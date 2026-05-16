@@ -34,12 +34,12 @@ export interface VibeReport {
 }
 
 export interface StackInfo {
-	language: "typescript" | "javascript" | "unknown";
-	framework: "react" | "vue" | "svelte" | "none" | "unknown";
+	language: "typescript" | "javascript" | "dart" | "unknown";
+	framework: "react" | "vue" | "svelte" | "flutter" | "none" | "unknown";
 	bundler: "vite" | "webpack" | "esbuild" | "none" | "unknown";
-	testRunner: "vitest" | "jest" | "none" | "unknown";
-	linter: "biome" | "eslint" | "none" | "unknown";
-	packageManager: "pnpm" | "npm" | "yarn" | "bun" | "unknown";
+	testRunner: "vitest" | "jest" | "flutter_test" | "dart_test" | "none" | "unknown";
+	linter: "biome" | "eslint" | "dart_analyze" | "none" | "unknown";
+	packageManager: "pnpm" | "npm" | "yarn" | "bun" | "pub" | "unknown";
 }
 
 export function gradeFromScore(score: number): "A" | "B" | "C" | "D" | "F" {

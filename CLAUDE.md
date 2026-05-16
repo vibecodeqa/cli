@@ -7,7 +7,7 @@ Code health scanner for the AI coding era. Zero runtime deps, pure TypeScript.
 ```bash
 pnpm install        # install dev deps
 pnpm build          # tsc → dist/
-pnpm test           # vitest run (107 tests)
+pnpm test           # vitest run (109 tests)
 pnpm lint           # biome check src/
 node dist/cli.js    # self-scan
 node dist/cli.js --skip-tests --badge  # fast scan + badge SVG
@@ -21,7 +21,7 @@ src/
 ├── types.ts            # CheckResult, Issue, VibeReport, StackInfo, gradeFromScore
 ├── score.ts            # Weighted composite score from check-meta weights
 ├── check-meta.ts       # Metadata for all 20 checks (name, label, category, weight, description, risk, recommendation)
-├── detect.ts           # Auto-detect stack (TS/React/Vite/vitest/Biome/pnpm) + git remote
+├── detect.ts           # Auto-detect stack (TS/React/Dart/Flutter/Vite/vitest/Biome/pnpm/pub) + git remote
 ├── fs-utils.ts         # Shared file walker (symlink protection, 1MB limit, skip dirs)
 ├── trend.ts            # Compare current report to previous, compute deltas
 ├── history.ts          # Read .vibe-check/history/ for timeline data
@@ -44,6 +44,7 @@ src/
 │   ├── architecture.ts # Import graph, cycles, god modules, SVG diagram
 │   ├── confusion.ts    # Naming ambiguity (Levenshtein, synonyms, collisions)
 │   ├── context.ts      # Token density, import depth, context sinks
+│   ├── performance.ts     # Barrel imports, heavy deps, dynamic import opportunities, CSS-in-JS
 │   ├── doc-coherence.ts   # PREMIUM placeholder — docs vs code contradictions
 │   ├── code-coherence.ts  # PREMIUM placeholder — internal codebase contradictions
 │   └── exec.ts         # Shared execSync wrapper
@@ -51,21 +52,22 @@ src/
     ├── html.ts         # Main generator — assembles nav, sidebar, pages
     ├── pages.ts        # Page renderers (overview, categories, issues, files)
     ├── svg.ts          # SVG builders (ring, radar, timeline, pyramid, badge, sparkline)
+    ├── sarif.ts        # SARIF 2.1.0 output for GitHub Code Scanning
     ├── styles.ts       # All CSS as a template string
     └── components.ts   # Helpers (HTML escape, file links, grade/priority colors)
 ```
 
-## 20 Checks across 7 categories
+## 21 Checks across 7 categories
 
 Weights sum to 100 (premium checks have weight 0).
 
 | Category | Checks | Weights |
 |---|---|---|
 | **Foundations** | structure, lint, types, type-safety, standards | 6+5+6+3+3 = 23 |
-| **Quality** | complexity, duplication, error-handling, react, accessibility, docs | 5+5+3+3+4+3 = 23 |
-| **Testing** | testing | 17 |
-| **Architecture** | architecture | 6 |
-| **Security** | secrets, security, dependencies | 6+7+5 = 18 |
+| **Quality** | complexity, duplication, error-handling, react, accessibility, docs | 3+5+5+3+4+3 = 23 |
+| **Testing** | testing | 15 |
+| **Architecture** | architecture, performance | 6+4 = 10 |
+| **Security** | secrets, security, dependencies | 6+5+5 = 16 |
 | **AI Readiness** | confusion, context | 7+6 = 13 |
 | **AI Analysis** | doc-coherence, code-coherence | 0+0 (PRO) |
 
@@ -81,21 +83,15 @@ Weights sum to 100 (premium checks have weight 0).
 
 - Every runner returns `CheckResult` — synchronous, no async
 - Runners that call external tools (lint, types, testing, dependencies) use `exec.ts`
-- `fs-utils.ts` is the canonical file walker — 4 runners use it, 11 still have their own (migration needed)
+- `fs-utils.ts` is the canonical file walker — all runners use it (symlink protection + 1MB limit)
 - Premium checks return `{ details: { comingSoon: true, premium: true } }` — excluded from score
 - Skipped checks return `{ details: { skipped: true, reason: "..." } }` — excluded from score
 - Report is one self-contained HTML file — no external deps, no JS frameworks
 
-## Known issues from review agents
+## Known issues
 
-- 11 of 18 runners duplicate file walking instead of using fs-utils.ts
-- `readDeps()` defined in 3 places (fs-utils, testing, standards)
-- Complexity regex has malformed ternary/&&/|| matching
-- Context runner's resolveImport has broken extension check
-- Duplication check over-reports for import blocks
-- Clipboard API in report fails on file:// URLs (no fallback)
-- Sidebar checks don't activate the correct sub-tab
-- Mobile: Issues/Files views inaccessible (hidden with no alternative)
+- Architecture SVG: >50 modules shows message instead of diagram — need clustering/zoom
+- Security check: "password in URL" pattern too broad (matches key=, token= in JSX)
 
 ## npm publish
 
@@ -105,7 +101,7 @@ Requires `NPM_TOKEN` secret on the repo (needs to be set — not yet configured)
 ## Testing
 
 ```bash
-pnpm test                    # 107 tests across 15 files
+pnpm test                    # 109 tests across 15 files
 pnpm test -- --reporter=verbose  # see all test names
 ```
 

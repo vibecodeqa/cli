@@ -15,6 +15,23 @@ export function detectStack(cwd: string): StackInfo {
 		}
 	};
 
+	// ── Dart/Flutter detection ──
+	const pubspec = read("pubspec.yaml");
+	if (pubspec || has("pubspec.lock")) {
+		const isFlutter = pubspec.includes("flutter:") || pubspec.includes("flutter_test:");
+		const hasTest = pubspec.includes("test:") || pubspec.includes("flutter_test:");
+		const hasAnalysis = has("analysis_options.yaml");
+		return {
+			language: "dart",
+			framework: isFlutter ? "flutter" : "none",
+			bundler: "none",
+			testRunner: isFlutter ? (hasTest ? "flutter_test" : "none") : hasTest ? "dart_test" : "none",
+			linter: hasAnalysis ? "dart_analyze" : "none",
+			packageManager: "pub",
+		};
+	}
+
+	// ── Node.js/TypeScript detection ──
 	const pkg = read("package.json");
 	let allDeps: Record<string, string> = {};
 	try {

@@ -1,7 +1,6 @@
 /** Code duplication detection — finds copy-pasted blocks. */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { extname, join } from "node:path";
+import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
@@ -20,22 +19,14 @@ export function runDuplication(cwd: string): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 
-	const files: string[] = [];
-	const dirs = ["src", "web/src"];
-	for (const dir of dirs) {
-		try {
-			collectFiles(join(cwd, dir), files);
-		} catch {
-			/* dir doesn't exist */
-		}
-	}
+	const sourceFiles = getProductionFiles(cwd);
 
-	if (files.length < 2) {
+	if (sourceFiles.length < 2) {
 		return {
 			name: "duplication",
 			score: 100,
 			grade: "A",
-			details: { filesScanned: files.length, duplicates: 0 },
+			details: { filesScanned: sourceFiles.length, duplicates: 0 },
 			issues: [],
 			duration: Date.now() - start,
 		};
@@ -46,24 +37,22 @@ export function runDuplication(cwd: string): CheckResult {
 	const lineMap = new Map<string, { file: string; line: number }[]>();
 	let totalSourceLines = 0;
 
-	for (const file of files) {
-		const content = readFileSync(file, "utf-8");
-		const relPath = file.replace(`${cwd}/`, "");
-		const lines = content.split("\n");
+	for (const sf of sourceFiles) {
+		const lines = sf.content.split("\n");
 		totalSourceLines += lines.length;
 
 		for (let i = 0; i <= lines.length - MIN_LINES; i++) {
 			const block = lines
 				.slice(i, i + MIN_LINES)
 				.map((l) => l.trim())
-				.filter((l) => l.length > 0 && !l.startsWith("//") && !l.startsWith("*") && l !== "{" && l !== "}" && l !== "");
+				.filter((l) => l.length > 0 && !l.startsWith("//") && !l.startsWith("*") && !l.startsWith("import ") && !l.startsWith("export {") && l !== "{" && l !== "}" && l !== "");
 
 			if (block.length < MIN_LINES - 2) continue; // too many empty/trivial lines
 			const key = block.join("\n");
 			if (key.length < MIN_TOKENS) continue;
 
 			const locs = lineMap.get(key) || [];
-			locs.push({ file: relPath, line: i + 1 });
+			locs.push({ file: sf.path, line: i + 1 });
 			lineMap.set(key, locs);
 		}
 	}
@@ -105,23 +94,8 @@ export function runDuplication(cwd: string): CheckResult {
 		name: "duplication",
 		score,
 		grade: gradeFromScore(score),
-		details: { filesScanned: files.length, totalSourceLines, duplicateBlocks: duplicates.length, duplicationPct: `${dupPct}%` },
+		details: { filesScanned: sourceFiles.length, totalSourceLines, duplicateBlocks: duplicates.length, duplicationPct: `${dupPct}%` },
 		issues,
 		duration: Date.now() - start,
 	};
-}
-
-function collectFiles(dir: string, out: string[]): void {
-	for (const entry of readdirSync(dir)) {
-		if (entry === "node_modules" || entry === "dist" || entry === ".git") continue;
-		const full = join(dir, entry);
-		if (statSync(full).isDirectory()) {
-			collectFiles(full, out);
-		} else {
-			const ext = extname(entry);
-			if ([".ts", ".tsx", ".js", ".jsx"].includes(ext) && !entry.includes(".test.") && !entry.includes(".spec.")) {
-				out.push(full);
-			}
-		}
-	}
 }

@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { detectRepoUrl, detectStack } from "./detect.js";
-import { generateHTML } from "./report/html.js";
+import { generatePages } from "./report/html.js";
 import { runArchitecture } from "./runners/architecture.js";
 import { runComplexity } from "./runners/complexity.js";
 import { runConfusion } from "./runners/confusion.js";
@@ -12,6 +12,7 @@ import { runContext } from "./runners/context.js";
 import { runDependencies } from "./runners/dependencies.js";
 import { runDocs } from "./runners/docs.js";
 import { runDuplication } from "./runners/duplication.js";
+import { runPerformance } from "./runners/performance.js";
 import { runErrorHandling } from "./runners/error-handling.js";
 import { runLint } from "./runners/lint.js";
 import { runReact } from "./runners/react.js";
@@ -41,6 +42,7 @@ const ciMode = flags.has("--ci");
 const skipTests = flags.has("--skip-tests");
 const watchMode = flags.has("--watch");
 const badgeMode = flags.has("--badge");
+const sarifMode = flags.has("--sarif");
 
 function color(grade: string): string {
 	if (grade === "A") return "\x1b[32m";
@@ -68,14 +70,15 @@ async function main() {
 	}
 
 	const checks: CheckResult[] = [];
+	const isDart = stack.language === "dart";
 
 	// All runners grouped by category
 	const runners: { name: string; fn: () => CheckResult }[] = [
 		// Foundations
 		{ name: "structure", fn: () => runStructure(cwd, stack) },
 		{ name: "lint", fn: () => runLint(cwd, stack) },
-		{ name: "types", fn: () => runTypeCheck(cwd) },
-		{ name: "type-safety", fn: () => runTypeSafety(cwd) },
+		{ name: "types", fn: () => runTypeCheck(cwd, isDart) },
+		{ name: "type-safety", fn: () => runTypeSafety(cwd, isDart) },
 		{ name: "standards", fn: () => runStandards(cwd, stack) },
 		// Quality
 		{ name: "complexity", fn: () => runComplexity(cwd) },
@@ -92,6 +95,7 @@ async function main() {
 		{ name: "dependencies", fn: () => runDependencies(cwd, stack) },
 		// Architecture
 		{ name: "architecture", fn: () => runArchitecture(cwd) },
+		{ name: "performance", fn: () => runPerformance(cwd) },
 		// LLM Readiness
 		{ name: "confusion", fn: () => runConfusion(cwd) },
 		{ name: "context", fn: () => runContext(cwd) },
@@ -156,13 +160,26 @@ async function main() {
 	}
 
 	writeFileSync(join(outputDir, "report.json"), JSON.stringify(report, null, 2));
-	writeFileSync(join(outputDir, "report.html"), generateHTML(report, historyDir));
+
+	// Generate multi-page HTML report
+	const reportDir = join(outputDir, "report");
+	if (!existsSync(reportDir)) mkdirSync(reportDir, { recursive: true });
+	const pages = generatePages(report, historyDir);
+	for (const [filename, html] of pages) {
+		writeFileSync(join(reportDir, filename), html);
+	}
 
 	// Badge SVG
 	if (badgeMode) {
 		const { buildBadge } = await import("./report/svg.js");
 		const badgeSvg = buildBadge(score, grade);
 		writeFileSync(join(outputDir, "badge.svg"), badgeSvg);
+	}
+
+	// SARIF output for GitHub Code Scanning
+	if (sarifMode) {
+		const { generateSARIF } = await import("./report/sarif.js");
+		writeFileSync(join(outputDir, "report.sarif"), generateSARIF(report));
 	}
 
 	if (jsonOnly) {
@@ -175,9 +192,10 @@ async function main() {
 		);
 		if (trend) console.log(formatTrend(trend));
 		console.log("");
-		console.log(`  \x1b[2mReport: ${join(outputDir, "report.html")}\x1b[0m`);
+		console.log(`  \x1b[2mReport: ${join(outputDir, "report/index.html")}\x1b[0m`);
 		console.log(`  \x1b[2mJSON:   ${join(outputDir, "report.json")}\x1b[0m`);
 		if (badgeMode) console.log(`  \x1b[2mBadge:  ${join(outputDir, "badge.svg")}\x1b[0m`);
+		if (sarifMode) console.log(`  \x1b[2mSARIF:  ${join(outputDir, "report.sarif")}\x1b[0m`);
 		console.log("");
 	}
 
@@ -189,7 +207,7 @@ async function main() {
 		try {
 			const { execFileSync } = await import("node:child_process");
 			const openCmd = process.platform === "darwin" ? "open" : "xdg-open";
-			execFileSync(openCmd, [join(outputDir, "report.html")], { stdio: "ignore" });
+			execFileSync(openCmd, [join(outputDir, "report/index.html")], { stdio: "ignore" });
 		} catch {
 			/* failed to open browser */
 		}

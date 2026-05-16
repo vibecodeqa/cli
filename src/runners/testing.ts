@@ -11,6 +11,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
+import { getProductionFiles, readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue, StackInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
@@ -129,31 +130,7 @@ function walkTests(dir: string, cwd: string, out: TestFile[]): void {
 }
 
 function findSourceFiles(cwd: string): string[] {
-	const files: string[] = [];
-	const dirs = ["src", "web/src"];
-	for (const dir of dirs) {
-		try {
-			walkSource(join(cwd, dir), cwd, files);
-		} catch {
-			/* dir doesn't exist */
-		}
-	}
-	return files;
-}
-
-function walkSource(dir: string, cwd: string, out: string[]): void {
-	for (const entry of readdirSync(dir)) {
-		if (entry === "node_modules" || entry === "dist") continue;
-		const full = join(dir, entry);
-		if (statSync(full).isDirectory()) {
-			walkSource(full, cwd, out);
-		} else {
-			const ext = extname(entry);
-			if ([".ts", ".tsx", ".js", ".jsx"].includes(ext) && !entry.includes(".test.") && !entry.includes(".spec.")) {
-				out.push(full.replace(`${cwd}/`, ""));
-			}
-		}
-	}
+	return getProductionFiles(cwd).map((f) => f.path);
 }
 
 // ── Pairing analysis ──
@@ -195,15 +172,6 @@ function detectE2E(cwd: string): { tool: string; configured: boolean } {
 		return { tool: "cypress", configured: hasConfig };
 	}
 	return { tool: "none", configured: false };
-}
-
-function readDeps(cwd: string): Record<string, string> {
-	try {
-		const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf-8"));
-		return { ...pkg.dependencies, ...pkg.devDependencies };
-	} catch {
-		return {};
-	}
 }
 
 // ── Coverage collection ──

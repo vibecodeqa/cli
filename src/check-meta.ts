@@ -127,7 +127,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		label: "Testing",
 		category: "Testing",
 		priority: "critical",
-		weight: 17,
+		weight: 15,
 		description:
 			"Deep assessment of test quality across 6 dimensions: pyramid presence (unit/integration/component/E2E layers), test execution (pass/fail), coverage (statement/branch/line/function), file pairing (test file per source file), test quality (assertion density, mock ratio, snapshot ratio), and E2E tool detection (Playwright/Cypress).",
 		risk: "Code without tests is code you can't safely change. Missing test layers mean entire categories of bugs go undetected: unit tests catch logic bugs, integration tests catch API contract breaks, E2E tests catch user-visible regressions. Low coverage means large portions of code are never exercised.",
@@ -151,7 +151,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		label: "Security Patterns",
 		category: "Security",
 		priority: "critical",
-		weight: 7,
+		weight: 5,
 		description:
 			"Static analysis for 15 vulnerability patterns mapped to CWE (Common Weakness Enumeration) IDs. Covers: XSS (innerHTML, dangerouslySetInnerHTML, document.write), injection (eval, new Function, SQL template literals, command injection), weak crypto (Math.random for tokens, MD5/SHA1), prototype pollution, path traversal, SSRF, and missing security headers.",
 		risk: "These patterns represent the most commonly exploited vulnerabilities in web applications (OWASP Top 10). A single XSS or injection vulnerability can lead to account takeover, data theft, or complete system compromise.",
@@ -229,6 +229,18 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		risk: "1 in 4 adults has a disability (CDC). Missing alt text makes images invisible to screen readers. Click-only divs exclude keyboard users. Unlabeled inputs are unusable with assistive technology. Missing lang attribute breaks screen reader pronunciation.",
 		recommendation:
 			"Add alt text to all images (use alt=\"\" for decorative). Use <button> for clickable elements, not <div onClick>. Label all form controls with <label>, aria-label, or aria-labelledby. Set lang on <html>.",
+	},
+	performance: {
+		name: "performance",
+		label: "Performance",
+		category: "Architecture",
+		priority: "medium",
+		weight: 4,
+		description:
+			"Detects barrel imports that defeat tree-shaking, heavy dependencies with lighter alternatives, static imports of large libraries that could be lazy-loaded, and runtime CSS-in-JS overhead.",
+		risk: "Barrel files (index.ts re-exports) prevent bundlers from tree-shaking unused code, bloating bundles by 2-10x. Heavy dependencies like moment.js add 300KB when date-fns does the same in 7KB. Static imports of visualization libraries delay initial page load.",
+		recommendation:
+			"Replace barrel re-exports with direct imports. Swap heavy deps for lighter alternatives. Use dynamic import() for large libraries only needed on interaction. Prefer zero-runtime CSS (Tailwind, CSS Modules) over styled-components.",
 	},
 	"doc-coherence": {
 		name: "doc-coherence",

@@ -10,6 +10,7 @@ import { buildPyramid, buildRadar, buildRing, buildTimeline } from "./svg.js";
 export interface CatScore {
 	id: string;
 	label: string;
+	file?: string;
 	checks: CheckResult[];
 	avg: number;
 }
@@ -36,7 +37,6 @@ export function overviewPage(
 	fl: FL,
 	historyDir?: string,
 ): string {
-	// Hero: score ring + grade
 	const hero = `<div class="hero">
     ${buildRing(report.score, gc(report.grade))}
     <div class="hc">
@@ -46,10 +46,9 @@ export function overviewPage(
     </div>
   </div>`;
 
-	// Radar chart
-	const radarSvg = buildRadar(catScores.map((cs) => ({ label: cs.label, score: cs.avg })));
+	const scoredCats = catScores.filter((cs) => cs.checks.some((c) => !(c.details as any).skipped && !(c.details as any).comingSoon));
+	const radarSvg = scoredCats.length >= 3 ? buildRadar(scoredCats.map((cs) => ({ label: cs.label, score: cs.avg }))) : "";
 
-	// Category cards
 	const catCards = catScores
 		.map((cs) => {
 			const clr = gc(cs.avg >= 90 ? "A" : cs.avg >= 75 ? "B" : cs.avg >= 60 ? "C" : cs.avg >= 40 ? "D" : "F");
@@ -59,11 +58,11 @@ export function overviewPage(
 					return `<span class="mc" style="color:${sk ? "#555" : gc(c.grade)}" title="${e(c.name)}: ${sk ? "skip" : c.score}">${sk ? "\u2014" : c.grade}</span>`;
 				})
 				.join("");
-			return `<div class="cc" onclick="go('${cs.id}')"><div class="cc-s" style="color:${clr}">${cs.avg}</div><div class="cc-l">${cs.label}</div><div class="cc-m">${mini}</div></div>`;
+			const href = cs.file || `${cs.id}.html`;
+			return `<a class="cc" href="${href}"><div class="cc-s" style="color:${clr}">${cs.avg}</div><div class="cc-l">${cs.label}</div><div class="cc-m">${mini}</div></a>`;
 		})
 		.join("");
 
-	// Score timeline (from history)
 	let timelineSection = "";
 	if (historyDir) {
 		const history = loadHistory(historyDir);
@@ -73,7 +72,6 @@ export function overviewPage(
 		}
 	}
 
-	// All checks bar chart
 	const barChart = active
 		.sort((a, b) => a.score - b.score)
 		.map((c) => {
@@ -81,7 +79,6 @@ export function overviewPage(
 		})
 		.join("");
 
-	// Top issues preview (10 most severe)
 	const allIssues = allChecks.flatMap((c) => c.issues.map((i) => ({ check: c.name, ...i })));
 	const sortedIssues = allIssues
 		.sort((a, b) => (a.severity === "error" ? 0 : a.severity === "warning" ? 1 : 2) - (b.severity === "error" ? 0 : b.severity === "warning" ? 1 : 2))
@@ -95,28 +92,26 @@ export function overviewPage(
 				return `<div class="ov-issue ${i.severity}"><span class="is">${i.severity[0]!.toUpperCase()}</span><span class="ov-check">${e(i.check)}</span>${loc ? `<span class="ov-loc">${loc}</span>` : ""}<span class="ov-msg">${e(i.message)}</span></div>`;
 			})
 			.join("");
-		const viewAll = allIssues.length > 10 ? `<a class="ov-link" onclick="go('issues')">View all ${allIssues.length} issues \u2192</a>` : "";
+		const viewAll = allIssues.length > 10 ? `<a class="ov-link" href="issues.html">View all ${allIssues.length} issues \u2192</a>` : "";
 		topIssuesHtml = `<div class="ov-section"><h3>Top Issues</h3>${rows}${viewAll}</div>`;
 	}
 
-	// File hotspots preview (top 5)
 	let fileHotspotsHtml = "";
 	if (topFiles.length > 0) {
 		const fileRows = topFiles.slice(0, 5).map((f) => {
 			const pct = Math.min(100, f.total * 5);
 			return `<div class="fr"><span class="ff">${fl(f.file)}</span><div class="fb"><div class="fbf" style="width:${pct}%;background:${f.errors > 0 ? "var(--fail)" : "var(--warn)"}"></div></div><span class="fv">${f.errors}E ${f.warnings}W</span></div>`;
 		}).join("");
-		const viewAll = topFiles.length > 5 ? `<a class="ov-link" onclick="go('files')">View all ${topFiles.length} files \u2192</a>` : "";
+		const viewAll = topFiles.length > 5 ? `<a class="ov-link" href="files.html">View all ${topFiles.length} files \u2192</a>` : "";
 		fileHotspotsHtml = `<div class="ov-section"><h3>File Hotspots</h3>${fileRows}${viewAll}</div>`;
 	}
 
-	// Stack badges
 	const stackHtml = Object.entries(report.meta.stack)
 		.filter(([, v]) => v !== "none" && v !== "unknown")
 		.map(([k, v]) => `<span>${k}: <b>${v}</b></span>`)
 		.join("");
 
-	return `<div id="p-overview" class="page active">
+	return `
 <div class="dash">
   ${hero}
   <div class="radar">${radarSvg}</div>
@@ -126,70 +121,65 @@ ${timelineSection}
 <div class="ov-section"><h3>All Checks</h3><div class="bars">${barChart}</div></div>
 ${topIssuesHtml}
 ${fileHotspotsHtml}
-<div class="stack">${stackHtml}</div>
-</div>`;
+<div class="stack">${stackHtml}</div>`;
 }
 
-// ── Category dimension pages ──────────────────────────────────────────
+// ── Single category page ──────────────────────────────────────────
 
-export function categoryPages(catScores: CatScore[], fl: FL): string {
-	let catPagesHtml = "";
-	for (const cs of catScores) {
-		const subNav = cs.checks
-			.map((c, i) => {
-				const sk = (c.details as any).skipped;
-				const premium = (c.details as any).comingSoon;
-				const badge = premium ? "PRO" : sk ? "\u2014" : c.grade;
-				const clr = premium ? "#6366f1" : sk ? "#555" : gc(c.grade);
-				return `<a class="sn${i === 0 ? " active" : ""}${premium ? " sn-pro" : ""}" data-sub="${cs.id}-${c.name}" onclick="sub(this,'${cs.id}')">${e(c.name)} <span style="color:${clr}">${badge}</span></a>`;
-			})
-			.join("");
+export function categoryPage(cs: CatScore, fl: FL): string {
+	const subNav = cs.checks
+		.map((c, i) => {
+			const sk = (c.details as any).skipped;
+			const premium = (c.details as any).comingSoon;
+			const badge = premium ? "PRO" : sk ? "\u2014" : c.grade;
+			const clr = premium ? "#6366f1" : sk ? "#555" : gc(c.grade);
+			return `<a class="sn${i === 0 ? " active" : ""}${premium ? " sn-pro" : ""}" data-sub="${cs.id}-${c.name}" onclick="sub(this,'${cs.id}')">${e(c.name)} <span style="color:${clr}">${badge}</span></a>`;
+		})
+		.join("");
 
-		const subPages = cs.checks
-			.map((c, i) => {
-				const meta = getCheckMeta(c.name);
-				const sk = (c.details as any).skipped;
-				const premium = (c.details as any).comingSoon;
-				const detailsFiltered = Object.entries(c.details)
-					.filter(([k]) => k !== "skipped" && k !== "reason" && k !== "graph")
-					.map(([k, v]) => {
-						const d = Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : String(v);
-						return `<div class="kv"><span class="k">${e(k)}</span><span class="v">${e(d)}</span></div>`;
-					})
-					.join("");
+	const subPages = cs.checks
+		.map((c, i) => {
+			const meta = getCheckMeta(c.name);
+			const sk = (c.details as any).skipped;
+			const premium = (c.details as any).comingSoon;
+			const detailsFiltered = Object.entries(c.details)
+				.filter(([k]) => k !== "skipped" && k !== "reason" && k !== "graph")
+				.map(([k, v]) => {
+					const d = Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : String(v);
+					return `<div class="kv"><span class="k">${e(k)}</span><span class="v">${e(d)}</span></div>`;
+				})
+				.join("");
 
-				// Group issues by file
-				const byFile = new Map<string, typeof c.issues>();
-				const noFile: typeof c.issues = [];
-				for (const iss of c.issues) {
-					const f = iss.file?.split(":")[0];
-					if (f) {
-						const arr = byFile.get(f) || [];
-						arr.push(iss);
-						byFile.set(f, arr);
-					} else {
-						noFile.push(iss);
-					}
+			const byFile = new Map<string, typeof c.issues>();
+			const noFile: typeof c.issues = [];
+			for (const iss of c.issues) {
+				const f = iss.file?.split(":")[0];
+				if (f) {
+					const arr = byFile.get(f) || [];
+					arr.push(iss);
+					byFile.set(f, arr);
+				} else {
+					noFile.push(iss);
 				}
+			}
 
-				let issuesHtml = "";
-				for (const [file, issues] of byFile) {
-					issuesHtml += `<div class="fg"><div class="fn">${fl(file)} <span class="fc">${issues.length}</span></div>`;
-					for (const iss of issues) {
-						const prompt = `Fix this issue in ${file}${iss.line ? `:${iss.line}` : ""}\n${iss.severity}: ${iss.message}${iss.rule ? ` (${iss.rule})` : ""}\nCheck: ${c.name}`;
-						issuesHtml += `<div class="ir ${iss.severity}"><span class="is">${iss.severity[0]!.toUpperCase()}</span>${iss.line ? `<span class="il">${iss.line}</span>` : ""}<span class="im">${e(iss.message)}</span>${iss.rule ? `<span class="iru">${e(iss.rule)}</span>` : ""}<button class="cp-btn" data-prompt="${e(prompt)}" title="Copy fix prompt">\ud83d\udccb</button></div>`;
-					}
-					issuesHtml += `</div>`;
+			let issuesHtml = "";
+			for (const [file, issues] of byFile) {
+				issuesHtml += `<div class="fg"><div class="fn">${fl(file)} <span class="fc">${issues.length}</span></div>`;
+				for (const iss of issues) {
+					const prompt = `Fix this issue in ${file}${iss.line ? `:${iss.line}` : ""}\n${iss.severity}: ${iss.message}${iss.rule ? ` (${iss.rule})` : ""}\nCheck: ${c.name}`;
+					issuesHtml += `<div class="ir ${iss.severity}"><span class="is">${iss.severity[0]!.toUpperCase()}</span>${iss.line ? `<span class="il">${iss.line}</span>` : ""}<span class="im">${e(iss.message)}</span>${iss.rule ? `<span class="iru">${e(iss.rule)}</span>` : ""}<button class="cp-btn" data-prompt="${e(prompt)}" title="Copy fix prompt">\ud83d\udccb</button></div>`;
 				}
-				if (noFile.length > 0) {
-					issuesHtml += `<div class="fg"><div class="fn">General</div>`;
-					for (const iss of noFile) {
-						issuesHtml += `<div class="ir ${iss.severity}"><span class="is">${iss.severity[0]!.toUpperCase()}</span><span class="im">${e(iss.message)}</span>${iss.rule ? `<span class="iru">${e(iss.rule)}</span>` : ""}</div>`;
-					}
-					issuesHtml += `</div>`;
+				issuesHtml += `</div>`;
+			}
+			if (noFile.length > 0) {
+				issuesHtml += `<div class="fg"><div class="fn">General</div>`;
+				for (const iss of noFile) {
+					issuesHtml += `<div class="ir ${iss.severity}"><span class="is">${iss.severity[0]!.toUpperCase()}</span><span class="im">${e(iss.message)}</span>${iss.rule ? `<span class="iru">${e(iss.rule)}</span>` : ""}</div>`;
 				}
+				issuesHtml += `</div>`;
+			}
 
-				// Premium "coming soon" check
 			if (premium) {
 				const det = c.details as Record<string, unknown>;
 				const desc = (det.description as string) || meta.description;
@@ -210,7 +200,7 @@ ${detailKvs ? `<div class="kvs" style="margin-top:0.8rem">${detailKvs}</div>` : 
 </div>`;
 			}
 
-				return `<div class="sp${i === 0 ? " active" : ""}" data-sub="${cs.id}-${c.name}">
+			return `<div class="sp${i === 0 ? " active" : ""}" data-sub="${cs.id}-${c.name}">
 <div class="ch-head"><span class="ch-g" style="color:${sk ? "#555" : gc(c.grade)}">${sk ? "\u2014" : c.grade}</span><div><b>${e(meta.label)}</b><span class="ch-s">${sk ? "skipped" : `${c.score}/100`} \u00b7 weight ${meta.weight}% \u00b7 ${c.duration}ms \u00b7 ${c.issues.length} issues</span></div><span class="pri" style="color:${pc(meta.priority)}">${meta.priority}</span></div>
 ${meta.description ? `<div class="info-panel"><div class="ip-row"><span class="ip-label">What</span><span>${e(meta.description)}</span></div><div class="ip-row"><span class="ip-label">Risk</span><span>${e(meta.risk)}</span></div><div class="ip-row"><span class="ip-label">Fix</span><span>${e(meta.recommendation)}</span></div></div>` : ""}
 ${sk ? `<p class="skip-r">${e((c.details as any).reason || "skipped")}</p>` : ""}
@@ -219,21 +209,18 @@ ${c.name === "testing" && !sk && (c.details as any).pyramid ? `<div class="arch-
 ${detailsFiltered ? `<div class="kvs">${detailsFiltered}</div>` : ""}
 ${issuesHtml ? `<div class="iss-list">${issuesHtml}</div>` : '<p style="color:var(--muted);font-size:0.8rem;margin-top:1rem">No issues found.</p>'}
 </div>`;
-			})
-			.join("");
+		})
+		.join("");
 
-		const clr = gc(cs.avg >= 90 ? "A" : cs.avg >= 75 ? "B" : cs.avg >= 60 ? "C" : cs.avg >= 40 ? "D" : "F");
-		catPagesHtml += `<div id="p-${cs.id}" class="page">
+	const clr = gc(cs.avg >= 90 ? "A" : cs.avg >= 75 ? "B" : cs.avg >= 60 ? "C" : cs.avg >= 40 ? "D" : "F");
+	return `
 <div class="cat-head"><span style="color:${clr};font-size:1.8rem;font-weight:900">${cs.avg}</span><span style="color:${clr}">/100</span><span style="color:var(--muted);margin-left:0.5rem">${cs.label}</span></div>
 <div class="bar2"><div class="bf2" style="width:${cs.avg}%;background:${clr}"></div></div>
 <div class="sub-nav">${subNav}</div>
-${subPages}
-</div>`;
-	}
-	return catPagesHtml;
+${subPages}`;
 }
 
-// ── Issues view (cross-cutting) ──────────────────────────────────────
+// ── Issues view ──────────────────────────────────────────
 
 export function issuesPage(allChecks: CheckResult[], totalIssues: number, fl: FL): string {
 	const allIssues = allChecks.flatMap((c) => c.issues.map((i) => ({ check: c.name, ...i })));
@@ -250,15 +237,14 @@ export function issuesPage(allChecks: CheckResult[], totalIssues: number, fl: FL
 		})
 		.join("");
 
-	return `<div id="p-issues" class="page">
+	return `
 <h2>All Issues <span style="color:var(--muted);font-weight:400">${totalIssues}</span></h2>
 <div class="isf"><span style="color:var(--fail)">${errorCount} errors</span> \u00b7 <span style="color:var(--warn)">${warnCount} warnings</span>${infoCount > 0 ? ` \u00b7 <span style="color:var(--info)">${infoCount} info</span>` : ""}</div>
 <table class="it"><thead><tr><th></th><th>Check</th><th>Location</th><th>Message</th><th>Rule</th></tr></thead><tbody>${issueRows}</tbody></table>
-${allIssues.length > 200 ? `<p style="color:var(--muted);text-align:center;margin-top:1rem">Showing 200 of ${allIssues.length}</p>` : ""}
-</div>`;
+${allIssues.length > 200 ? `<p style="color:var(--muted);text-align:center;margin-top:1rem">Showing 200 of ${allIssues.length}</p>` : ""}`;
 }
 
-// ── Files view (merged file map + heatmap) ───────────────────────────
+// ── Files view ───────────────────────────────────────────
 
 export function filesPage(
 	topFiles: FileEntry[],
@@ -266,10 +252,9 @@ export function filesPage(
 	fl: FL,
 ): string {
 	if (topFiles.length === 0) {
-		return `<div id="p-files" class="page"><h2>File Health</h2><p style="color:var(--muted)">No file-level issues found.</p></div>`;
+		return `<h2>File Health</h2><p style="color:var(--muted)">No file-level issues found.</p>`;
 	}
 
-	// Heatmap (visual density bars)
 	const maxIssues = Math.max(...topFiles.map((f) => f.total));
 	const heatmapRows = topFiles
 		.slice(0, 30)
@@ -283,9 +268,8 @@ export function filesPage(
 		})
 		.join("");
 
-	return `<div id="p-files" class="page">
+	return `
 <h2>File Health</h2>
-<p style="color:var(--muted);font-size:0.78rem;margin-bottom:1rem">${fileIssues.size} files with issues across ${topFiles.reduce((s, f) => { for (const c of f.checks) s.add(c); return s; }, new Set<string>()).size} checks. Bar color: red = errors, orange = warnings only. Width = relative issue density.</p>
-${heatmapRows}
-</div>`;
+<p style="color:var(--muted);font-size:0.78rem;margin-bottom:1rem">${fileIssues.size} files with issues across ${topFiles.reduce((s, f) => { for (const c of f.checks) s.add(c); return s; }, new Set<string>()).size} checks.</p>
+${heatmapRows}`;
 }

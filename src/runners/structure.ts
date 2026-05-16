@@ -1,7 +1,8 @@
 /** Project structure check — does the repo have standard files and conventions? */
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { extname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { collectSourceFiles } from "../fs-utils.js";
 import type { CheckResult, Issue, StackInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
@@ -12,9 +13,17 @@ interface FileCheck {
 	description: string;
 }
 
-const EXPECTED_FILES: FileCheck[] = [
+const NODE_FILES: FileCheck[] = [
 	{ name: "package.json", path: "package.json", required: true, description: "Package manifest" },
 	{ name: "tsconfig.json", path: "tsconfig.json", required: false, description: "TypeScript configuration" },
+	{ name: "LICENSE", path: "LICENSE", required: true, description: "Open source license" },
+	{ name: ".gitignore", path: ".gitignore", required: true, description: "Git ignore rules" },
+	{ name: "README.md", path: "README.md", required: false, description: "Project documentation" },
+];
+
+const DART_FILES: FileCheck[] = [
+	{ name: "pubspec.yaml", path: "pubspec.yaml", required: true, description: "Dart package manifest" },
+	{ name: "analysis_options.yaml", path: "analysis_options.yaml", required: true, description: "Dart analysis options" },
 	{ name: "LICENSE", path: "LICENSE", required: true, description: "Open source license" },
 	{ name: ".gitignore", path: ".gitignore", required: true, description: "Git ignore rules" },
 	{ name: "README.md", path: "README.md", required: false, description: "Project documentation" },
@@ -25,6 +34,9 @@ export function runStructure(cwd: string, stack: StackInfo): CheckResult {
 	const issues: Issue[] = [];
 	const found: string[] = [];
 	const missing: string[] = [];
+
+	const isDart = stack.language === "dart";
+	const EXPECTED_FILES = isDart ? DART_FILES : NODE_FILES;
 
 	// Check standard files
 	for (const fc of EXPECTED_FILES) {
@@ -43,26 +55,25 @@ export function runStructure(cwd: string, stack: StackInfo): CheckResult {
 	}
 
 	// Check for lockfile
-	const hasLock = ["pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lockb"].some((f) => existsSync(join(cwd, f)));
+	const lockfiles = isDart ? ["pubspec.lock"] : ["pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lockb"];
+	const hasLock = lockfiles.some((f) => existsSync(join(cwd, f)));
 	if (hasLock) {
 		found.push("lockfile");
 	} else {
 		issues.push({ severity: "warning", message: "No lockfile found — builds may not be reproducible", rule: "missing-lockfile" });
 	}
 
-	// Check for src directory
-	const hasSrc = existsSync(join(cwd, "src")) || existsSync(join(cwd, "web/src"));
+	// Check for source directory
+	const srcDirs = isDart ? ["lib"] : ["src", "web/src"];
+	const hasSrc = srcDirs.some((d) => existsSync(join(cwd, d)));
 	if (!hasSrc) {
-		issues.push({ severity: "error", message: "No src/ directory found", rule: "no-src" });
+		issues.push({ severity: "error", message: `No ${srcDirs[0]}/ directory found`, rule: "no-src" });
 	}
 
 	// Count source vs test files
-	const srcFiles: string[] = [];
-	const testFiles: string[] = [];
-	collectAll(cwd, srcFiles, testFiles);
-
-	const srcCount = srcFiles.length;
-	const testCount = testFiles.length;
+	const allFiles = collectSourceFiles(cwd, { includeTests: true });
+	const srcCount = allFiles.filter((f) => !f.isTest).length;
+	const testCount = allFiles.filter((f) => f.isTest).length;
 	const testRatio = srcCount > 0 ? testCount / srcCount : 0;
 
 	if (testCount === 0 && srcCount > 0) {
@@ -75,15 +86,17 @@ export function runStructure(cwd: string, stack: StackInfo): CheckResult {
 		});
 	}
 
-	// Check package.json has essential scripts
-	try {
-		const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf-8"));
-		const scripts = pkg.scripts || {};
-		if (!scripts.test) issues.push({ severity: "warning", message: "No 'test' script in package.json", rule: "no-test-script" });
-		if (!scripts.build && !scripts.dev)
-			issues.push({ severity: "info", message: "No 'build' or 'dev' script in package.json", rule: "no-build-script" });
-	} catch {
-		/* no package.json or parse error */
+	// Check manifest has essential config
+	if (!isDart) {
+		try {
+			const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf-8"));
+			const scripts = pkg.scripts || {};
+			if (!scripts.test) issues.push({ severity: "warning", message: "No 'test' script in package.json", rule: "no-test-script" });
+			if (!scripts.build && !scripts.dev)
+				issues.push({ severity: "info", message: "No 'build' or 'dev' script in package.json", rule: "no-build-script" });
+		} catch {
+			/* no package.json or parse error */
+		}
 	}
 
 	const errors = issues.filter((i) => i.severity === "error").length;
@@ -98,34 +111,4 @@ export function runStructure(cwd: string, stack: StackInfo): CheckResult {
 		issues,
 		duration: Date.now() - start,
 	};
-}
-
-function collectAll(cwd: string, src: string[], test: string[]): void {
-	const dirs = ["src", "web/src"];
-	for (const dir of dirs) {
-		try {
-			walk(join(cwd, dir), src, test);
-		} catch {
-			/* dir doesn't exist */
-		}
-	}
-}
-
-function walk(dir: string, src: string[], test: string[]): void {
-	for (const entry of readdirSync(dir)) {
-		if (entry === "node_modules" || entry === "dist") continue;
-		const full = join(dir, entry);
-		if (statSync(full).isDirectory()) {
-			walk(full, src, test);
-		} else {
-			const ext = extname(entry);
-			if ([".ts", ".tsx", ".js", ".jsx"].includes(ext)) {
-				if (entry.includes(".test.") || entry.includes(".spec.")) {
-					test.push(full);
-				} else {
-					src.push(full);
-				}
-			}
-		}
-	}
 }

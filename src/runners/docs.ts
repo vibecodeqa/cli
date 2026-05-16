@@ -1,7 +1,8 @@
 /** Documentation check — README, JSDoc, code comments. */
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { extname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
@@ -35,22 +36,13 @@ export function runDocs(cwd: string): CheckResult {
 	}
 
 	// Check exported function documentation
-	const files: string[] = [];
-	const dirs = ["src", "web/src"];
-	for (const dir of dirs) {
-		try {
-			collectFiles(join(cwd, dir), files);
-		} catch {
-			/* dir doesn't exist */
-		}
-	}
+	const sourceFiles = getProductionFiles(cwd);
 
 	let totalExports = 0;
 	let documentedExports = 0;
 
-	for (const file of files) {
-		const content = readFileSync(file, "utf-8");
-		const lines = content.split("\n");
+	for (const sf of sourceFiles) {
+		const lines = sf.content.split("\n");
 
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i].trim();
@@ -91,7 +83,7 @@ export function runDocs(cwd: string): CheckResult {
 		score,
 		grade: gradeFromScore(score),
 		details: {
-			readmeLines: existsSync(readmePath) ? readFileSync(readmePath, "utf-8").split("\n").length : 0,
+			readmeLines: existsSync(join(cwd, "README.md")) ? readFileSync(join(cwd, "README.md"), "utf-8").split("\n").length : 0,
 			totalExports,
 			documentedExports,
 			documentedPct: totalExports > 0 ? `${Math.round((documentedExports / totalExports) * 100)}%` : "n/a",
@@ -99,19 +91,4 @@ export function runDocs(cwd: string): CheckResult {
 		issues,
 		duration: Date.now() - start,
 	};
-}
-
-function collectFiles(dir: string, out: string[]): void {
-	for (const entry of readdirSync(dir)) {
-		if (entry === "node_modules" || entry === "dist") continue;
-		const full = join(dir, entry);
-		if (statSync(full).isDirectory()) {
-			collectFiles(full, out);
-		} else {
-			const ext = extname(entry);
-			if ((ext === ".ts" || ext === ".tsx") && !entry.includes(".test.") && !entry.includes(".spec.")) {
-				out.push(full);
-			}
-		}
-	}
 }

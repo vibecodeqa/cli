@@ -12,8 +12,7 @@
  *   4. Circular dependencies — import cycles that confuse navigation
  */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { extname, join } from "node:path";
+import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
@@ -26,15 +25,13 @@ export function runContext(cwd: string): CheckResult {
 	const issues: Issue[] = [];
 
 	// Collect source files with imports
-	const files: { path: string; content: string; imports: string[]; tokens: number }[] = [];
-	const dirs = ["src", "web/src"];
-	for (const dir of dirs) {
-		try {
-			collectFiles(join(cwd, dir), cwd, files);
-		} catch {
-			/* dir doesn't exist */
-		}
-	}
+	const sourceFiles = getProductionFiles(cwd);
+	const files = sourceFiles.map((sf) => ({
+		path: sf.path,
+		content: sf.content,
+		imports: parseImports(sf.content),
+		tokens: Math.round(sf.content.length / CHARS_PER_TOKEN),
+	}));
 
 	if (files.length === 0) {
 		return {
@@ -172,13 +169,8 @@ function resolveImport(fromPath: string, importPath: string): string | null {
 		parts.pop();
 		resolved = [...parts, importPath.slice(3)].join("/");
 	}
-	// Strip extension and try common ones
+	// Strip known extension if present, then default to .ts
 	resolved = resolved.replace(/\.(js|ts|tsx|jsx)$/, "");
-	const extensions = [".ts", ".tsx", ".js", ".jsx"];
-	for (const ext of extensions) {
-		if (resolved.endsWith(ext.replace(".", ""))) return resolved;
-	}
-	// Return with .ts as default assumption
 	return `${resolved}.ts`;
 }
 
@@ -223,23 +215,3 @@ function findCycles(graph: Map<string, Set<string>>): string[][] {
 	return cycles;
 }
 
-// ── File collection ──
-
-function collectFiles(dir: string, cwd: string, out: { path: string; content: string; imports: string[]; tokens: number }[]): void {
-	for (const entry of readdirSync(dir)) {
-		if (entry === "node_modules" || entry === "dist" || entry === ".git") continue;
-		const full = join(dir, entry);
-		if (statSync(full).isDirectory()) {
-			collectFiles(full, cwd, out);
-		} else {
-			const ext = extname(entry);
-			if ([".ts", ".tsx", ".js", ".jsx"].includes(ext) && !entry.includes(".test.") && !entry.includes(".spec.")) {
-				const content = readFileSync(full, "utf-8");
-				const relPath = full.replace(`${cwd}/`, "");
-				const imports = parseImports(content);
-				const tokens = Math.round(content.length / CHARS_PER_TOKEN);
-				out.push({ path: relPath, content, imports, tokens });
-			}
-		}
-	}
-}

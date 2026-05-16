@@ -46,28 +46,30 @@
 ## Bugs to fix
 
 ### From review agents (2026-05-16)
-- [ ] 11 of 18 runners have their own file walking — migrate to fs-utils.ts
-- [ ] readDeps() defined in 3 places (fs-utils, testing, standards) — deduplicate
-- [ ] Complexity regex: `[?]:` malformed + `&&`/`||` can't match with `\b` boundaries
-- [ ] Context runner resolveImport: broken extension check (`endsWith("ts")` matches `myUtils`)
-- [ ] Duplication check over-reports for import blocks (normalize more aggressively)
-- [ ] Report clipboard API fails on file:// URLs (needs try/catch fallback)
-- [ ] Sidebar checks don't activate the correct sub-tab (calls go() but not sub())
-- [ ] Mobile: Issues/Files views inaccessible (hidden nav-views, sidebar also hidden)
-- [ ] Empty radar div takes space when <3 categories have scored checks
-- [ ] Content can overflow horizontally between 768-1100px viewport widths
+- [x] 11 of 18 runners have their own file walking — migrate to fs-utils.ts
+- [x] readDeps() defined in 3 places (fs-utils, testing, standards) — deduplicate
+- [x] Complexity regex: `[?]:` malformed + `&&`/`||` can't match with `\b` boundaries
+- [x] Context runner resolveImport: broken extension check (`endsWith("ts")` matches `myUtils`)
+- [x] Duplication check over-reports for import blocks (normalize more aggressively)
+- [x] Report clipboard API fails on file:// URLs (needs try/catch fallback)
+- [x] Sidebar checks don't activate the correct sub-tab (calls go() but not sub())
+- [x] Mobile: Issues/Files views inaccessible (hidden nav-views, sidebar also hidden)
+- [x] Empty radar div takes space when <3 categories have scored checks
+- [x] Content can overflow horizontally between 768-1100px viewport widths
 
 ### Older (partially addressed)
 - [ ] Architecture SVG: >50 modules shows message instead of diagram — need clustering/zoom
-- [ ] Security check: "password in URL" pattern too broad (matches key=, token= in JSX)
+- [x] Security check: "password in URL" pattern too broad — tightened to require 8+ char value
+- [x] Security check: exec() regex too broad — matches regex.exec(), now scoped to child_process
+- [x] Security check: flags own check-meta descriptions as vulnerabilities — skip string-only lines
 
 ## Next features — Free CLI
 
 ### High priority
 - [ ] Interactive architecture graph (force-directed layout, draggable nodes)
-- [ ] Migrate all runners to fs-utils.ts (consistency + symlink/size protection)
-- [ ] Performance check (bundle analysis, barrel imports, tree-shaking issues)
-- [ ] SARIF output for GitHub Security tab integration
+- [x] Migrate all runners to fs-utils.ts (consistency + symlink/size protection)
+- [x] Performance check (bundle analysis, barrel imports, tree-shaking issues)
+- [x] SARIF output for GitHub Security tab integration
 
 ### Medium priority
 - [ ] "Vibe Score" readability metric (nesting depth, naming quality, whitespace)

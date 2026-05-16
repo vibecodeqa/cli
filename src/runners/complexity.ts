@@ -1,7 +1,6 @@
 /** Complexity analysis — counts lines, functions, and cognitive complexity via AST-free heuristics. */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { extname, join } from "node:path";
+import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
@@ -20,29 +19,18 @@ export function runComplexity(cwd: string): CheckResult {
 	const issues: Issue[] = [];
 	const functions: FunctionMetric[] = [];
 
-	// Find all TS/JS source files (not tests, not node_modules)
-	const srcDirs = ["src", "web/src"];
-	const files: string[] = [];
-	for (const dir of srcDirs) {
-		try {
-			collectFiles(join(cwd, dir), files);
-		} catch {
-			/* dir doesn't exist */
-		}
-	}
+	const sourceFiles = getProductionFiles(cwd);
 
 	let totalLines = 0;
-	const totalFiles = files.length;
+	const totalFiles = sourceFiles.length;
 	let longFunctions = 0;
 	let complexFunctions = 0;
 
-	for (const file of files) {
-		const content = readFileSync(file, "utf-8");
-		const lines = content.split("\n");
-		totalLines += lines.length;
+	for (const sf of sourceFiles) {
+		totalLines += sf.lines;
 
 		// Simple heuristic: find function boundaries and measure complexity
-		const funcs = extractFunctions(content, file.replace(`${cwd}/`, ""));
+		const funcs = extractFunctions(sf.content, sf.path);
 		for (const f of funcs) {
 			functions.push(f);
 			if (f.lines > MAX_FUNCTION_LINES) {
@@ -83,22 +71,6 @@ export function runComplexity(cwd: string): CheckResult {
 		issues,
 		duration: Date.now() - start,
 	};
-}
-
-function collectFiles(dir: string, out: string[]): void {
-	for (const entry of readdirSync(dir)) {
-		if (entry === "node_modules" || entry === "dist" || entry === ".git") continue;
-		const full = join(dir, entry);
-		const stat = statSync(full);
-		if (stat.isDirectory()) {
-			collectFiles(full, out);
-		} else {
-			const ext = extname(entry);
-			if ((ext === ".ts" || ext === ".tsx" || ext === ".js" || ext === ".jsx") && !entry.includes(".test.") && !entry.includes(".spec.")) {
-				out.push(full);
-			}
-		}
-	}
 }
 
 /** Simple heuristic function extraction — not a full AST parser but good enough for metrics. */
@@ -159,7 +131,7 @@ function measureComplexity(code: string): number {
 	for (const line of lines) {
 		const trimmed = line.trim();
 		// +1 for each branch/loop keyword
-		if (/\b(if|else if|else|switch|for|while|do|catch|&&|\|\||[?]:)\b/.test(trimmed)) {
+		if (/\b(if|else if|else|switch|for|while|do|catch)\b/.test(trimmed) || /&&|\|\|/.test(trimmed)) {
 			complexity++;
 		}
 		// +1 for ternary

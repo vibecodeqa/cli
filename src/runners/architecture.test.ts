@@ -72,7 +72,7 @@ describe("generateArchSVG", () => {
 		};
 		const svg = generateArchSVG(details);
 		expect(svg).toContain("<svg");
-		expect(svg).toContain('fill="#09090b"'); // dark background rect, not CSS background
+		expect(svg).toContain('fill="none"'); // transparent bg, inherits page dark background
 		expect(svg).not.toContain("background:"); // no CSS background
 		expect(svg).toContain("<path"); // bezier edges
 		expect(svg).toContain("marker-end"); // arrowheads

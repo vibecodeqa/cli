@@ -1,7 +1,8 @@
 /** Code standards check — naming conventions, anti-patterns, config hygiene. */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
+import { getProductionFiles, readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue, StackInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
@@ -53,15 +54,7 @@ export function runStandards(cwd: string, stack: StackInfo): CheckResult {
 	const issues: Issue[] = [];
 
 	// Collect source files
-	const files: { path: string; content: string }[] = [];
-	const dirs = ["src", "web/src"];
-	for (const dir of dirs) {
-		try {
-			collectFiles(join(cwd, dir), cwd, files);
-		} catch {
-			/* dir doesn't exist */
-		}
-	}
+	const files = getProductionFiles(cwd);
 
 	// ── File naming conventions ──
 	let namingViolations = 0;
@@ -183,26 +176,3 @@ export function runStandards(cwd: string, stack: StackInfo): CheckResult {
 	};
 }
 
-function collectFiles(dir: string, cwd: string, out: { path: string; content: string }[]): void {
-	for (const entry of readdirSync(dir)) {
-		if (entry === "node_modules" || entry === "dist" || entry === ".git") continue;
-		const full = join(dir, entry);
-		if (statSync(full).isDirectory()) {
-			collectFiles(full, cwd, out);
-		} else {
-			const ext = extname(entry);
-			if ([".ts", ".tsx", ".js", ".jsx"].includes(ext) && !entry.includes(".test.") && !entry.includes(".spec.")) {
-				out.push({ path: full.replace(`${cwd}/`, ""), content: readFileSync(full, "utf-8") });
-			}
-		}
-	}
-}
-
-function readDeps(cwd: string): Record<string, string> {
-	try {
-		const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf-8"));
-		return { ...pkg.dependencies, ...pkg.devDependencies };
-	} catch {
-		return {};
-	}
-}

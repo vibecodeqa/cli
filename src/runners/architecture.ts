@@ -325,8 +325,8 @@ export function generateArchSVG(details: Record<string, unknown>): string {
 <marker id="ah-cycle" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="8" markerHeight="6" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#f97316"/></marker>
 </defs>`;
 
-	// ── Background ──
-	const bg = `<rect width="${W}" height="${H}" rx="8" fill="#09090b"/>`;
+	// ── Background — transparent, inherits page dark bg ──
+	const bg = `<rect width="${W}" height="${H}" rx="8" fill="none"/>`;
 
 	// ── Draw edges (curved bezier paths with arrows) ──
 	let edgesSvg = "";
@@ -362,9 +362,9 @@ export function generateArchSVG(details: Record<string, unknown>): string {
 	for (const [dName, paths] of dirEntries) {
 		const x = padding + dirIdx * dirWidth;
 		const h = paths.length * nodeSpacing + 24;
-		groupsSvg += `<rect x="${x + 5}" y="${padding + 32}" width="${dirWidth - 10}" height="${h}" rx="8" fill="#0f0f14" stroke="#1e1e24"/>`;
+		groupsSvg += `<rect x="${x + 5}" y="${padding + 32}" width="${dirWidth - 10}" height="${h}" rx="8" fill="#ffffff06" stroke="#ffffff10"/>`;
 		const label = dName === "." ? "root" : dName.split("/").pop();
-		groupsSvg += `<text x="${x + dirWidth / 2}" y="${padding + 24}" text-anchor="middle" fill="#555" font-size="10" font-weight="700" letter-spacing="0.03em">${label}</text>`;
+		groupsSvg += `<text x="${x + dirWidth / 2}" y="${padding + 24}" text-anchor="middle" fill="#6b7280" font-size="10" font-weight="700" letter-spacing="0.03em">${label}</text>`;
 		dirIdx++;
 	}
 
@@ -385,11 +385,11 @@ export function generateArchSVG(details: Record<string, unknown>): string {
 		const isHighFanOut = fanOut > 10;
 		const isInCycle = [...cycleEdges].some((e) => e.startsWith(path + "->") || e.endsWith("->" + path));
 
-		let nodeColor = "#818cf8"; // default: accent
-		if (isInCycle) nodeColor = "#f97316"; // orange for cycle participant
-		else if (isGod) nodeColor = "#ef4444"; // red for god module
-		else if (isOrphan) nodeColor = "#555"; // dim for orphan
-		else if (isHighFanOut) nodeColor = "#eab308"; // yellow for high fan-out
+		let nodeColor = "#6d78d0"; // default: softer accent
+		if (isInCycle) nodeColor = "#d97706"; // amber for cycle participant
+		else if (isGod) nodeColor = "#dc2626"; // red for god module
+		else if (isOrphan) nodeColor = "#4b5563"; // dim for orphan
+		else if (isHighFanOut) nodeColor = "#ca8a04"; // yellow for high fan-out
 
 		const size = Math.min(9, 3 + Math.floor(fanIn * 0.8));
 
@@ -400,7 +400,7 @@ export function generateArchSVG(details: Record<string, unknown>): string {
 		nodesSvg += `<circle cx="${pos.x}" cy="${pos.y}" r="${size}" fill="${nodeColor}"/>`;
 
 		// Label
-		const labelColor = isOrphan ? "#555" : "#d4d4d8";
+		const labelColor = isOrphan ? "#4b5563" : "#9ca3af";
 		nodesSvg += `<text x="${pos.x + size + 5}" y="${pos.y + 3}" fill="${labelColor}" font-size="9" font-weight="${isGod ? "700" : "400"}">${name}</text>`;
 
 		// Fan-in/fan-out badge (only for notable nodes)
@@ -411,14 +411,14 @@ export function generateArchSVG(details: Record<string, unknown>): string {
 
 	// ── Legend ──
 	const legendY = H - 30;
-	const legend = `<g transform="translate(${padding}, ${legendY})" font-size="8" fill="#555">
-<circle cx="0" cy="0" r="4" fill="#818cf8"/><text x="8" y="3">module</text>
-<circle cx="60" cy="0" r="4" fill="#ef4444"/><text x="68" y="3">god module</text>
-<circle cx="140" cy="0" r="4" fill="#f97316"/><text x="148" y="3">in cycle</text>
-<circle cx="200" cy="0" r="4" fill="#eab308"/><text x="208" y="3">high fan-out</text>
-<circle cx="280" cy="0" r="4" fill="#555"/><text x="288" y="3">orphan</text>
-<line x1="330" y1="0" x2="350" y2="0" stroke="#ef444460" stroke-width="1.2"/><text x="354" y="3">cross-dir</text>
-<line x1="410" y1="0" x2="430" y2="0" stroke="#f97316" stroke-width="1.5" stroke-dasharray="5,3"/><text x="434" y="3">circular</text>
+	const legend = `<g transform="translate(${padding}, ${legendY})" font-size="8" fill="#6b7280">
+<circle cx="0" cy="0" r="4" fill="#6d78d0"/><text x="8" y="3">module</text>
+<circle cx="60" cy="0" r="4" fill="#dc2626"/><text x="68" y="3">god module</text>
+<circle cx="140" cy="0" r="4" fill="#d97706"/><text x="148" y="3">in cycle</text>
+<circle cx="200" cy="0" r="4" fill="#ca8a04"/><text x="208" y="3">high fan-out</text>
+<circle cx="280" cy="0" r="4" fill="#4b5563"/><text x="288" y="3">orphan</text>
+<line x1="330" y1="0" x2="350" y2="0" stroke="#ef444440" stroke-width="1.2"/><text x="354" y="3">cross-dir</text>
+<line x1="410" y1="0" x2="430" y2="0" stroke="#d97706" stroke-width="1.5" stroke-dasharray="5,3"/><text x="434" y="3">circular</text>
 </g>`;
 
 	return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px">${defs}${bg}${groupsSvg}${edgesSvg}${nodesSvg}${legend}</svg>`;

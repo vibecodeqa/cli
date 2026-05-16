@@ -2,17 +2,17 @@
 
 **Code health scanner for the AI coding era.**
 
-One command. 20 checks. Full report. Zero config.
+One command. 21 checks. Full report. Zero config.
 
 ```bash
 npx @vibecodeqa/cli
 ```
 
-![Grade](https://img.shields.io/badge/checks-20-blue) ![TypeScript](https://img.shields.io/badge/TypeScript-first-3178C6) ![License](https://img.shields.io/badge/license-MIT-green)
+![Grade](https://img.shields.io/badge/checks-21-blue) ![TypeScript](https://img.shields.io/badge/TypeScript-first-3178C6) ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## What it does
 
-vcqa scans your TypeScript/JavaScript codebase and produces a scored health report with actionable findings. It auto-detects your stack (React, Vite, vitest, Biome, etc.) and runs 20 checks across 7 categories.
+vcqa scans your TypeScript/JavaScript/Dart/Flutter codebase and produces a scored health report with actionable findings. It auto-detects your stack (React, Flutter, Vite, vitest, Biome, etc.) and runs 21 checks across 7 categories.
 
 The output is a self-contained HTML report with radar charts, architecture diagrams, score timeline, testing pyramid, and drill-down issue lists — all navigable via sidebar and tab navigation.
 
@@ -37,6 +37,9 @@ npx @vibecodeqa/cli --json
 # Generate badge SVG for README
 npx @vibecodeqa/cli --badge
 
+# SARIF output for GitHub Security tab
+npx @vibecodeqa/cli --sarif
+
 # Scan a specific directory
 npx @vibecodeqa/cli /path/to/project
 ```
@@ -45,6 +48,7 @@ Output goes to `.vibe-check/`:
 - `report.html` — navigable multi-page dashboard (open in browser)
 - `report.json` — machine-readable results
 - `badge.svg` — shields.io-style badge (with `--badge`)
+- `report.sarif` — SARIF 2.1.0 for GitHub Code Scanning (with `--sarif`)
 - `history/` — last 30 reports for trend tracking
 
 ## Checks
@@ -63,14 +67,14 @@ Output goes to `.vibe-check/`:
 
 | Check | Weight | What it measures |
 |-------|--------|-----------------|
-| **Complexity** | 5% | Cognitive complexity per function, functions >60 lines |
+| **Complexity** | 3% | Cognitive complexity per function, functions >60 lines |
 | **Duplication** | 5% | Copy-pasted 6+ line blocks |
-| **Error Handling** | 3% | Empty catch blocks, throw string, missing Error Boundaries |
+| **Error Handling** | 5% | Empty catch blocks, throw string, missing Error Boundaries |
 | **React Patterns** | 3% | Conditional hooks, missing keys, index keys, prop spreading |
 | **Accessibility** | 4% | img alt, click on non-interactive elements, form labels, html lang |
 | **Docs** | 3% | README quality, JSDoc coverage of exports |
 
-### Testing (17%)
+### Testing (15%)
 
 One deep check with 6 sub-dimensions:
 
@@ -81,19 +85,20 @@ One deep check with 6 sub-dimensions:
 - **Quality** — assertion density, mock ratio, snapshot ratio
 - **E2E detection** — Playwright/Cypress configured?
 
-### Architecture (6%)
+### Architecture (10%)
 
 | Check | Weight | What it measures |
 |-------|--------|-----------------|
 | **Architecture** | 6% | Import graph, circular deps, god modules, orphan files, fan-out, SVG diagram with legend |
+| **Performance** | 4% | Barrel imports, heavy dependencies, dynamic import opportunities, CSS-in-JS overhead |
 
-### Security (18%)
+### Security (16%)
 
 | Check | Weight | What it measures |
 |-------|--------|-----------------|
 | **Secrets** | 6% | 13 patterns (AWS, GitHub, Stripe, OpenAI, private keys) |
-| **Security** | 7% | 15 CWE-mapped patterns (XSS, injection, crypto, SSRF) |
-| **Dependencies** | 5% | npm audit vulnerabilities + outdated packages |
+| **Security** | 5% | 15 CWE-mapped patterns (XSS, injection, crypto, SSRF) |
+| **Dependencies** | 5% | npm audit / dart pub outdated vulnerabilities + outdated packages |
 
 ### AI Readiness (13%)
 
@@ -147,16 +152,36 @@ Each check produces a score from 0-100. The composite score is a weighted averag
 | `--ci` | Exit code 1 if composite score < 60 |
 | `--json` | Output JSON to stdout (no HTML, no browser) |
 | `--badge` | Generate badge.svg in output directory |
+| `--sarif` | Generate SARIF 2.1.0 for GitHub Code Scanning |
 
 ## Stack detection
 
-Auto-detects from `package.json` and config files:
-- **Language:** TypeScript, JavaScript
-- **Framework:** React, Vue, Svelte
+Auto-detects from `package.json`, `pubspec.yaml`, and config files:
+- **Language:** TypeScript, JavaScript, Dart
+- **Framework:** React, Vue, Svelte, Flutter
 - **Bundler:** Vite, Webpack, esbuild
-- **Test runner:** vitest, jest
-- **Linter:** Biome, ESLint
-- **Package manager:** pnpm, npm, yarn, bun
+- **Test runner:** vitest, jest, flutter_test, dart_test
+- **Linter:** Biome, ESLint, dart analyze
+- **Package manager:** pnpm, npm, yarn, bun, pub
+
+## GitHub Actions
+
+Add this to `.github/workflows/vibecodeqa.yml` for automatic PR scanning:
+
+```yaml
+name: VibeCode QA
+on: [pull_request]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npx @vibecodeqa/cli --skip-tests --ci --sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: .vibe-check/report.sarif
+```
 
 ## License
 

@@ -1,7 +1,6 @@
 /** Type safety check — count unsafe patterns: `as any`, explicit `any`, non-null assertions. */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { extname, join } from "node:path";
+import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
@@ -12,7 +11,8 @@ interface UnsafePattern {
 	weight: number; // score penalty per occurrence
 }
 
-const PATTERNS: UnsafePattern[] = [
+// TypeScript unsafe patterns
+const TS_PATTERNS: UnsafePattern[] = [
 	{ name: "as any", pattern: /\bas any\b/g, severity: "warning", weight: 2 },
 	{ name: ": any", pattern: /:\s*any\b/g, severity: "warning", weight: 1 },
 	{ name: "non-null assertion (!.)", pattern: /\w+!\./g, severity: "info", weight: 0.5 },
@@ -21,23 +21,25 @@ const PATTERNS: UnsafePattern[] = [
 	{ name: "@ts-nocheck", pattern: /@ts-nocheck/g, severity: "error", weight: 10 },
 ];
 
-export function runTypeSafety(cwd: string): CheckResult {
+// Dart unsafe patterns
+const DART_PATTERNS: UnsafePattern[] = [
+	{ name: "dynamic type", pattern: /\bdynamic\b/g, severity: "warning", weight: 1 },
+	{ name: "as dynamic", pattern: /\bas dynamic\b/g, severity: "warning", weight: 2 },
+	{ name: "// ignore:", pattern: /\/\/\s*ignore:/g, severity: "error", weight: 5 },
+	{ name: "// ignore_for_file:", pattern: /\/\/\s*ignore_for_file:/g, severity: "error", weight: 10 },
+	{ name: "late keyword", pattern: /\blate\s+(?!final)/g, severity: "info", weight: 0.5 },
+];
+
+export function runTypeSafety(cwd: string, isDart = false): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 	const counts: Record<string, number> = {};
 	let totalPenalty = 0;
+	const PATTERNS = isDart ? DART_PATTERNS : TS_PATTERNS;
 
-	const files: string[] = [];
-	const dirs = ["src", "web/src"];
-	for (const dir of dirs) {
-		try {
-			collectFiles(join(cwd, dir), files);
-		} catch {
-			/* dir doesn't exist */
-		}
-	}
+	const sourceFiles = getProductionFiles(cwd);
 
-	if (files.length === 0) {
+	if (sourceFiles.length === 0) {
 		return {
 			name: "type-safety",
 			score: 100,
@@ -48,10 +50,8 @@ export function runTypeSafety(cwd: string): CheckResult {
 		};
 	}
 
-	for (const file of files) {
-		const content = readFileSync(file, "utf-8");
-		const relPath = file.replace(`${cwd}/`, "");
-		const lines = content.split("\n");
+	for (const sf of sourceFiles) {
+		const lines = sf.content.split("\n");
 
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];
@@ -66,7 +66,7 @@ export function runTypeSafety(cwd: string): CheckResult {
 					counts[p.name] = (counts[p.name] || 0) + matches.length;
 					totalPenalty += p.weight * matches.length;
 					for (const _m of matches) {
-						issues.push({ severity: p.severity, message: p.name, file: relPath, line: i + 1, rule: "unsafe-type" });
+						issues.push({ severity: p.severity, message: p.name, file: sf.path, line: i + 1, rule: "unsafe-type" });
 					}
 				}
 			}
@@ -79,23 +79,8 @@ export function runTypeSafety(cwd: string): CheckResult {
 		name: "type-safety",
 		score,
 		grade: gradeFromScore(score),
-		details: { ...counts, filesScanned: files.length, totalUnsafe: issues.length },
+		details: { ...counts, filesScanned: sourceFiles.length, totalUnsafe: issues.length },
 		issues,
 		duration: Date.now() - start,
 	};
-}
-
-function collectFiles(dir: string, out: string[]): void {
-	for (const entry of readdirSync(dir)) {
-		if (entry === "node_modules" || entry === "dist") continue;
-		const full = join(dir, entry);
-		if (statSync(full).isDirectory()) {
-			collectFiles(full, out);
-		} else {
-			const ext = extname(entry);
-			if ((ext === ".ts" || ext === ".tsx") && !entry.includes(".test.") && !entry.includes(".spec.")) {
-				out.push(full);
-			}
-		}
-	}
 }

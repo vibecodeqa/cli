@@ -9,6 +9,32 @@ export function runDependencies(cwd: string, stack: StackInfo): CheckResult {
 	const issues: Issue[] = [];
 	const pm = stack.packageManager;
 
+	// Dart/Flutter: skip npm audit, just check pubspec for outdated
+	if (pm === "pub") {
+		const outdatedResult = run("dart pub outdated --json 2>/dev/null || true", cwd);
+		let outdatedCount = 0;
+		let majorOutdated = 0;
+		try {
+			const data = JSON.parse(outdatedResult.stdout);
+			for (const pkg of data.packages || []) {
+				if (pkg.current?.version && pkg.latest?.version && pkg.current.version !== pkg.latest.version) {
+					outdatedCount++;
+					if (pkg.current.version.split(".")[0] !== pkg.latest.version.split(".")[0]) majorOutdated++;
+				}
+			}
+		} catch { /* parse failed */ }
+		if (majorOutdated > 0) issues.push({ severity: "warning", message: `${majorOutdated} packages behind by a major version` });
+		const score = Math.max(0, Math.min(100, 100 - majorOutdated));
+		return {
+			name: "dependencies",
+			score,
+			grade: gradeFromScore(score),
+			details: { vulnerabilities: { critical: 0, high: 0, moderate: 0, low: 0 }, outdated: outdatedCount, majorOutdated },
+			issues,
+			duration: Date.now() - start,
+		};
+	}
+
 	// Vulnerability audit
 	const auditCmd = pm === "pnpm" ? "pnpm audit --json" : pm === "yarn" ? "yarn audit --json" : "npm audit --json";
 	const auditResult = run(`${auditCmd} 2>/dev/null || true`, cwd);

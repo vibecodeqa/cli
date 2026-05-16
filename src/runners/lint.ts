@@ -47,6 +47,21 @@ export function runLint(cwd: string, stack: StackInfo): CheckResult {
 		} catch {
 			/* eslint output parse failed */
 		}
+	} else if (stack.linter === "dart_analyze") {
+		const { stdout } = run("dart analyze --format=machine 2>/dev/null || true", cwd);
+		// machine format: SEVERITY|TYPE|CODE|PATH|LINE|COL|LEN|MESSAGE
+		for (const line of stdout.split("\n")) {
+			const parts = line.split("|");
+			if (parts.length < 8) continue;
+			const severity = parts[0] === "ERROR" ? "error" : parts[0] === "WARNING" ? "warning" : "info";
+			issues.push({
+				severity,
+				message: parts[7],
+				file: parts[3],
+				line: parseInt(parts[4], 10) || undefined,
+				rule: parts[2],
+			});
+		}
 	} else {
 		return {
 			name: "lint",

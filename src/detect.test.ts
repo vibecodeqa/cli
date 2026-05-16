@@ -65,6 +65,33 @@ describe("detectStack", () => {
 		cleanup();
 	});
 
+	it("detects Flutter/Dart project", () => {
+		setup({
+			"pubspec.yaml": "name: my_app\ndependencies:\n  flutter:\n    sdk: flutter\ndev_dependencies:\n  flutter_test:\n    sdk: flutter\n",
+			"analysis_options.yaml": "include: package:flutter_lints/flutter.yaml\n",
+		});
+		const stack = detectStack(TMP);
+		expect(stack.language).toBe("dart");
+		expect(stack.framework).toBe("flutter");
+		expect(stack.testRunner).toBe("flutter_test");
+		expect(stack.linter).toBe("dart_analyze");
+		expect(stack.packageManager).toBe("pub");
+		cleanup();
+	});
+
+	it("detects pure Dart project (no Flutter)", () => {
+		setup({
+			"pubspec.yaml": "name: my_cli\ndependencies:\n  args: ^2.0.0\ndev_dependencies:\n  test: any\n",
+		});
+		const stack = detectStack(TMP);
+		expect(stack.language).toBe("dart");
+		expect(stack.framework).toBe("none");
+		expect(stack.testRunner).toBe("dart_test");
+		expect(stack.linter).toBe("none");
+		expect(stack.packageManager).toBe("pub");
+		cleanup();
+	});
+
 	it("detects Vue + Webpack + Yarn", () => {
 		setup({
 			"package.json": JSON.stringify({
