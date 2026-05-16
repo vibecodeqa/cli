@@ -855,6 +855,116 @@ export function generateSequenceDiagram(details: Record<string, unknown>): strin
 	return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px">${defs}${svg}</svg>`;
 }
 
+// ── Layer Diagram ────────────────────────────────────────────────────
+// Detects application layers (MVC, Clean Architecture, etc.) from module behavior.
+// Layers are determined by fan-in/fan-out patterns + naming conventions.
+
+export function generateLayerDiagram(details: Record<string, unknown>): string {
+	const graph = details.graph as Record<string, { imports: string[]; importedBy: string[]; dir: string }> | undefined;
+	if (!graph || Object.keys(graph).length < 5) return "";
+
+	const entries = Object.entries(graph);
+
+	// Classify each module into a layer
+	type Layer = "entry" | "view" | "service" | "data" | "model";
+	const layerDefs: { id: Layer; label: string; color: string }[] = [
+		{ id: "entry", label: "Entry / Controller", color: "#6d78d0" },
+		{ id: "view", label: "View / Output", color: "#06b6d4" },
+		{ id: "service", label: "Service / Logic", color: "#22c55e" },
+		{ id: "data", label: "Data / IO", color: "#d97706" },
+		{ id: "model", label: "Model / Types", color: "#8b5cf6" },
+	];
+
+	const moduleLayer = new Map<string, Layer>();
+	for (const [path, info] of entries) {
+		const name = basename(path, extname(path));
+		const fanIn = info.importedBy.length;
+		const fanOut = info.imports.length;
+
+		let layer: Layer = "service";
+		if (fanIn === 0 && fanOut > 5) layer = "entry";
+		else if (fanIn > 10 && fanOut === 0) layer = "model";
+		else if (fanIn > 5 && fanOut <= 1) layer = "model";
+		else if (path.includes("report") || path.includes("html") || path.includes("svg") || path.includes("page") || path.includes("style") || path.includes("component")) layer = "view";
+		else if (name === "types" || name === "check-meta" || path.includes("types")) layer = "model";
+		else if (name === "exec" || name === "detect" || name.includes("fs-") || path.includes("history")) layer = "data";
+		else if (path.includes("runner") || path.includes("check")) layer = "service";
+		else if (fanOut > fanIn * 2) layer = "entry";
+
+		moduleLayer.set(path, layer);
+	}
+
+	// Count modules per layer
+	const layerCounts = new Map<Layer, string[]>();
+	for (const [path, layer] of moduleLayer) {
+		const arr = layerCounts.get(layer) || [];
+		arr.push(basename(path, extname(path)));
+		layerCounts.set(layer, arr);
+	}
+
+	// Count violations (imports going UP the stack)
+	const layerOrder: Layer[] = ["entry", "view", "service", "data", "model"];
+	let violations = 0;
+	let totalCrossLayer = 0;
+	for (const [path, info] of entries) {
+		const myLayer = moduleLayer.get(path)!;
+		const myIdx = layerOrder.indexOf(myLayer);
+		for (const imp of info.imports) {
+			const impLayer = moduleLayer.get(imp);
+			if (impLayer && impLayer !== myLayer) {
+				totalCrossLayer++;
+				const impIdx = layerOrder.indexOf(impLayer);
+				if (impIdx < myIdx) violations++; // importing from layer ABOVE = violation
+			}
+		}
+	}
+
+	// Draw
+	const W = 600;
+	const layerH = 50;
+	const gap = 6;
+	const padding = 20;
+	const activeLayers = layerDefs.filter((l) => (layerCounts.get(l.id)?.length || 0) > 0);
+	const H = padding * 2 + activeLayers.length * (layerH + gap) + 40;
+
+	let svg = "";
+	let y = padding;
+
+	// Title
+	svg += `<text x="${W / 2}" y="${y}" text-anchor="middle" fill="#9ca3af" font-size="10" font-weight="700">Application Layers</text>`;
+	y += 20;
+
+	for (const layer of activeLayers) {
+		const modules = layerCounts.get(layer.id) || [];
+		const moduleList = modules.slice(0, 8).join(", ") + (modules.length > 8 ? ` +${modules.length - 8}` : "");
+
+		// Layer band
+		svg += `<rect x="${padding}" y="${y}" width="${W - padding * 2}" height="${layerH}" rx="6" fill="${layer.color}10" stroke="${layer.color}40"/>`;
+		svg += `<text x="${padding + 12}" y="${y + 20}" fill="${layer.color}" font-size="10" font-weight="700">${layer.label}</text>`;
+		svg += `<text x="${padding + 12}" y="${y + 36}" fill="#6b7280" font-size="8">${moduleList}</text>`;
+		svg += `<text x="${W - padding - 12}" y="${y + 20}" text-anchor="end" fill="#4b5563" font-size="9">${modules.length}</text>`;
+
+		// Arrow down to next layer
+		if (activeLayers.indexOf(layer) < activeLayers.length - 1) {
+			const arrowY = y + layerH + gap / 2;
+			svg += `<line x1="${W / 2}" y1="${y + layerH}" x2="${W / 2}" y2="${arrowY + gap / 2}" stroke="#ffffff15" stroke-width="1" marker-end="url(#layer-arrow)"/>`;
+		}
+
+		y += layerH + gap;
+	}
+
+	// Violation indicator
+	if (violations > 0) {
+		svg += `<text x="${W / 2}" y="${y + 10}" text-anchor="middle" fill="var(--warn)" font-size="8">${violations} layer violation${violations > 1 ? "s" : ""} (imports going UP the stack)</text>`;
+	} else {
+		svg += `<text x="${W / 2}" y="${y + 10}" text-anchor="middle" fill="var(--pass)" font-size="8">Clean layering — all dependencies flow downward</text>`;
+	}
+
+	const defs = `<defs><marker id="layer-arrow" viewBox="0 0 10 7" refX="5" refY="3.5" markerWidth="6" markerHeight="4" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#ffffff30"/></marker></defs>`;
+
+	return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px">${defs}${svg}</svg>`;
+}
+
 // ── Container Diagram ────────────────────────────────────────────────
 // Auto-detects high-level system containers from config files:
 // frontend, backend/API, database, worker, static site, etc.

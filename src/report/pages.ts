@@ -2,7 +2,7 @@
 
 import { getCheckMeta } from "../check-meta.js";
 import { loadHistory } from "../history.js";
-import { generateArchSVG, generateDSM, generatePackageDiagram, generateSequenceDiagram } from "../runners/architecture.js";
+import { generateArchSVG, generateDSM, generateLayerDiagram, generatePackageDiagram, generateSequenceDiagram } from "../runners/architecture.js";
 import type { CheckResult, VibeReport } from "../types.js";
 import { det, e, gc, pc } from "./components.js";
 import { buildPyramid, buildRadar, buildRing, buildTimeline } from "./svg.js";
@@ -348,6 +348,7 @@ function renderArchSection(details: Record<string, unknown>): string {
 	if (containerSvg) {
 		html += `<h3 style="margin-top:1.5rem">Container Diagram</h3><div class="arch-svg">${containerSvg}</div>`;
 	}
+	html += `<h3 style="margin-top:1.5rem">Layer Diagram</h3><div class="arch-svg">${generateLayerDiagram(details)}</div>`;
 	html += `<h3 style="margin-top:1.5rem">Dependency Graph</h3><div class="arch-svg">${generateArchSVG(details)}</div>`;
 	html += `<h3 style="margin-top:1.5rem">Sequence Diagram</h3><div class="arch-svg">${generateSequenceDiagram(details)}</div>`;
 	html += `<h3 style="margin-top:1.5rem">Package Diagram</h3><div class="arch-svg">${generatePackageDiagram(details)}</div>`;
