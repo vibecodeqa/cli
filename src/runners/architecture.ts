@@ -423,3 +423,159 @@ export function generateArchSVG(details: Record<string, unknown>): string {
 
 	return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px">${defs}${bg}${groupsSvg}${edgesSvg}${nodesSvg}${legend}</svg>`;
 }
+
+// ── Dependency Matrix (DSM) ──────────────────────────────────────────
+// Standard software architecture visualization. Rows and columns are modules,
+// cells show import relationships. Clusters on the diagonal = well-structured packages.
+
+export function generateDSM(details: Record<string, unknown>): string {
+	const graph = details.graph as Record<string, { imports: string[]; importedBy: string[]; dir: string }> | undefined;
+	if (!graph || Object.keys(graph).length === 0) return "";
+	const entries = Object.entries(graph);
+	if (entries.length > 40) return `<div style="color:#6b7280;font-size:0.75rem">${entries.length} modules — too many for matrix view.</div>`;
+	if (entries.length < 3) return "";
+
+	// Sort by directory then name for clustering
+	entries.sort((a, b) => `${a[1].dir}/${a[0]}`.localeCompare(`${b[1].dir}/${b[0]}`));
+	const paths = entries.map(([p]) => p);
+	const idx = new Map(paths.map((p, i) => [p, i]));
+	const n = paths.length;
+
+	const cell = 14;
+	const labelW = 110;
+	const W = labelW + n * cell + 10;
+	const H = labelW + n * cell + 10;
+
+	// Build adjacency
+	const matrix: boolean[][] = Array.from({ length: n }, () => Array(n).fill(false));
+	for (const [path, info] of entries) {
+		const from = idx.get(path)!;
+		for (const imp of info.imports) {
+			const to = idx.get(imp);
+			if (to !== undefined) matrix[from][to] = true;
+		}
+	}
+
+	let svg = "";
+	const ox = labelW, oy = labelW;
+
+	// Grid
+	for (let i = 0; i <= n; i++) {
+		svg += `<line x1="${ox}" y1="${oy + i * cell}" x2="${ox + n * cell}" y2="${oy + i * cell}" stroke="#1e1e24" stroke-width="0.5"/>`;
+		svg += `<line x1="${ox + i * cell}" y1="${oy}" x2="${ox + i * cell}" y2="${oy + n * cell}" stroke="#1e1e24" stroke-width="0.5"/>`;
+	}
+
+	// Cells — row imports col
+	for (let r = 0; r < n; r++) {
+		for (let c = 0; c < n; c++) {
+			if (r === c) {
+				// Diagonal — highlight
+				svg += `<rect x="${ox + c * cell}" y="${oy + r * cell}" width="${cell}" height="${cell}" fill="#818cf808"/>`;
+			} else if (matrix[r][c]) {
+				const mutual = matrix[c][r]; // circular?
+				const color = mutual ? "#d97706" : "#6d78d0";
+				svg += `<rect x="${ox + c * cell + 2}" y="${oy + r * cell + 2}" width="${cell - 4}" height="${cell - 4}" rx="2" fill="${color}" opacity="0.7"/>`;
+			}
+		}
+	}
+
+	// Directory bands (background stripe per dir group)
+	let prevDir = "";
+	let bandStart = 0;
+	const dirColors = ["#ffffff04", "#ffffff08"];
+	let dirIdx2 = 0;
+	for (let i = 0; i <= n; i++) {
+		const dir = i < n ? entries[i][1].dir : "__end__";
+		if (dir !== prevDir && i > 0) {
+			const fill = dirColors[dirIdx2 % 2];
+			svg += `<rect x="${ox}" y="${oy + bandStart * cell}" width="${n * cell}" height="${(i - bandStart) * cell}" fill="${fill}"/>`;
+			svg += `<rect x="${ox + bandStart * cell}" y="${oy}" width="${(i - bandStart) * cell}" height="${n * cell}" fill="${fill}"/>`;
+			dirIdx2++;
+			bandStart = i;
+		}
+		prevDir = dir;
+	}
+
+	// Row labels (left) and column labels (top, rotated)
+	for (let i = 0; i < n; i++) {
+		const name = basename(paths[i], extname(paths[i]));
+		svg += `<text x="${ox - 4}" y="${oy + i * cell + cell / 2 + 3}" text-anchor="end" fill="#9ca3af" font-size="7">${name}</text>`;
+		svg += `<text x="${ox + i * cell + cell / 2}" y="${oy - 4}" text-anchor="start" fill="#9ca3af" font-size="7" transform="rotate(-60 ${ox + i * cell + cell / 2} ${oy - 4})">${name}</text>`;
+	}
+
+	// Legend
+	svg += `<g transform="translate(${ox}, ${oy + n * cell + 16})" font-size="7" fill="#6b7280">`;
+	svg += `<rect x="0" y="-4" width="8" height="8" rx="2" fill="#6d78d0" opacity="0.7"/><text x="12" y="3">imports</text>`;
+	svg += `<rect x="60" y="-4" width="8" height="8" rx="2" fill="#d97706" opacity="0.7"/><text x="72" y="3">mutual (cycle)</text>`;
+	svg += `</g>`;
+
+	return `<svg viewBox="0 0 ${W} ${H + 30}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px">${svg}</svg>`;
+}
+
+// ── Package Nesting Diagram ──────────────────────────────────────────
+// UML-style Package diagram: directories as nested boxes, files as items inside.
+
+export function generatePackageDiagram(details: Record<string, unknown>): string {
+	const graph = details.graph as Record<string, { imports: string[]; importedBy: string[]; dir: string }> | undefined;
+	if (!graph || Object.keys(graph).length === 0) return "";
+	const entries = Object.entries(graph);
+	if (entries.length > 50) return `<div style="color:#6b7280;font-size:0.75rem">${entries.length} modules — too many for package view.</div>`;
+
+	// Group by directory
+	const dirs = new Map<string, { path: string; fanIn: number; fanOut: number }[]>();
+	for (const [path, info] of entries) {
+		const dir = info.dir || ".";
+		const arr = dirs.get(dir) || [];
+		arr.push({ path, fanIn: info.importedBy.length, fanOut: info.imports.length });
+		dirs.set(dir, arr);
+	}
+
+	const dirEntries = [...dirs.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+	const boxW = 180;
+	const fileH = 18;
+	const headerH = 24;
+	const gap = 16;
+	const cols = Math.min(dirEntries.length, 4);
+	const colW = boxW + gap;
+
+	let svg = "";
+	let maxH = 0;
+
+	for (let i = 0; i < dirEntries.length; i++) {
+		const [dir, files] = dirEntries[i];
+		const col = i % cols;
+		const row = Math.floor(i / cols);
+		const prevRowsH = row * 300; // rough estimate, will adjust
+		const x = gap + col * colW;
+		let y = gap + prevRowsH;
+
+		const boxH = headerH + files.length * fileH + 8;
+
+		// Package box
+		svg += `<rect x="${x}" y="${y}" width="${boxW}" height="${boxH}" rx="6" fill="#ffffff04" stroke="#ffffff10"/>`;
+		// Package tab (UML-style)
+		svg += `<rect x="${x}" y="${y}" width="${Math.min(boxW * 0.6, 100)}" height="${headerH}" rx="4" fill="#ffffff08" stroke="#ffffff10"/>`;
+		const label = dir === "." ? "root" : dir.replace(/^src\//, "");
+		svg += `<text x="${x + 8}" y="${y + 16}" fill="#9ca3af" font-size="10" font-weight="700">${label}/</text>`;
+		svg += `<text x="${x + boxW - 8}" y="${y + 16}" text-anchor="end" fill="#4b5563" font-size="8">${files.length}</text>`;
+
+		y += headerH + 4;
+
+		// Files inside package
+		for (const f of files) {
+			const name = basename(f.path, extname(f.path));
+			const health = f.fanIn > 5 ? "#d97706" : f.fanOut > 8 ? "#ca8a04" : "#6d78d0";
+			svg += `<circle cx="${x + 12}" cy="${y + 7}" r="3" fill="${health}"/>`;
+			svg += `<text x="${x + 20}" y="${y + 10}" fill="#9ca3af" font-size="8">${name}</text>`;
+			svg += `<text x="${x + boxW - 8}" y="${y + 10}" text-anchor="end" fill="#4b5563" font-size="7">${f.fanIn}\u2190 ${f.fanOut}\u2192</text>`;
+			y += fileH;
+		}
+
+		maxH = Math.max(maxH, y + 8);
+	}
+
+	const W = gap + cols * colW;
+	const H = maxH + gap;
+
+	return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px">${svg}</svg>`;
+}
