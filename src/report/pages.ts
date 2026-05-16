@@ -213,7 +213,7 @@ ${detailKvs ? `<div class="kvs" style="margin-top:0.8rem">${detailKvs}</div>` : 
 <div class="ch-head"><span class="ch-g" style="color:${sk ? "#555" : gc(c.grade)}">${sk ? "\u2014" : c.grade}</span><div><b>${e(meta.label)}</b><span class="ch-s">${sk ? "skipped" : `${c.score}/100`} \u00b7 weight ${meta.weight}% \u00b7 ${c.duration}ms \u00b7 ${c.issues.length} issues</span></div><span class="pri" style="color:${pc(meta.priority)}">${meta.priority}</span></div>
 ${meta.description ? `<div class="info-panel"><div class="ip-row"><span class="ip-label">What</span><span>${e(meta.description)}</span></div><div class="ip-row"><span class="ip-label">Risk</span><span>${e(meta.risk)}</span></div><div class="ip-row"><span class="ip-label">Fix</span><span>${e(meta.recommendation)}</span></div></div>` : ""}
 ${sk ? `<p class="skip-r">${e(det(c).reason || "skipped")}</p>` : ""}
-${c.name === "architecture" && !sk ? `${(c.details as Record<string, unknown>).containerSvg ? `<h3 style="margin-top:1.5rem">Container Diagram</h3><div class="arch-svg">${(c.details as Record<string, unknown>).containerSvg}</div>` : ""}<h3 style="margin-top:1.5rem">Dependency Graph</h3><div class="arch-svg">${generateArchSVG(c.details)}</div><h3 style="margin-top:1.5rem">Sequence Diagram</h3><div class="arch-svg">${generateSequenceDiagram(c.details)}</div><h3 style="margin-top:1.5rem">Package Diagram</h3><div class="arch-svg">${generatePackageDiagram(c.details)}</div><h3 style="margin-top:1.5rem">Dependency Matrix (DSM)</h3><div class="arch-svg">${generateDSM(c.details)}</div>` : ""}
+${c.name === "architecture" && !sk ? renderArchSection(c.details) : ""}
 ${c.name === "testing" && !sk && det(c).pyramid ? `<div class="arch-svg">${buildPyramid(det(c).pyramid as { unit: number; integration: number; component: number; e2e: number })}</div>` : ""}
 ${detailsFiltered ? `<div class="kvs">${detailsFiltered}</div>` : ""}
 ${issuesHtml ? `<div class="iss-list">${issuesHtml}</div>` : '<p style="color:var(--muted);font-size:0.8rem;margin-top:1rem">No issues found.</p>'}
@@ -289,6 +289,71 @@ export function filesPage(
 		}, new Set<string>()).size
 	} checks.</p>
 ${heatmapRows}`;
+}
+
+// ── Architecture section renderer ────────────────────────
+
+function renderArchSection(details: Record<string, unknown>): string {
+	const assessment = details.assessment as {
+		pattern: string;
+		patternDescription: string;
+		layering: string;
+		stability: { package: string; instability: number; role: string }[];
+		crossCoupling: number;
+		cohesion: number;
+		rating: string;
+		insights: string[];
+	} | undefined;
+
+	let html = "";
+
+	// Assessment panel (before diagrams)
+	if (assessment) {
+		const ratingColors: Record<string, string> = { excellent: "var(--pass)", good: "#84cc16", fair: "var(--warn)", poor: "var(--fail)" };
+		const ratingColor = ratingColors[assessment.rating] || "var(--muted)";
+
+		html += `<div class="info-panel" style="margin-top:1rem">`;
+		html += `<div class="ip-row"><span class="ip-label">Pattern</span><span><b>${assessment.pattern}</b> — ${assessment.patternDescription}</span></div>`;
+		html += `<div class="ip-row"><span class="ip-label">Rating</span><span style="color:${ratingColor};font-weight:700;text-transform:uppercase">${assessment.rating}</span></div>`;
+		html += `<div class="ip-row"><span class="ip-label">Layers</span><span>${assessment.layering} layering</span></div>`;
+		html += `<div class="ip-row"><span class="ip-label">Coupling</span><span>${assessment.crossCoupling}% cross-directory imports</span></div>`;
+		html += `<div class="ip-row"><span class="ip-label">Cohesion</span><span>${assessment.cohesion}% average internal cohesion</span></div>`;
+		html += `</div>`;
+
+		// Insights
+		if (assessment.insights.length > 0) {
+			html += `<div style="margin:0.8rem 0;font-size:0.75rem">`;
+			for (const insight of assessment.insights) {
+				html += `<div style="padding:0.2rem 0;color:var(--muted)">\u2022 ${insight}</div>`;
+			}
+			html += `</div>`;
+		}
+
+		// Stability table
+		if (assessment.stability.length > 1) {
+			html += `<h3 style="margin-top:1rem">Package Stability (Martin)</h3>`;
+			html += `<div style="font-size:0.72rem;margin-bottom:1rem">`;
+			for (const s of assessment.stability) {
+				const barW = Math.round(s.instability * 100);
+				const color = s.instability > 0.7 ? "var(--warn)" : s.instability < 0.3 ? "var(--pass)" : "var(--accent)";
+				html += `<div class="brow"><span class="bl">${s.package.replace("src/", "")}</span><div class="bb"><div class="bf" style="width:${barW}%;background:${color}"></div></div><span class="bv" style="color:${color}">${s.instability.toFixed(2)}</span></div>`;
+			}
+			html += `<div style="color:var(--muted);font-size:0.62rem;margin-top:0.3rem">I=0 = maximally stable (many dependents, hard to change). I=1 = maximally unstable (no dependents, easy to change).</div>`;
+			html += `</div>`;
+		}
+	}
+
+	// Diagrams
+	const containerSvg = details.containerSvg as string | undefined;
+	if (containerSvg) {
+		html += `<h3 style="margin-top:1.5rem">Container Diagram</h3><div class="arch-svg">${containerSvg}</div>`;
+	}
+	html += `<h3 style="margin-top:1.5rem">Dependency Graph</h3><div class="arch-svg">${generateArchSVG(details)}</div>`;
+	html += `<h3 style="margin-top:1.5rem">Sequence Diagram</h3><div class="arch-svg">${generateSequenceDiagram(details)}</div>`;
+	html += `<h3 style="margin-top:1.5rem">Package Diagram</h3><div class="arch-svg">${generatePackageDiagram(details)}</div>`;
+	html += `<h3 style="margin-top:1.5rem">Dependency Matrix (DSM)</h3><div class="arch-svg">${generateDSM(details)}</div>`;
+
+	return html;
 }
 
 // ── Trends page ──────────────────────────────────────────

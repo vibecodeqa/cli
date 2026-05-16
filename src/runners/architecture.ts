@@ -122,6 +122,9 @@ export function runArchitecture(cwd: string): CheckResult {
 		graphData[path] = { imports: node.imports, importedBy: node.importedBy, dir: node.dir };
 	}
 
+	// ── Architecture Assessment ──
+	const assessment = assessArchitecture(graph.nodes, files.length);
+
 	return {
 		name: "architecture",
 		score,
@@ -135,6 +138,7 @@ export function runArchitecture(cwd: string): CheckResult {
 			connectors,
 			graph: graphData,
 			containerSvg: generateContainerDiagram(cwd),
+			assessment,
 		},
 		issues,
 		duration: Date.now() - start,
@@ -263,6 +267,144 @@ function findCycles(nodes: Map<string, ModuleNode>): string[][] {
 
 function short(path: string): string {
 	return basename(path, extname(path));
+}
+
+// ── Architecture Assessment ─────────────────────────────────────────
+// Categorizes the architecture pattern and rates its quality.
+
+interface ArchAssessment {
+	pattern: string;
+	patternDescription: string;
+	layering: "clean" | "mixed" | "tangled";
+	stability: { package: string; instability: number; role: string }[];
+	crossCoupling: number; // % of edges that cross directory boundaries
+	cohesion: number; // average internal cohesion across directories
+	rating: "excellent" | "good" | "fair" | "poor";
+	insights: string[];
+}
+
+function assessArchitecture(nodes: Map<string, ModuleNode>, fileCount: number): ArchAssessment {
+	// Group by directory
+	const dirs = new Map<string, ModuleNode[]>();
+	for (const [, node] of nodes) {
+		const dir = node.dir || ".";
+		const arr = dirs.get(dir) || [];
+		arr.push(node);
+		dirs.set(dir, arr);
+	}
+
+	// Detect pattern
+	let pattern = "flat";
+	let patternDescription = "All files in one directory — no clear separation of concerns.";
+	const dirCount = dirs.size;
+	const hasRunners = [...dirs.keys()].some((d) => d.includes("runner") || d.includes("plugin") || d.includes("check"));
+	const hasReport = [...dirs.keys()].some((d) => d.includes("report") || d.includes("output") || d.includes("view"));
+	if (hasRunners && dirCount >= 3) {
+		pattern = "plugin";
+		patternDescription = "Plugin architecture — core defines interfaces, plugins implement independently.";
+	} else if (dirCount >= 4 && hasReport) {
+		pattern = "layered";
+		patternDescription = "Layered architecture — clear separation between input, processing, and output.";
+	} else if (dirCount >= 3) {
+		pattern = "modular";
+		patternDescription = "Modular architecture — code organized by feature/responsibility.";
+	} else if (dirCount === 2) {
+		pattern = "two-tier";
+		patternDescription = "Two-tier — main code + one sub-package (e.g., src + lib).";
+	}
+
+	// Stability per directory (Robert Martin's instability metric)
+	const stability: ArchAssessment["stability"] = [];
+	for (const [dir, dirNodes] of dirs) {
+		let ce = 0; // efferent (outgoing deps)
+		let ca = 0; // afferent (incoming deps)
+		for (const node of dirNodes) {
+			ce += node.imports.length;
+			ca += node.importedBy.length;
+		}
+		const instability = ce / Math.max(1, ce + ca);
+		const role = instability > 0.7 ? "unstable (easy to change)" : instability < 0.3 ? "stable (hard to change)" : "balanced";
+		stability.push({ package: dir, instability: Math.round(instability * 100) / 100, role });
+	}
+
+	// Cross-coupling: what % of imports cross directory boundaries?
+	// Exclude imports TO stable core (types, utils) — those are expected in plugin arch.
+	let totalEdges = 0;
+	let crossEdges = 0;
+	const stableDirs = stability.filter((s) => s.instability < 0.35).map((s) => s.package);
+	for (const [, node] of nodes) {
+		for (const imp of node.imports) {
+			totalEdges++;
+			const impNode = nodes.get(imp);
+			if (impNode && impNode.dir !== node.dir) {
+				// Importing FROM stable core is expected, don't count as coupling
+				if (!stableDirs.includes(impNode.dir || ".")) {
+					crossEdges++;
+				}
+			}
+		}
+	}
+	const crossCoupling = totalEdges > 0 ? Math.round((crossEdges / totalEdges) * 100) : 0;
+
+	// Cohesion: average % of internal edges per directory
+	let totalCohesion = 0;
+	let dirsCounted = 0;
+	for (const [dir, dirNodes] of dirs) {
+		if (dirNodes.length < 2) continue;
+		let internal = 0;
+		let total = 0;
+		for (const node of dirNodes) {
+			for (const imp of node.imports) {
+				total++;
+				const impNode = nodes.get(imp);
+				if (impNode && impNode.dir === dir) internal++;
+			}
+		}
+		if (total > 0) {
+			totalCohesion += internal / total;
+			dirsCounted++;
+		}
+	}
+	const cohesion = dirsCounted > 0 ? Math.round((totalCohesion / dirsCounted) * 100) : 0;
+
+	// Layering: check if dependencies flow in one direction
+	// Violations = importing from peer/sibling packages (not from stable core)
+	let violations = 0;
+	for (const [, node] of nodes) {
+		for (const imp of node.imports) {
+			const impNode = nodes.get(imp);
+			if (impNode && impNode.dir !== node.dir) {
+				// Importing from stable core = fine
+				if (stableDirs.includes(impNode.dir || ".")) continue;
+				// Two unstable packages importing each other = violation
+				const myStability = stability.find((s) => s.package === (node.dir || "."));
+				const impStability = stability.find((s) => s.package === (impNode.dir || "."));
+				if (myStability && impStability && myStability.instability > 0.5 && impStability.instability > 0.5) {
+					violations++;
+				}
+			}
+		}
+	}
+	const layering: ArchAssessment["layering"] = violations === 0 ? "clean" : violations < 5 ? "mixed" : "tangled";
+
+	// Overall rating
+	let rating: ArchAssessment["rating"] = "excellent";
+	if (crossCoupling > 80 || layering === "tangled") rating = "poor";
+	else if (crossCoupling > 60 || layering === "mixed") rating = "fair";
+	else if (crossCoupling > 40 || cohesion < 20) rating = "good";
+
+	// Generate insights
+	const insights: string[] = [];
+	if (pattern === "plugin") insights.push("Plugin pattern detected — runners are independent and interchangeable.");
+	if (layering === "clean") insights.push("Clean layering — dependencies flow in one direction without violations.");
+	if (crossCoupling < 40) insights.push(`Low cross-coupling (${crossCoupling}%) — packages are well-isolated.`);
+	else insights.push(`High cross-coupling (${crossCoupling}%) — packages depend heavily on each other.`);
+	if (stability.some((s) => s.instability < 0.3)) insights.push("Stable foundation detected — core modules rarely change.");
+	const godCount = [...nodes.values()].filter((n) => n.importedBy.length > fileCount * 0.5).length;
+	if (godCount === 0) insights.push("No god modules — healthy dependency distribution.");
+	else insights.push(`${godCount} god module(s) — consider splitting into focused interfaces.`);
+
+	return { pattern, patternDescription, layering, stability, crossCoupling, cohesion, rating, insights };
 }
 
 // ── SVG Architecture Diagram ──
