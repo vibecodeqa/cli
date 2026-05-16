@@ -1,12 +1,14 @@
 /** Generate a multi-page HTML report as separate files.
  *
  * Layout:
- *   Top nav:    Logo | Overview | Foundations | Quality | ... | Issues | Files  (scrollable)
- *   Sidebar:    Score + dimension tree with individual check grades + views links
- *   Content:    Page-specific content (offset by sidebar width)
- *   Mobile:     Hamburger button toggles both top nav links and sidebar
- *
- * Each file is a standalone HTML document with consistent nav + sidebar + CSS.
+ *   Top nav:    Logo | Overview | Foundations | Quality | ... | Issues | Files
+ *               Page-level navigation. Scrollable on mobile.
+ *   Sidebar:    CONTEXTUAL to current page — NOT a duplicate of top nav.
+ *               Overview: score + category scores
+ *               Category: individual checks with grades (click to jump)
+ *               Issues: severity breakdown
+ *               Files: summary stats
+ *   Mobile:     Hamburger toggles both top nav dropdown and sidebar panel.
  */
 
 import { getCheckMeta } from "../check-meta.js";
@@ -25,7 +27,6 @@ export const GROUPS: { id: string; label: string; file: string; checks: string[]
 	{ id: "ai", label: "AI Analysis", file: "ai-analysis.html", checks: ["doc-coherence", "code-coherence"] },
 ];
 
-/** Generate all HTML pages. Returns Map<filename, html>. */
 export function generatePages(report: VibeReport, historyDir?: string): Map<string, string> {
 	const pages = new Map<string, string>();
 	const allChecks = report.checks;
@@ -37,7 +38,6 @@ export function generatePages(report: VibeReport, historyDir?: string): Map<stri
 	const totalIssues = allChecks.reduce((s, c) => s + c.issues.length, 0);
 	const proj = report.meta.cwd.split("/").pop() || "project";
 
-	// ── Aggregate file issues ──
 	const fileIssues = new Map<string, { errors: number; warnings: number; checks: Set<string> }>();
 	for (const c of allChecks) {
 		for (const iss of c.issues) {
@@ -55,7 +55,6 @@ export function generatePages(report: VibeReport, historyDir?: string): Map<stri
 		.sort((a, b) => b.total - a.total)
 		.slice(0, 30);
 
-	// ── Category scores ──
 	const catScores: CatScore[] = GROUPS.map((g) => {
 		const checks = g.checks.map((n) => checkMap.get(n)).filter(Boolean) as CheckResult[];
 		const scored = checks.filter((c) => !(c.details as any).skipped);
@@ -63,62 +62,79 @@ export function generatePages(report: VibeReport, historyDir?: string): Map<stri
 		return { ...g, avg, checks };
 	});
 
-	// ── Build sidebar HTML (shared across all pages) ──
-	const sidebar = buildSidebar(report, catScores, totalIssues, fileIssues.size);
+	const w = (id: string, sidebar: string, content: string) => wrap(proj, id, report, totalIssues, sidebar, content);
 
-	// ── Generate pages ──
-	const w = (id: string, content: string) => wrap(proj, id, report, totalIssues, sidebar, content);
+	// ── Overview: sidebar shows score + category summary ──
+	const overviewSidebar = sidebarScore(report)
+		+ catScores.map((cs) => {
+			const isPremium = cs.checks.every((c) => (c.details as any).comingSoon);
+			const clr = isPremium ? "#6366f1" : gc(cs.avg >= 90 ? "A" : cs.avg >= 75 ? "B" : cs.avg >= 60 ? "C" : cs.avg >= 40 ? "D" : "F");
+			const label = isPremium
+				? `<span class="pro-badge" style="font-size:0.5rem;padding:0.08rem 0.35rem">PRO</span>`
+				: `<span style="color:${clr}">${cs.avg}</span>`;
+			return `<a class="side-cat" href="${cs.file}">${cs.label} ${label}</a>`;
+		}).join("")
+		+ sidebarViews(totalIssues, fileIssues.size);
 
-	pages.set("index.html", w("overview",
+	pages.set("index.html", w("overview", overviewSidebar,
 		overviewPage(report, active, totalIssues, catScores, allChecks, topFiles, fl, historyDir)));
 
+	// ── Category pages: sidebar shows the checks within this category ──
 	for (let i = 0; i < GROUPS.length; i++) {
 		const g = GROUPS[i];
 		const cs = catScores[i];
-		pages.set(g.file, w(g.id, categoryPage(cs, fl)));
+		const catSidebar = sidebarScore(report)
+			+ `<div class="side-section"><div class="side-cat-title">${cs.label}</div>`
+			+ cs.checks.map((c) => {
+				const sk = (c.details as any).skipped;
+				const premium = (c.details as any).comingSoon;
+				const meta = getCheckMeta(c.name);
+				const badge = premium ? `<span style="color:#6366f1">PRO</span>` : `<span style="color:${sk ? "#555" : gc(c.grade)}">${sk ? "\u2014" : c.grade} ${sk ? "" : c.score}</span>`;
+				return `<a class="side-check" onclick="var t=document.querySelector('[data-sub=\\'${cs.id}-${c.name}\\']');if(t)sub(t,'${cs.id}')" title="${e(meta.label)}">${badge} ${e(meta.label)}</a>`;
+			}).join("")
+			+ `</div>`
+			+ sidebarViews(totalIssues, fileIssues.size);
+		pages.set(g.file, w(g.id, catSidebar, categoryPage(cs, fl)));
 	}
 
-	pages.set("issues.html", w("issues", issuesPage(allChecks, totalIssues, fl)));
-	pages.set("files.html", w("files", filesPage(topFiles, fileIssues, fl)));
+	// ── Issues: sidebar shows severity breakdown ──
+	const allIssuesList = allChecks.flatMap((c) => c.issues);
+	const errCount = allIssuesList.filter((i) => i.severity === "error").length;
+	const warnCount = allIssuesList.filter((i) => i.severity === "warning").length;
+	const infoCount = allIssuesList.filter((i) => i.severity === "info").length;
+	const issuesSidebar = sidebarScore(report)
+		+ `<div class="side-section"><div class="side-cat-title">Breakdown</div>`
+		+ `<div class="side-stat"><span style="color:var(--fail)">${errCount}</span> errors</div>`
+		+ `<div class="side-stat"><span style="color:var(--warn)">${warnCount}</span> warnings</div>`
+		+ `<div class="side-stat"><span style="color:var(--info)">${infoCount}</span> info</div>`
+		+ `</div>`
+		+ sidebarViews(totalIssues, fileIssues.size);
+	pages.set("issues.html", w("issues", issuesSidebar, issuesPage(allChecks, totalIssues, fl)));
+
+	// ── Files: sidebar shows file stats ──
+	const filesSidebar = sidebarScore(report)
+		+ `<div class="side-section"><div class="side-cat-title">File Health</div>`
+		+ `<div class="side-stat"><span style="color:var(--text)">${fileIssues.size}</span> files with issues</div>`
+		+ `<div class="side-stat"><span style="color:var(--fail)">${topFiles.filter(f => f.errors > 0).length}</span> with errors</div>`
+		+ `</div>`
+		+ sidebarViews(totalIssues, fileIssues.size);
+	pages.set("files.html", w("files", filesSidebar, filesPage(topFiles, fileIssues, fl)));
 
 	return pages;
 }
 
-/** For backwards compat — generate single file with all pages embedded. */
 export function generateHTML(report: VibeReport, historyDir?: string): string {
-	const pages = generatePages(report, historyDir);
-	return pages.get("index.html")!;
+	return generatePages(report, historyDir).get("index.html")!;
 }
 
-// ── Sidebar builder ──
+// ── Sidebar fragments ──
 
-function buildSidebar(report: VibeReport, catScores: CatScore[], totalIssues: number, fileCount: number): string {
-	const sidebarDims = catScores
-		.map((cs) => {
-			const isPremium = cs.checks.every((c) => (c.details as any).comingSoon);
-			const clr = isPremium ? "#6366f1" : gc(cs.avg >= 90 ? "A" : cs.avg >= 75 ? "B" : cs.avg >= 60 ? "C" : cs.avg >= 40 ? "D" : "F");
-			const scoreLabel = isPremium
-				? `<span class="pro-badge" style="font-size:0.5rem;padding:0.08rem 0.35rem">PRO</span>`
-				: `<span style="color:${clr}">${cs.avg}</span>`;
-			const checkLinks = cs.checks
-				.map((c) => {
-					const sk = (c.details as any).skipped;
-					const premium = (c.details as any).comingSoon;
-					const meta = getCheckMeta(c.name);
-					const badge = premium ? `<span style="color:#6366f1">PRO</span>` : `<span style="color:${sk ? "#555" : gc(c.grade)}">${sk ? "\u2014" : c.grade}</span>`;
-					return `<a class="side-check" href="${cs.file}" title="${e(meta.label)}">${badge} ${e(meta.label)}</a>`;
-				})
-				.join("");
-			return `<div class="side-section"><a class="side-cat" href="${cs.file}">${cs.label} ${scoreLabel}</a>${checkLinks}</div>`;
-		})
-		.join("");
+function sidebarScore(report: VibeReport): string {
+	return `<div class="side-section"><div class="side-label">Score</div><div class="side-score" style="color:${gc(report.grade)}">${report.grade} ${report.score}</div></div>`;
+}
 
-	const sidebarViews = `<div class="side-section side-views"><div class="side-views-label">Views</div><a class="side-check" href="issues.html">Issues <span style="color:var(--muted)">${totalIssues}</span></a><a class="side-check" href="files.html">Files <span style="color:var(--muted)">${fileCount}</span></a></div>`;
-
-	return `
-  <div class="side-section">Score<div class="side-score" style="color:${gc(report.grade)}">${report.grade} ${report.score}</div></div>
-  ${sidebarDims}
-  ${sidebarViews}`;
+function sidebarViews(totalIssues: number, fileCount: number): string {
+	return `<div class="side-section side-views"><div class="side-label" style="margin-top:0.3rem">Views</div><a class="side-check" href="issues.html">Issues <span style="color:var(--muted)">${totalIssues}</span></a><a class="side-check" href="files.html">Files <span style="color:var(--muted)">${fileCount}</span></a></div>`;
 }
 
 // ── Page wrapper ──

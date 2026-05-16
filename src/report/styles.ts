@@ -21,14 +21,17 @@ code{font-family:"SF Mono",Menlo,monospace;font-size:0.85em}
 .side{position:fixed;top:var(--top-h);left:0;bottom:0;width:var(--side-w);background:#0c0c0f;border-right:1px solid var(--border);overflow-y:auto;padding:0.6rem 0;font-size:0.7rem;z-index:20}
 .side-section{padding:0.3rem 0;border-bottom:1px solid var(--border)}
 .side-section:last-child{border-bottom:none}
+.side-label{padding:0.2rem 0.8rem;font-size:0.6rem;text-transform:uppercase;letter-spacing:0.05em;color:#444;font-weight:600}
 .side-score{font-size:1.4rem;font-weight:900;padding:0.2rem 0.8rem}
 .side-cat{display:block;padding:0.3rem 0.8rem;color:var(--text);font-weight:700;cursor:pointer;text-decoration:none;font-size:0.72rem}
 .side-cat:hover{background:#14141a}
-.side-check{display:block;padding:0.15rem 0.8rem 0.15rem 1.2rem;color:var(--muted);cursor:pointer;text-decoration:none;font-size:0.65rem}
+.side-cat-title{padding:0.3rem 0.8rem;font-size:0.65rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--accent);font-weight:700}
+.side-check{display:block;padding:0.15rem 0.8rem 0.15rem 0.8rem;color:var(--muted);cursor:pointer;text-decoration:none;font-size:0.65rem}
 .side-check:hover{color:var(--text);background:#14141a}
-.side-check span{display:inline-block;width:1rem;font-weight:800;text-align:center}
-.side-views{padding-top:0.4rem}
-.side-views-label{padding:0.2rem 0.8rem;font-size:0.6rem;text-transform:uppercase;letter-spacing:0.05em;color:#444;font-weight:600}
+.side-check span{display:inline-block;min-width:2.5rem;font-weight:700;font-size:0.6rem}
+.side-stat{padding:0.15rem 0.8rem;font-size:0.7rem;color:var(--muted)}
+.side-stat span{font-weight:800;font-size:0.8rem}
+.side-views{padding-top:0.3rem}
 .side-views .side-check{padding-left:0.8rem}
 
 /* ── Content ── */
