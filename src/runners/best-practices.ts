@@ -16,22 +16,18 @@ import { readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
-export function runBestPractices(cwd: string): CheckResult {
-	const start = Date.now();
+type HasFn = (f: string) => boolean;
+type ReadFn = (f: string) => string;
+interface CategoryResult {
+	practices: number;
+	followed: number;
+	issues: Issue[];
+}
+
+function checkCICD(cwd: string, has: HasFn, read: ReadFn): CategoryResult {
 	const issues: Issue[] = [];
 	let practices = 0;
 	let followed = 0;
-
-	const has = (f: string) => existsSync(join(cwd, f));
-	const read = (f: string) => {
-		try {
-			return readFileSync(join(cwd, f), "utf-8");
-		} catch {
-			return "";
-		}
-	};
-
-	// ── 1. CI/CD Best Practices ──
 
 	// Check for GitHub Actions workflows
 	const hasWorkflows = has(".github/workflows");
@@ -106,7 +102,13 @@ export function runBestPractices(cwd: string): CheckResult {
 		});
 	}
 
-	// ── 2. Supply Chain ──
+	return { practices, followed, issues };
+}
+
+function checkSupplyChain(has: HasFn, read: ReadFn): CategoryResult {
+	const issues: Issue[] = [];
+	let practices = 0;
+	let followed = 0;
 
 	// Lockfile committed
 	practices++;
@@ -144,7 +146,13 @@ export function runBestPractices(cwd: string): CheckResult {
 		}
 	}
 
-	// ── 3. Repo Hygiene ──
+	return { practices, followed, issues };
+}
+
+function checkRepoHygiene(has: HasFn): CategoryResult {
+	const issues: Issue[] = [];
+	let practices = 0;
+	let followed = 0;
 
 	// SECURITY.md or security policy
 	practices++;
@@ -174,7 +182,13 @@ export function runBestPractices(cwd: string): CheckResult {
 		});
 	}
 
-	// ── 4. Developer Experience ──
+	return { practices, followed, issues };
+}
+
+function checkDevExperience(cwd: string, has: HasFn): CategoryResult {
+	const issues: Issue[] = [];
+	let practices = 0;
+	let followed = 0;
 
 	// .env.example
 	practices++;
@@ -214,7 +228,13 @@ export function runBestPractices(cwd: string): CheckResult {
 		});
 	}
 
-	// ── 5. Code Quality Tooling ──
+	return { practices, followed, issues };
+}
+
+function checkCodeQualityTooling(has: HasFn, read: ReadFn): CategoryResult {
+	const issues: Issue[] = [];
+	let practices = 0;
+	let followed = 0;
 
 	// Linter configured
 	practices++;
@@ -260,7 +280,15 @@ export function runBestPractices(cwd: string): CheckResult {
 		});
 	}
 
-	// ── 6. Testing Best Practices ──
+	return { practices, followed, issues };
+}
+
+function checkTesting(has: HasFn, read: ReadFn): CategoryResult {
+	const issues: Issue[] = [];
+	let practices = 0;
+	let followed = 0;
+
+	const pkg = read("package.json");
 
 	// Test script exists
 	practices++;
@@ -282,7 +310,13 @@ export function runBestPractices(cwd: string): CheckResult {
 		});
 	}
 
-	// ── 7. Docker / Deployment ──
+	return { practices, followed, issues };
+}
+
+function checkDocker(has: HasFn, read: ReadFn): CategoryResult {
+	const issues: Issue[] = [];
+	let practices = 0;
+	let followed = 0;
 
 	// Dockerfile best practices (if Docker is used)
 	if (has("Dockerfile") || has("docker-compose.yml") || has("docker-compose.yaml")) {
@@ -328,7 +362,15 @@ export function runBestPractices(cwd: string): CheckResult {
 		}
 	}
 
-	// ── 8. Git Practices ──
+	return { practices, followed, issues };
+}
+
+function checkGitPractices(cwd: string, has: HasFn, read: ReadFn): CategoryResult {
+	const issues: Issue[] = [];
+	let practices = 0;
+	let followed = 0;
+
+	const deps = readDeps(cwd);
 
 	// .gitignore is comprehensive
 	practices++;
@@ -357,7 +399,15 @@ export function runBestPractices(cwd: string): CheckResult {
 		});
 	}
 
-	// ── 9. Monitoring & Observability ──
+	return { practices, followed, issues };
+}
+
+function checkMonitoring(cwd: string): CategoryResult {
+	const issues: Issue[] = [];
+	let practices = 0;
+	let followed = 0;
+
+	const deps = readDeps(cwd);
 
 	// Error tracking (Sentry, Bugsnag, etc.) — only for apps/servers, not CLI tools
 	const isApp = deps.react || deps.vue || deps.svelte || deps.express || deps.fastify || deps.hono || deps.next || deps.nuxt;
@@ -374,7 +424,16 @@ export function runBestPractices(cwd: string): CheckResult {
 		}
 	}
 
-	// ── 10. API & Configuration ──
+	return { practices, followed, issues };
+}
+
+function checkAPIConfig(cwd: string, read: ReadFn): CategoryResult {
+	const issues: Issue[] = [];
+	let practices = 0;
+	let followed = 0;
+
+	const deps = readDeps(cwd);
+	const pkg = read("package.json");
 
 	// Environment validation (zod, joi, envalid)
 	practices++;
@@ -392,6 +451,44 @@ export function runBestPractices(cwd: string): CheckResult {
 		} else {
 			followed++;
 		}
+	}
+
+	return { practices, followed, issues };
+}
+
+export function runBestPractices(cwd: string): CheckResult {
+	const start = Date.now();
+
+	const has: HasFn = (f: string) => existsSync(join(cwd, f));
+	const read: ReadFn = (f: string) => {
+		try {
+			return readFileSync(join(cwd, f), "utf-8");
+		} catch {
+			return "";
+		}
+	};
+
+	const categories = [
+		checkCICD(cwd, has, read),
+		checkSupplyChain(has, read),
+		checkRepoHygiene(has),
+		checkDevExperience(cwd, has),
+		checkCodeQualityTooling(has, read),
+		checkTesting(has, read),
+		checkDocker(has, read),
+		checkGitPractices(cwd, has, read),
+		checkMonitoring(cwd),
+		checkAPIConfig(cwd, read),
+	];
+
+	let practices = 0;
+	let followed = 0;
+	const issues: Issue[] = [];
+
+	for (const cat of categories) {
+		practices += cat.practices;
+		followed += cat.followed;
+		issues.push(...cat.issues);
 	}
 
 	// ── Score ──

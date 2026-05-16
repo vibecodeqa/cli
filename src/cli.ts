@@ -34,17 +34,35 @@ import { gradeFromScore } from "./types.js";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
 const VERSION: string = pkg.version;
-const args = process.argv.slice(2);
-const flags = new Set(args.filter((a) => a.startsWith("--")));
-const cwd = resolve(args.find((a) => !a.startsWith("--")) || ".");
-const outputDir = join(cwd, ".vibe-check");
-const jsonOnly = flags.has("--json");
-const ciMode = flags.has("--ci");
-const skipTests = flags.has("--skip-tests");
-const watchMode = flags.has("--watch");
-const badgeMode = flags.has("--badge");
-const sarifMode = flags.has("--sarif");
-const uploadMode = flags.has("--upload");
+
+interface ParsedFlags {
+	cwd: string;
+	outputDir: string;
+	jsonOnly: boolean;
+	ciMode: boolean;
+	skipTests: boolean;
+	watchMode: boolean;
+	badgeMode: boolean;
+	sarifMode: boolean;
+	uploadMode: boolean;
+}
+
+function parseFlags(): ParsedFlags {
+	const args = process.argv.slice(2);
+	const flags = new Set(args.filter((a) => a.startsWith("--")));
+	const cwd = resolve(args.find((a) => !a.startsWith("--")) || ".");
+	return {
+		cwd,
+		outputDir: join(cwd, ".vibe-check"),
+		jsonOnly: flags.has("--json"),
+		ciMode: flags.has("--ci"),
+		skipTests: flags.has("--skip-tests"),
+		watchMode: flags.has("--watch"),
+		badgeMode: flags.has("--badge"),
+		sarifMode: flags.has("--sarif"),
+		uploadMode: flags.has("--upload"),
+	};
+}
 
 function color(grade: string): string {
 	if (grade === "A") return "\x1b[32m";
@@ -52,29 +70,7 @@ function color(grade: string): string {
 	return "\x1b[31m";
 }
 
-async function main() {
-	const start = Date.now();
-
-	if (!jsonOnly) {
-		console.log("");
-		console.log(`  \x1b[1m\x1b[38;5;141mvcqa\x1b[0m v${VERSION}`);
-		console.log(`  \x1b[2m${cwd}\x1b[0m`);
-		console.log("");
-	}
-
-	const stack = detectStack(cwd);
-	if (!jsonOnly) {
-		const parts = [stack.language, stack.framework, stack.bundler, stack.testRunner, stack.linter, stack.packageManager].filter(
-			(v) => v !== "none" && v !== "unknown",
-		);
-		console.log(`  stack: ${parts.join(" + ")}`);
-		console.log("");
-	}
-
-	const checks: CheckResult[] = [];
-	const isDart = stack.language === "dart";
-
-	// All runners grouped by category
+function runChecks(cwd: string, stack: ReturnType<typeof detectStack>, skipTests: boolean, isDart: boolean, jsonOnly: boolean): CheckResult[] {
 	const runners: { name: string; fn: () => CheckResult }[] = [
 		// Foundations
 		{ name: "structure", fn: () => runStructure(cwd, stack) },
@@ -107,6 +103,7 @@ async function main() {
 		{ name: "code-coherence", fn: () => runCodeCoherence(cwd) },
 	];
 
+	const checks: CheckResult[] = [];
 	for (const runner of runners) {
 		if (!jsonOnly) process.stdout.write(`  ${runner.name.padEnd(14)}`);
 		const result = runner.fn();
@@ -122,24 +119,10 @@ async function main() {
 			console.log(`${c}${label.padEnd(5)}${scoreStr}\x1b[0m  \x1b[2m${result.duration}ms\x1b[0m${issueStr}`);
 		}
 	}
+	return checks;
+}
 
-	const score = computeScore(checks);
-	const grade = gradeFromScore(score);
-	const duration = Date.now() - start;
-	const totalIssues = checks.reduce((s, c) => s + c.issues.length, 0);
-
-	const report: VibeReport = {
-		version: VERSION,
-		timestamp: new Date().toISOString(),
-		score,
-		grade,
-		checks,
-		meta: { cwd, node: process.version, duration, stack, ...detectRepoUrl(cwd) },
-	};
-
-	// Trend comparison (read previous report before overwriting)
-	const trend = computeTrend(report, outputDir);
-
+async function writeOutputs(report: VibeReport, outputDir: string, flags: Pick<ParsedFlags, "badgeMode" | "sarifMode">): Promise<void> {
 	if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
 
 	// Save to history before overwriting current report
@@ -173,54 +156,141 @@ async function main() {
 	}
 
 	// Badge SVG
-	if (badgeMode) {
+	if (flags.badgeMode) {
 		const { buildBadge } = await import("./report/svg.js");
-		const badgeSvg = buildBadge(score, grade);
+		const badgeSvg = buildBadge(report.score, report.grade);
 		writeFileSync(join(outputDir, "badge.svg"), badgeSvg);
 	}
 
 	// SARIF output for GitHub Code Scanning
-	if (sarifMode) {
+	if (flags.sarifMode) {
 		const { generateSARIF } = await import("./report/sarif.js");
 		writeFileSync(join(outputDir, "report.sarif"), generateSARIF(report));
 	}
+}
 
-	// Upload to VibeCode QA dashboard
-	if (uploadMode) {
-		const repo = report.meta.repoUrl?.replace(/^https:\/\/github\.com\//, "") || cwd.split("/").pop() || "project";
-		const token = process.env.VCQA_TOKEN || "";
-		try {
-			const res = await fetch("https://api.vibecodeqa.online/api/reports", {
-				method: "POST",
-				headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-				body: JSON.stringify({ repo, report }),
-			});
-			if (res.ok) {
-				const data = (await res.json()) as { totalReports?: number };
-				if (!jsonOnly) console.log(`  \x1b[32m\u2713 Uploaded to dashboard\x1b[0m \x1b[2m(${data.totalReports || 1} reports)\x1b[0m`);
-			} else if (!jsonOnly) {
-				console.log(`  \x1b[33m\u26a0 Upload failed: ${res.status}\x1b[0m \x1b[2m(set VCQA_TOKEN env var)\x1b[0m`);
-			}
-		} catch {
-			if (!jsonOnly) console.log(`  \x1b[33m\u26a0 Upload failed (network error)\x1b[0m`);
-		}
-	}
+function printResults(
+	report: VibeReport,
+	trend: ReturnType<typeof computeTrend>,
+	flags: Pick<ParsedFlags, "jsonOnly" | "badgeMode" | "sarifMode">,
+	outputDir: string,
+): void {
+	const { score, grade, checks } = report;
+	const totalIssues = checks.reduce((s, c) => s + c.issues.length, 0);
 
-	if (jsonOnly) {
+	if (flags.jsonOnly) {
 		console.log(JSON.stringify(report));
 	} else {
 		const gc = color(grade);
 		console.log("");
 		console.log(
-			`  ${gc}\x1b[1m${grade}\x1b[0m ${gc}${score}/100\x1b[0m  \x1b[2m${checks.length} checks · ${totalIssues} issues · ${duration}ms\x1b[0m`,
+			`  ${gc}\x1b[1m${grade}\x1b[0m ${gc}${score}/100\x1b[0m  \x1b[2m${checks.length} checks · ${totalIssues} issues · ${report.meta.duration}ms\x1b[0m`,
 		);
 		if (trend) console.log(formatTrend(trend));
 		console.log("");
 		console.log(`  \x1b[2mReport: ${join(outputDir, "report/index.html")}\x1b[0m`);
 		console.log(`  \x1b[2mJSON:   ${join(outputDir, "report.json")}\x1b[0m`);
-		if (badgeMode) console.log(`  \x1b[2mBadge:  ${join(outputDir, "badge.svg")}\x1b[0m`);
-		if (sarifMode) console.log(`  \x1b[2mSARIF:  ${join(outputDir, "report.sarif")}\x1b[0m`);
+		if (flags.badgeMode) console.log(`  \x1b[2mBadge:  ${join(outputDir, "badge.svg")}\x1b[0m`);
+		if (flags.sarifMode) console.log(`  \x1b[2mSARIF:  ${join(outputDir, "report.sarif")}\x1b[0m`);
 		console.log("");
+	}
+}
+
+async function handleUpload(report: VibeReport, cwd: string, jsonOnly: boolean): Promise<void> {
+	const repo = report.meta.repoUrl?.replace(/^https:\/\/github\.com\//, "") || cwd.split("/").pop() || "project";
+	const token = process.env.VCQA_TOKEN || "";
+	try {
+		const res = await fetch("https://api.vibecodeqa.online/api/reports", {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+			body: JSON.stringify({ repo, report }),
+		});
+		if (res.ok) {
+			const data = (await res.json()) as { totalReports?: number };
+			if (!jsonOnly) console.log(`  \x1b[32m\u2713 Uploaded to dashboard\x1b[0m \x1b[2m(${data.totalReports || 1} reports)\x1b[0m`);
+		} else if (!jsonOnly) {
+			console.log(`  \x1b[33m\u26a0 Upload failed: ${res.status}\x1b[0m \x1b[2m(set VCQA_TOKEN env var)\x1b[0m`);
+		}
+	} catch {
+		if (!jsonOnly) console.log(`  \x1b[33m\u26a0 Upload failed (network error)\x1b[0m`);
+	}
+}
+
+async function startWatch(cwd: string): Promise<void> {
+	const { watch } = await import("node:fs");
+	const srcDirs = ["src", "web/src"].map((d) => join(cwd, d)).filter((d) => existsSync(d));
+	if (srcDirs.length === 0) {
+		console.log("  \x1b[31mNo src/ directory to watch\x1b[0m");
+		process.exit(1);
+	}
+
+	console.log("  \x1b[2mWatching for changes... (Ctrl+C to stop)\x1b[0m");
+	console.log("");
+
+	let debounce: ReturnType<typeof setTimeout> | null = null;
+	let running = false;
+	for (const dir of srcDirs) {
+		watch(dir, { recursive: true }, (_event, filename) => {
+			if (!filename || filename.includes("node_modules") || filename.includes(".vibe-check")) return;
+			if (running) return;
+			if (debounce) clearTimeout(debounce);
+			debounce = setTimeout(async () => {
+				running = true;
+				console.log(`  \x1b[2mChanged: ${filename} — re-scanning...\x1b[0m`);
+				await main().catch(() => {});
+				running = false;
+			}, 500);
+		});
+	}
+
+	// Keep process alive
+	await new Promise(() => {});
+}
+
+async function main() {
+	const flags = parseFlags();
+	const { cwd, outputDir, jsonOnly, ciMode, skipTests, watchMode } = flags;
+	const start = Date.now();
+
+	if (!jsonOnly) {
+		console.log("");
+		console.log(`  \x1b[1m\x1b[38;5;141mvcqa\x1b[0m v${VERSION}`);
+		console.log(`  \x1b[2m${cwd}\x1b[0m`);
+		console.log("");
+	}
+
+	const stack = detectStack(cwd);
+	if (!jsonOnly) {
+		const parts = [stack.language, stack.framework, stack.bundler, stack.testRunner, stack.linter, stack.packageManager].filter(
+			(v) => v !== "none" && v !== "unknown",
+		);
+		console.log(`  stack: ${parts.join(" + ")}`);
+		console.log("");
+	}
+
+	const isDart = stack.language === "dart";
+	const checks = runChecks(cwd, stack, skipTests, isDart, jsonOnly);
+
+	const score = computeScore(checks);
+	const grade = gradeFromScore(score);
+	const duration = Date.now() - start;
+
+	const report: VibeReport = {
+		version: VERSION,
+		timestamp: new Date().toISOString(),
+		score,
+		grade,
+		checks,
+		meta: { cwd, node: process.version, duration, stack, ...detectRepoUrl(cwd) },
+	};
+
+	const trend = computeTrend(report, outputDir);
+
+	await writeOutputs(report, outputDir, flags);
+	printResults(report, trend, flags, outputDir);
+
+	if (flags.uploadMode) {
+		await handleUpload(report, cwd, jsonOnly);
 	}
 
 	if (ciMode && score < 60) {
@@ -237,36 +307,8 @@ async function main() {
 		}
 	}
 
-	// Watch mode — re-run on file changes
 	if (watchMode) {
-		const { watch } = await import("node:fs");
-		const srcDirs = ["src", "web/src"].map((d) => join(cwd, d)).filter((d) => existsSync(d));
-		if (srcDirs.length === 0) {
-			console.log("  \x1b[31mNo src/ directory to watch\x1b[0m");
-			process.exit(1);
-		}
-
-		console.log("  \x1b[2mWatching for changes... (Ctrl+C to stop)\x1b[0m");
-		console.log("");
-
-		let debounce: ReturnType<typeof setTimeout> | null = null;
-		let running = false;
-		for (const dir of srcDirs) {
-			watch(dir, { recursive: true }, (_event, filename) => {
-				if (!filename || filename.includes("node_modules") || filename.includes(".vibe-check")) return;
-				if (running) return; // prevent concurrent re-runs (M5)
-				if (debounce) clearTimeout(debounce);
-				debounce = setTimeout(async () => {
-					running = true;
-					console.log(`  \x1b[2mChanged: ${filename} — re-scanning...\x1b[0m`);
-					await main().catch(() => {});
-					running = false;
-				}, 500);
-			});
-		}
-
-		// Keep process alive
-		await new Promise(() => {});
+		await startWatch(cwd);
 	}
 }
 
