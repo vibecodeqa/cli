@@ -10,7 +10,8 @@
  *   7. SVG architecture diagram
  */
 
-import { basename, dirname, extname } from "node:path";
+import { existsSync } from "node:fs";
+import { basename, dirname, extname, join } from "node:path";
 import { getProductionFiles, type SourceFile } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -133,6 +134,7 @@ export function runArchitecture(cwd: string): CheckResult {
 			highFanOut,
 			connectors,
 			graph: graphData,
+			containerSvg: generateContainerDiagram(cwd),
 		},
 		issues,
 		duration: Date.now() - start,
@@ -586,4 +588,176 @@ export function generatePackageDiagram(details: Record<string, unknown>): string
 	const H = maxH + gap;
 
 	return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px">${svg}</svg>`;
+}
+
+// ── Sequence Diagram ─────────────────────────────────────────────────
+// Traces the longest import chains from entry points, showing how a request
+// flows through the system. UML-style lifelines with arrows.
+
+export function generateSequenceDiagram(details: Record<string, unknown>): string {
+	const graph = details.graph as Record<string, { imports: string[]; importedBy: string[]; dir: string }> | undefined;
+	if (!graph || Object.keys(graph).length < 3) return "";
+
+	// Find entry points (files with 0 importers that aren't utility files)
+	const entries = Object.entries(graph);
+	const entryPoints = entries
+		.filter(([path, info]) => {
+			const name = basename(path, extname(path));
+			return info.importedBy.length === 0 && ["index", "main", "cli", "App", "app", "server"].includes(name);
+		})
+		.map(([p]) => p);
+
+	if (entryPoints.length === 0) return "";
+
+	// BFS from first entry point to find the longest chain (max 8 deep)
+	const entry = entryPoints[0];
+	const chain = findLongestChain(entry, graph, 8);
+	if (chain.length < 3) return "";
+
+	// Draw sequence diagram
+	const participants = chain.map((p) => basename(p, extname(p)));
+	const lifelineSpacing = 120;
+	const W = participants.length * lifelineSpacing + 40;
+	const messageH = 36;
+	const headerH = 50;
+	const H = headerH + (chain.length - 1) * messageH + 40;
+
+	let svg = "";
+
+	// Participant boxes (lifeline headers)
+	for (let i = 0; i < participants.length; i++) {
+		const x = 20 + i * lifelineSpacing + lifelineSpacing / 2;
+		const name = participants[i];
+		const boxW = Math.max(60, name.length * 7 + 16);
+		svg += `<rect x="${x - boxW / 2}" y="8" width="${boxW}" height="22" rx="4" fill="#ffffff08" stroke="#ffffff15"/>`;
+		svg += `<text x="${x}" y="23" text-anchor="middle" fill="#9ca3af" font-size="9" font-weight="600">${name}</text>`;
+		// Lifeline (dashed vertical)
+		svg += `<line x1="${x}" y1="30" x2="${x}" y2="${H - 10}" stroke="#ffffff10" stroke-width="1" stroke-dasharray="4,3"/>`;
+	}
+
+	// Arrows between lifelines (imports = calls)
+	for (let i = 0; i < chain.length - 1; i++) {
+		const fromX = 20 + i * lifelineSpacing + lifelineSpacing / 2;
+		const toX = 20 + (i + 1) * lifelineSpacing + lifelineSpacing / 2;
+		const y = headerH + i * messageH;
+
+		// Arrow
+		svg += `<line x1="${fromX}" y1="${y}" x2="${toX - 6}" y2="${y}" stroke="#6d78d0" stroke-width="1.5" marker-end="url(#seq-arrow)"/>`;
+		// Label (the import)
+		const label = `import`;
+		svg += `<text x="${(fromX + toX) / 2}" y="${y - 6}" text-anchor="middle" fill="#6b7280" font-size="7">${label}</text>`;
+	}
+
+	// Arrow marker
+	const defs = `<defs><marker id="seq-arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#6d78d0"/></marker></defs>`;
+
+	return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px">${defs}${svg}</svg>`;
+}
+
+function findLongestChain(start: string, graph: Record<string, { imports: string[] }>, maxDepth: number): string[] {
+	let longest: string[] = [start];
+	const visited = new Set<string>([start]);
+
+	function dfs(node: string, path: string[]): void {
+		if (path.length > longest.length) longest = [...path];
+		if (path.length >= maxDepth) return;
+		const info = graph[node];
+		if (!info) return;
+		for (const imp of info.imports) {
+			if (!visited.has(imp) && graph[imp]) {
+				visited.add(imp);
+				dfs(imp, [...path, imp]);
+				visited.delete(imp);
+			}
+		}
+	}
+
+	dfs(start, [start]);
+	return longest;
+}
+
+// ── Container Diagram ────────────────────────────────────────────────
+// Auto-detects high-level system containers from config files:
+// frontend, backend/API, database, worker, static site, etc.
+
+export function generateContainerDiagram(cwd: string): string {
+	const has = (f: string) => existsSync(join(cwd, f));
+	const containers: { name: string; type: string; tech: string }[] = [];
+
+	// Detect containers from config files
+	if (has("src/App.tsx") || has("src/App.vue") || has("src/App.svelte") || has("web/src/App.tsx")) {
+		const tech = has("src/App.tsx") ? "React" : has("src/App.vue") ? "Vue" : "Svelte";
+		containers.push({ name: "Frontend", type: "webapp", tech });
+	}
+	if (has("wrangler.toml") || has("wrangler.json")) {
+		containers.push({ name: "Worker", type: "worker", tech: "Cloudflare Workers" });
+	}
+	if (has("Dockerfile") || has("server.ts") || has("src/server.ts") || has("src/index.ts")) {
+		if (!containers.some((c) => c.name === "Frontend")) {
+			containers.push({ name: "API Server", type: "api", tech: "Node.js" });
+		}
+	}
+	if (has("prisma/schema.prisma") || has("drizzle.config.ts")) {
+		const tech = has("prisma/schema.prisma") ? "Prisma" : "Drizzle";
+		containers.push({ name: "Database", type: "db", tech });
+	}
+	if (has("firebase.json") || has(".firebaserc")) {
+		containers.push({ name: "Firebase", type: "baas", tech: "Firebase" });
+	}
+	if (has("supabase/config.toml") || has(".supabase")) {
+		containers.push({ name: "Supabase", type: "baas", tech: "Supabase" });
+	}
+	if (has("pubspec.yaml")) {
+		containers.push({ name: "Mobile App", type: "mobile", tech: "Flutter" });
+	}
+	if (has("package.json") && !containers.length) {
+		containers.push({ name: "Application", type: "app", tech: "Node.js" });
+	}
+
+	if (containers.length < 2) return ""; // Only interesting with 2+ containers
+
+	// Layout: horizontal boxes with connecting lines
+	const boxW = 140;
+	const boxH = 60;
+	const gap = 30;
+	const W = containers.length * (boxW + gap) + gap;
+	const H = 120;
+
+	const typeColors: Record<string, string> = {
+		webapp: "#6d78d0",
+		worker: "#d97706",
+		api: "#22c55e",
+		db: "#8b5cf6",
+		baas: "#ec4899",
+		mobile: "#06b6d4",
+		app: "#6d78d0",
+	};
+
+	let svg = "";
+
+	for (let i = 0; i < containers.length; i++) {
+		const c = containers[i];
+		const x = gap + i * (boxW + gap);
+		const y = (H - boxH) / 2;
+		const color = typeColors[c.type] || "#6d78d0";
+
+		// Box
+		svg += `<rect x="${x}" y="${y}" width="${boxW}" height="${boxH}" rx="8" fill="${color}15" stroke="${color}50"/>`;
+		// Name
+		svg += `<text x="${x + boxW / 2}" y="${y + 24}" text-anchor="middle" fill="#e5e5e5" font-size="10" font-weight="700">${c.name}</text>`;
+		// Tech
+		svg += `<text x="${x + boxW / 2}" y="${y + 40}" text-anchor="middle" fill="#6b7280" font-size="8">[${c.tech}]</text>`;
+
+		// Connection to next
+		if (i < containers.length - 1) {
+			const ax = x + boxW;
+			const bx = ax + gap;
+			const ay = H / 2;
+			svg += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${ay}" stroke="#ffffff20" stroke-width="1.5" marker-end="url(#cont-arrow)"/>`;
+		}
+	}
+
+	const defs = `<defs><marker id="cont-arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#ffffff40"/></marker></defs>`;
+
+	return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px">${defs}${svg}</svg>`;
 }

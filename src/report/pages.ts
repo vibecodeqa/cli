@@ -2,7 +2,7 @@
 
 import { getCheckMeta } from "../check-meta.js";
 import { loadHistory } from "../history.js";
-import { generateArchSVG, generateDSM, generatePackageDiagram } from "../runners/architecture.js";
+import { generateArchSVG, generateDSM, generatePackageDiagram, generateSequenceDiagram } from "../runners/architecture.js";
 import type { CheckResult, VibeReport } from "../types.js";
 import { det, e, gc, pc } from "./components.js";
 import { buildPyramid, buildRadar, buildRing, buildTimeline } from "./svg.js";
@@ -213,7 +213,7 @@ ${detailKvs ? `<div class="kvs" style="margin-top:0.8rem">${detailKvs}</div>` : 
 <div class="ch-head"><span class="ch-g" style="color:${sk ? "#555" : gc(c.grade)}">${sk ? "\u2014" : c.grade}</span><div><b>${e(meta.label)}</b><span class="ch-s">${sk ? "skipped" : `${c.score}/100`} \u00b7 weight ${meta.weight}% \u00b7 ${c.duration}ms \u00b7 ${c.issues.length} issues</span></div><span class="pri" style="color:${pc(meta.priority)}">${meta.priority}</span></div>
 ${meta.description ? `<div class="info-panel"><div class="ip-row"><span class="ip-label">What</span><span>${e(meta.description)}</span></div><div class="ip-row"><span class="ip-label">Risk</span><span>${e(meta.risk)}</span></div><div class="ip-row"><span class="ip-label">Fix</span><span>${e(meta.recommendation)}</span></div></div>` : ""}
 ${sk ? `<p class="skip-r">${e(det(c).reason || "skipped")}</p>` : ""}
-${c.name === "architecture" && !sk ? `<h3 style="margin-top:1.5rem">Dependency Graph</h3><div class="arch-svg">${generateArchSVG(c.details)}</div><h3 style="margin-top:1.5rem">Package Diagram</h3><div class="arch-svg">${generatePackageDiagram(c.details)}</div><h3 style="margin-top:1.5rem">Dependency Matrix (DSM)</h3><div class="arch-svg">${generateDSM(c.details)}</div>` : ""}
+${c.name === "architecture" && !sk ? `${(c.details as Record<string, unknown>).containerSvg ? `<h3 style="margin-top:1.5rem">Container Diagram</h3><div class="arch-svg">${(c.details as Record<string, unknown>).containerSvg}</div>` : ""}<h3 style="margin-top:1.5rem">Dependency Graph</h3><div class="arch-svg">${generateArchSVG(c.details)}</div><h3 style="margin-top:1.5rem">Sequence Diagram</h3><div class="arch-svg">${generateSequenceDiagram(c.details)}</div><h3 style="margin-top:1.5rem">Package Diagram</h3><div class="arch-svg">${generatePackageDiagram(c.details)}</div><h3 style="margin-top:1.5rem">Dependency Matrix (DSM)</h3><div class="arch-svg">${generateDSM(c.details)}</div>` : ""}
 ${c.name === "testing" && !sk && det(c).pyramid ? `<div class="arch-svg">${buildPyramid(det(c).pyramid as { unit: number; integration: number; component: number; e2e: number })}</div>` : ""}
 ${detailsFiltered ? `<div class="kvs">${detailsFiltered}</div>` : ""}
 ${issuesHtml ? `<div class="iss-list">${issuesHtml}</div>` : '<p style="color:var(--muted);font-size:0.8rem;margin-top:1rem">No issues found.</p>'}
