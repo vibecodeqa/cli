@@ -28,7 +28,6 @@ export function collectSourceFiles(cwd: string, opts?: { includeTests?: boolean;
 			/* dir doesn't exist */
 		}
 	}
-	if (opts?.includeTests) return files;
 	return files;
 }
 

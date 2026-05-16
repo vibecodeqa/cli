@@ -117,6 +117,7 @@ h3{font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:
 .is{font-weight:800;font-size:0.55rem;width:0.9rem;text-align:center;border-radius:2px;flex-shrink:0}
 .ir.error .is{color:var(--fail);background:#ef444418}
 .ir.warning .is{color:var(--warn);background:#eab30818}
+.ir.info .is{color:var(--info);background:#6366f118}
 .il{color:var(--accent);min-width:2rem;flex-shrink:0}
 .im{flex:1;word-break:break-word}
 .iru{color:#555;font-size:0.55rem}
