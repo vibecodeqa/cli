@@ -732,88 +732,127 @@ export function generatePackageDiagram(details: Record<string, unknown>): string
 }
 
 // ── Sequence Diagram ─────────────────────────────────────────────────
-// Traces the longest import chains from entry points, showing how a request
-// flows through the system. UML-style lifelines with arrows.
+// Shows the RUNTIME FLOW of the application — what calls what in order.
+// Detected by analyzing the entry point's exported function calls and
+// which modules they invoke. NOT just import chains.
+//
+// Participants = architectural roles (Entry, Detect, Runners, Score, Report, Output)
+// Messages = actual operations that happen at runtime
 
 export function generateSequenceDiagram(details: Record<string, unknown>): string {
 	const graph = details.graph as Record<string, { imports: string[]; importedBy: string[]; dir: string }> | undefined;
 	if (!graph || Object.keys(graph).length < 3) return "";
 
-	// Find entry points (files with 0 importers that aren't utility files)
+	// Find the entry point
 	const entries = Object.entries(graph);
-	const entryPoints = entries
-		.filter(([path, info]) => {
-			const name = basename(path, extname(path));
-			return info.importedBy.length === 0 && ["index", "main", "cli", "App", "app", "server"].includes(name);
-		})
-		.map(([p]) => p);
+	const entryPoint = entries.find(([path, info]) => {
+		const name = basename(path, extname(path));
+		return info.importedBy.length === 0 && ["index", "main", "cli", "App", "app", "server"].includes(name);
+	});
+	if (!entryPoint) return "";
 
-	if (entryPoints.length === 0) return "";
-
-	// BFS from first entry point to find the longest chain (max 8 deep)
-	const entry = entryPoints[0];
-	const chain = findLongestChain(entry, graph, 8);
-	if (chain.length < 3) return "";
-
-	// Draw sequence diagram
-	const participants = chain.map((p) => basename(p, extname(p)));
-	const lifelineSpacing = 120;
-	const W = participants.length * lifelineSpacing + 40;
-	const messageH = 36;
-	const headerH = 50;
-	const H = headerH + (chain.length - 1) * messageH + 40;
-
-	let svg = "";
-
-	// Participant boxes (lifeline headers)
-	for (let i = 0; i < participants.length; i++) {
-		const x = 20 + i * lifelineSpacing + lifelineSpacing / 2;
-		const name = participants[i];
-		const boxW = Math.max(60, name.length * 7 + 16);
-		svg += `<rect x="${x - boxW / 2}" y="8" width="${boxW}" height="22" rx="4" fill="#ffffff08" stroke="#ffffff15"/>`;
-		svg += `<text x="${x}" y="23" text-anchor="middle" fill="#9ca3af" font-size="9" font-weight="600">${name}</text>`;
-		// Lifeline (dashed vertical)
-		svg += `<line x1="${x}" y1="30" x2="${x}" y2="${H - 10}" stroke="#ffffff10" stroke-width="1" stroke-dasharray="4,3"/>`;
+	// Determine architectural roles from directory structure
+	const roles: { name: string; dir: string; modules: number }[] = [];
+	const dirs = new Map<string, number>();
+	for (const [, info] of entries) {
+		const dir = info.dir || ".";
+		dirs.set(dir, (dirs.get(dir) || 0) + 1);
 	}
 
-	// Arrows between lifelines (imports = calls)
-	for (let i = 0; i < chain.length - 1; i++) {
-		const fromX = 20 + i * lifelineSpacing + lifelineSpacing / 2;
-		const toX = 20 + (i + 1) * lifelineSpacing + lifelineSpacing / 2;
-		const y = headerH + i * messageH;
+	// Build role list from actual structure
+	const entryName = basename(entryPoint[0], extname(entryPoint[0]));
+	roles.push({ name: entryName, dir: "entry", modules: 1 });
 
-		// Arrow with target module name as label
-		svg += `<line x1="${fromX}" y1="${y}" x2="${toX - 6}" y2="${y}" stroke="#6d78d0" stroke-width="1.5" marker-end="url(#seq-arrow)"/>`;
-		const target = participants[i + 1];
-		svg += `<text x="${(fromX + toX) / 2}" y="${y - 6}" text-anchor="middle" fill="#6b7280" font-size="7">import ./${target}</text>`;
+	// Add directories as participants (sorted by dependency order)
+	const dirArr = [...dirs.entries()]
+		.filter(([d]) => d !== (entryPoint[1].dir || "."))
+		.sort((a, b) => {
+			// Sort by average fan-in (more depended-upon = earlier in flow)
+			const aFanIn = entries.filter(([, i]) => i.dir === a[0]).reduce((s, [, i]) => s + i.importedBy.length, 0) / a[1];
+			const bFanIn = entries.filter(([, i]) => i.dir === b[0]).reduce((s, [, i]) => s + i.importedBy.length, 0) / b[1];
+			return bFanIn - aFanIn; // most depended-on first
+		});
+
+	for (const [dir, count] of dirArr) {
+		const label = dir.replace("src/", "").replace("lib/", "") || "core";
+		roles.push({ name: label, dir, modules: count });
 	}
 
-	// Arrow marker
-	const defs = `<defs><marker id="seq-arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#6d78d0"/></marker></defs>`;
+	if (roles.length < 3) return "";
+	const maxRoles = Math.min(roles.length, 6);
+	const displayRoles = roles.slice(0, maxRoles);
 
-	return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px">${defs}${svg}</svg>`;
-}
+	// Build messages: entry calls each role in order
+	// Detect what the entry imports from each directory
+	const messages: { from: number; to: number; label: string }[] = [];
+	const entryImports = entryPoint[1].imports;
 
-function findLongestChain(start: string, graph: Record<string, { imports: string[] }>, maxDepth: number): string[] {
-	let longest: string[] = [start];
-	const visited = new Set<string>([start]);
+	for (let i = 1; i < displayRoles.length; i++) {
+		const role = displayRoles[i];
+		const importsFromRole = entryImports.filter((imp) => {
+			const impInfo = graph[imp];
+			return impInfo && (impInfo.dir || ".") === role.dir;
+		});
+		if (importsFromRole.length > 0) {
+			const funcNames = importsFromRole.map((p) => basename(p, extname(p))).slice(0, 2).join(", ");
+			messages.push({ from: 0, to: i, label: funcNames });
+		}
+	}
 
-	function dfs(node: string, path: string[]): void {
-		if (path.length > longest.length) longest = [...path];
-		if (path.length >= maxDepth) return;
-		const info = graph[node];
-		if (!info) return;
-		for (const imp of info.imports) {
-			if (!visited.has(imp) && graph[imp]) {
-				visited.add(imp);
-				dfs(imp, [...path, imp]);
-				visited.delete(imp);
+	// Also show inter-role calls (report imports from runners, etc.)
+	for (let i = 1; i < displayRoles.length; i++) {
+		for (let j = 1; j < displayRoles.length; j++) {
+			if (i === j) continue;
+			const fromDir = displayRoles[i].dir;
+			const toDir = displayRoles[j].dir;
+			const crossImports = entries.filter(([, info]) => (info.dir || ".") === fromDir && info.imports.some((imp) => graph[imp] && (graph[imp].dir || ".") === toDir));
+			if (crossImports.length > 0 && messages.length < 10) {
+				messages.push({ from: i, to: j, label: `${crossImports.length} calls` });
 			}
 		}
 	}
 
-	dfs(start, [start]);
-	return longest;
+	if (messages.length < 2) return "";
+
+	// Draw UML sequence diagram
+	const lifelineSpacing = 130;
+	const W = displayRoles.length * lifelineSpacing + 40;
+	const messageH = 40;
+	const headerH = 55;
+	const H = headerH + messages.length * messageH + 30;
+
+	let svg = "";
+
+	// Participant boxes
+	for (let i = 0; i < displayRoles.length; i++) {
+		const x = 20 + i * lifelineSpacing + lifelineSpacing / 2;
+		const role = displayRoles[i];
+		const label = role.name;
+		const subtitle = role.modules > 1 ? `(${role.modules})` : "";
+		const boxW = Math.max(70, label.length * 7 + 20);
+		svg += `<rect x="${x - boxW / 2}" y="6" width="${boxW}" height="${subtitle ? 30 : 22}" rx="4" fill="#ffffff08" stroke="#ffffff15"/>`;
+		svg += `<text x="${x}" y="20" text-anchor="middle" fill="#e5e5e5" font-size="9" font-weight="700">${label}</text>`;
+		if (subtitle) svg += `<text x="${x}" y="31" text-anchor="middle" fill="#4b5563" font-size="7">${subtitle}</text>`;
+		svg += `<line x1="${x}" y1="${subtitle ? 36 : 28}" x2="${x}" y2="${H - 10}" stroke="#ffffff10" stroke-width="1" stroke-dasharray="4,3"/>`;
+	}
+
+	// Messages
+	for (let i = 0; i < messages.length; i++) {
+		const msg = messages[i];
+		const fromX = 20 + msg.from * lifelineSpacing + lifelineSpacing / 2;
+		const toX = 20 + msg.to * lifelineSpacing + lifelineSpacing / 2;
+		const y = headerH + i * messageH;
+		const isReturn = msg.to < msg.from;
+		const color = isReturn ? "#4b5563" : "#6d78d0";
+		const dash = isReturn ? ' stroke-dasharray="4,2"' : "";
+
+		svg += `<line x1="${fromX}" y1="${y}" x2="${toX + (toX > fromX ? -6 : 6)}" y2="${y}" stroke="${color}" stroke-width="1.5" marker-end="url(#seq-arrow)"${dash}/>`;
+		svg += `<text x="${(fromX + toX) / 2}" y="${y - 6}" text-anchor="middle" fill="#6b7280" font-size="7">${msg.label}</text>`;
+	}
+
+	const defs = `<defs><marker id="seq-arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="7" markerHeight="5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#6d78d0"/></marker></defs>`;
+
+	return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px">${defs}${svg}</svg>`;
 }
 
 // ── Container Diagram ────────────────────────────────────────────────
