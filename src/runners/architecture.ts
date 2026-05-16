@@ -11,10 +11,10 @@
  */
 
 import { basename, dirname, extname } from "node:path";
-import { generateContainerDiagram } from "./diagrams.js";
 import { getProductionFiles, type SourceFile } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
+import { generateContainerDiagram } from "./diagrams.js";
 
 interface ModuleNode {
 	path: string;
@@ -406,7 +406,6 @@ function assessArchitecture(nodes: Map<string, ModuleNode>, fileCount: number): 
 
 	return { pattern, patternDescription, layering, stability, crossCoupling, cohesion, rating, insights };
 }
-
 
 // Diagram generators extracted to diagrams.ts for file size
 export { generateArchSVG, generateDSM, generateLayerDiagram, generatePackageDiagram, generateSequenceDiagram } from "./diagrams.js";

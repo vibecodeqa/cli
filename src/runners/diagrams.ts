@@ -124,7 +124,7 @@ export function generateArchSVG(details: Record<string, unknown>): string {
 		const isGod = fanIn >= godThreshold;
 		const isOrphan = fanIn === 0 && !["index", "main", "cli", "App"].includes(name);
 		const isHighFanOut = fanOut > 10;
-		const isInCycle = [...cycleEdges].some((e) => e.startsWith(path + "->") || e.endsWith("->" + path));
+		const isInCycle = [...cycleEdges].some((e) => e.startsWith(`${path}->`) || e.endsWith(`->${path}`));
 
 		let nodeColor = "#6d78d0"; // default: softer accent
 		if (isInCycle)
@@ -390,7 +390,10 @@ export function generateSequenceDiagram(details: Record<string, unknown>): strin
 			return impInfo && (impInfo.dir || ".") === role.dir;
 		});
 		if (importsFromRole.length > 0) {
-			const funcNames = importsFromRole.map((p) => basename(p, extname(p))).slice(0, 2).join(", ");
+			const funcNames = importsFromRole
+				.map((p) => basename(p, extname(p)))
+				.slice(0, 2)
+				.join(", ");
 			messages.push({ from: 0, to: i, label: funcNames });
 		}
 	}
@@ -401,7 +404,9 @@ export function generateSequenceDiagram(details: Record<string, unknown>): strin
 			if (i === j) continue;
 			const fromDir = displayRoles[i].dir;
 			const toDir = displayRoles[j].dir;
-			const crossImports = entries.filter(([, info]) => (info.dir || ".") === fromDir && info.imports.some((imp) => graph[imp] && (graph[imp].dir || ".") === toDir));
+			const crossImports = entries.filter(
+				([, info]) => (info.dir || ".") === fromDir && info.imports.some((imp) => graph[imp] && (graph[imp].dir || ".") === toDir),
+			);
 			if (crossImports.length > 0 && messages.length < 10) {
 				messages.push({ from: i, to: j, label: `${crossImports.length} calls` });
 			}
@@ -481,7 +486,15 @@ export function generateLayerDiagram(details: Record<string, unknown>): string {
 		if (fanIn === 0 && fanOut > 5) layer = "entry";
 		else if (fanIn > 10 && fanOut === 0) layer = "model";
 		else if (fanIn > 5 && fanOut <= 1) layer = "model";
-		else if (path.includes("report") || path.includes("html") || path.includes("svg") || path.includes("page") || path.includes("style") || path.includes("component")) layer = "view";
+		else if (
+			path.includes("report") ||
+			path.includes("html") ||
+			path.includes("svg") ||
+			path.includes("page") ||
+			path.includes("style") ||
+			path.includes("component")
+		)
+			layer = "view";
 		else if (name === "types" || name === "check-meta" || path.includes("types")) layer = "model";
 		else if (name === "exec" || name === "detect" || name.includes("fs-") || path.includes("history")) layer = "data";
 		else if (path.includes("runner") || path.includes("check")) layer = "service";
@@ -501,14 +514,14 @@ export function generateLayerDiagram(details: Record<string, unknown>): string {
 	// Count violations (imports going UP the stack)
 	const layerOrder: Layer[] = ["entry", "view", "service", "data", "model"];
 	let violations = 0;
-	let totalCrossLayer = 0;
+	let _totalCrossLayer = 0;
 	for (const [path, info] of entries) {
 		const myLayer = moduleLayer.get(path)!;
 		const myIdx = layerOrder.indexOf(myLayer);
 		for (const imp of info.imports) {
 			const impLayer = moduleLayer.get(imp);
 			if (impLayer && impLayer !== myLayer) {
-				totalCrossLayer++;
+				_totalCrossLayer++;
 				const impIdx = layerOrder.indexOf(impLayer);
 				if (impIdx < myIdx) violations++; // importing from layer ABOVE = violation
 			}

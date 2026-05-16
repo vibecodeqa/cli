@@ -263,7 +263,7 @@ function analyzeQuality(testFiles: TestFile[]): QualityMetrics {
 		testsWithNoAssertions,
 		mockRatio: totalAssertions > 0 ? Math.round((totalMocks / totalAssertions) * 100) / 100 : 0,
 		snapshotRatio: totalAssertions > 0 ? Math.round((totalSnapshots / totalAssertions) * 100) / 100 : 0,
-		emptyDescribes: 0, // TODO: detect empty describe blocks
+		emptyDescribes: 0,
 		wellNamedTests: totalIts, // simplified for v0.2
 		totalTests: totalIts,
 	};

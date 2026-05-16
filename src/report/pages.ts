@@ -2,7 +2,13 @@
 
 import { getCheckMeta } from "../check-meta.js";
 import { loadHistory } from "../history.js";
-import { generateArchSVG, generateDSM, generateLayerDiagram, generatePackageDiagram, generateSequenceDiagram } from "../runners/architecture.js";
+import {
+	generateArchSVG,
+	generateDSM,
+	generateLayerDiagram,
+	generatePackageDiagram,
+	generateSequenceDiagram,
+} from "../runners/architecture.js";
 import type { CheckResult, VibeReport } from "../types.js";
 import { det, e, gc, pc } from "./components.js";
 import { buildPyramid, buildRadar, buildRing, buildTimeline } from "./svg.js";
@@ -274,16 +280,18 @@ ${heatmapRows}`;
 // ── Architecture section renderer ────────────────────────
 
 function renderArchSection(details: Record<string, unknown>): string {
-	const assessment = details.assessment as {
-		pattern: string;
-		patternDescription: string;
-		layering: string;
-		stability: { package: string; instability: number; role: string }[];
-		crossCoupling: number;
-		cohesion: number;
-		rating: string;
-		insights: string[];
-	} | undefined;
+	const assessment = details.assessment as
+		| {
+				pattern: string;
+				patternDescription: string;
+				layering: string;
+				stability: { package: string; instability: number; role: string }[];
+				crossCoupling: number;
+				cohesion: number;
+				rating: string;
+				insights: string[];
+		  }
+		| undefined;
 
 	let html = "";
 
@@ -362,15 +370,18 @@ export function trendsPage(historyDir: string | undefined): string {
 	// Per-check mini charts
 	const checkCharts = checkNames
 		.map((name) => {
-			const data = history
-				.map((h) => ({ score: h.checkScores.get(name) ?? 0, timestamp: h.timestamp }))
-				.filter((d) => d.score > 0);
+			const data = history.map((h) => ({ score: h.checkScores.get(name) ?? 0, timestamp: h.timestamp })).filter((d) => d.score > 0);
 			if (data.length < 2) return "";
 
 			const current = data[data.length - 1].score;
 			const prev = data[data.length - 2].score;
 			const delta = current - prev;
-			const deltaStr = delta > 0 ? `<span style="color:var(--pass)">+${delta}</span>` : delta < 0 ? `<span style="color:var(--fail)">${delta}</span>` : `<span class="muted">=</span>`;
+			const deltaStr =
+				delta > 0
+					? `<span style="color:var(--pass)">+${delta}</span>`
+					: delta < 0
+						? `<span style="color:var(--fail)">${delta}</span>`
+						: `<span class="muted">=</span>`;
 			const color = current >= 90 ? "var(--pass)" : current >= 75 ? "#84cc16" : current >= 60 ? "var(--warn)" : "var(--fail)";
 
 			const chart = buildTimeline(data, { width: 300, height: 60 });
@@ -394,7 +405,12 @@ export function trendsPage(historyDir: string | undefined): string {
 			return { name, first, last, delta };
 		})
 		.filter(Boolean)
-		.sort((a, b) => (b as { delta: number }).delta - (a as { delta: number }).delta) as { name: string; first: number; last: number; delta: number }[];
+		.sort((a, b) => (b as { delta: number }).delta - (a as { delta: number }).delta) as {
+		name: string;
+		first: number;
+		last: number;
+		delta: number;
+	}[];
 
 	const deltaTable = deltaRows
 		.map((r) => {

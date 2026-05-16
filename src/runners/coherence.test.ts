@@ -5,14 +5,14 @@ import { describe, expect, it } from "vitest";
 import { runCodeCoherence } from "./code-coherence.js";
 import { runDocCoherence } from "./doc-coherence.js";
 
-function makeProject(files?: Record<string, string>): string {
+function _makeProject(files?: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-coh-"));
 	writeFileSync(join(dir, "package.json"), "{}");
 	mkdirSync(join(dir, "src"), { recursive: true });
 	if (files) {
 		for (const [name, content] of Object.entries(files)) {
 			writeFileSync(
-				join(dir, name.startsWith("src/") ? name.replace("src/", join(dir, "src") + "/").replace(join(dir, ""), "") : name),
+				join(dir, name.startsWith("src/") ? name.replace("src/", `${join(dir, "src")}/`).replace(join(dir, ""), "") : name),
 				content,
 			);
 		}

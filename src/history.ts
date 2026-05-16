@@ -22,7 +22,7 @@ export function loadHistory(historyDir: string): HistoryEntry[] {
 	for (const file of files) {
 		try {
 			const raw: VibeReport = JSON.parse(readFileSync(join(historyDir, file), "utf-8"));
-			if (raw.score == null || !raw.checks) continue;
+			if (raw.score === null || raw.score === undefined || !raw.checks) continue;
 			const checkScores = new Map<string, number>();
 			for (const c of raw.checks) {
 				checkScores.set(c.name, c.score);
