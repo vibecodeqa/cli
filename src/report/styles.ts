@@ -153,6 +153,21 @@ h3{font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:
 .pro-cta{color:#6366f1;font-size:0.72rem;font-weight:600;margin-top:1rem}
 .sn-pro{opacity:0.7}
 
+/* ── Trends page ── */
+.trend-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1rem;margin-top:0.5rem}
+.trend-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:0.8rem}
+.trend-header{display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem}
+.trend-name{font-size:0.78rem;font-weight:700;flex:1}
+.trend-score{font-size:1.1rem;font-weight:900}
+.trend-chart{overflow:hidden}
+.trend-chart svg{width:100%;height:60px}
+.trend-table{margin-bottom:1.5rem}
+.trend-row{display:flex;align-items:center;gap:0.5rem;padding:0.25rem 0;border-bottom:1px solid var(--border);font-size:0.75rem}
+.trend-row-name{flex:1;font-weight:600}
+.trend-row-val{width:2rem;text-align:center;color:var(--muted)}
+.trend-row-arrow{color:var(--muted);font-size:0.6rem}
+.trend-row-delta{width:2.5rem;text-align:right;font-weight:700}
+
 .footer{text-align:center;color:var(--muted);font-size:0.58rem;margin-top:2rem;padding:0.8rem 0;border-top:1px solid var(--border)}
 .footer a{color:var(--muted)}
 .flink{color:var(--accent);text-decoration:none;font-family:"SF Mono",monospace}.flink:hover{text-decoration:underline}

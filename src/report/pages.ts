@@ -290,3 +290,83 @@ export function filesPage(
 	} checks.</p>
 ${heatmapRows}`;
 }
+
+// ── Trends page ──────────────────────────────────────────
+
+export function trendsPage(historyDir: string | undefined): string {
+	if (!historyDir) {
+		return `<h2>Trends</h2><p class="muted">No history data yet. Run the scanner multiple times to see trends.</p>`;
+	}
+
+	const history = loadHistory(historyDir);
+	if (history.length < 2) {
+		return `<h2>Trends</h2><p class="muted">Need at least 2 scans to show trends. Run the scanner again.</p>`;
+	}
+
+	// Overall score timeline (large)
+	const overallChart = buildTimeline(
+		history.map((h) => ({ score: h.score, timestamp: h.timestamp })),
+		{ width: 700, height: 150 },
+	);
+
+	// Collect all check names from latest entry
+	const latest = history[history.length - 1];
+	const checkNames = [...latest.checkScores.keys()];
+
+	// Per-check mini charts
+	const checkCharts = checkNames
+		.map((name) => {
+			const data = history
+				.map((h) => ({ score: h.checkScores.get(name) ?? 0, timestamp: h.timestamp }))
+				.filter((d) => d.score > 0);
+			if (data.length < 2) return "";
+
+			const current = data[data.length - 1].score;
+			const prev = data[data.length - 2].score;
+			const delta = current - prev;
+			const deltaStr = delta > 0 ? `<span style="color:var(--pass)">+${delta}</span>` : delta < 0 ? `<span style="color:var(--fail)">${delta}</span>` : `<span class="muted">=</span>`;
+			const color = current >= 90 ? "var(--pass)" : current >= 75 ? "#84cc16" : current >= 60 ? "var(--warn)" : "var(--fail)";
+
+			const chart = buildTimeline(data, { width: 300, height: 60 });
+
+			return `<div class="trend-card">
+<div class="trend-header"><span class="trend-name">${name}</span><span class="trend-score" style="color:${color}">${current}</span>${deltaStr}</div>
+<div class="trend-chart">${chart}</div>
+</div>`;
+		})
+		.filter(Boolean)
+		.join("");
+
+	// Score delta table
+	const deltaRows = checkNames
+		.map((name) => {
+			const scores = history.map((h) => h.checkScores.get(name) ?? 0);
+			const first = scores.find((s) => s > 0) ?? 0;
+			const last = scores[scores.length - 1];
+			const delta = last - first;
+			if (first === 0 && last === 0) return "";
+			return { name, first, last, delta };
+		})
+		.filter(Boolean)
+		.sort((a, b) => (b as { delta: number }).delta - (a as { delta: number }).delta) as { name: string; first: number; last: number; delta: number }[];
+
+	const deltaTable = deltaRows
+		.map((r) => {
+			const clr = r.delta > 0 ? "var(--pass)" : r.delta < 0 ? "var(--fail)" : "var(--muted)";
+			return `<div class="trend-row"><span class="trend-row-name">${r.name}</span><span class="trend-row-val">${r.first}</span><span class="trend-row-arrow">\u2192</span><span class="trend-row-val">${r.last}</span><span class="trend-row-delta" style="color:${clr}">${r.delta > 0 ? "+" : ""}${r.delta}</span></div>`;
+		})
+		.join("");
+
+	return `
+<h2>Trends</h2>
+<p class="muted" style="font-size:0.78rem;margin-bottom:1.5rem">${history.length} scans from ${history[0].timestamp.split("T")[0]} to ${latest.timestamp.split("T")[0]}</p>
+
+<h3>Overall Score</h3>
+<div class="timeline">${overallChart}</div>
+
+<h3 style="margin-top:2rem">Score Changes (first \u2192 latest)</h3>
+<div class="trend-table">${deltaTable}</div>
+
+<h3 style="margin-top:2rem">Per-Check Trends</h3>
+<div class="trend-grid">${checkCharts}</div>`;
+}

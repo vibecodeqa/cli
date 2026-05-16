@@ -15,7 +15,7 @@ import { getCheckMeta } from "../check-meta.js";
 import type { CheckResult, VibeReport } from "../types.js";
 import { det, e, fileLink, gc } from "./components.js";
 import { FAVICON_SVG } from "./favicon.js";
-import { type CatScore, categoryPage, filesPage, issuesPage, overviewPage } from "./pages.js";
+import { type CatScore, categoryPage, filesPage, issuesPage, overviewPage, trendsPage } from "./pages.js";
 import { CSS } from "./styles.js";
 
 export const GROUPS: { id: string; label: string; file: string; checks: string[] }[] = [
@@ -138,6 +138,15 @@ export function generatePages(report: VibeReport, historyDir?: string): Map<stri
 		sidebarViews(totalIssues, fileIssues.size);
 	pages.set("files.html", w("files", filesSidebar, filesPage(topFiles, fileIssues, fl)));
 
+	// ── Trends page ──
+	const trendsSidebar =
+		sidebarScore(report) +
+		`<div class="side-section"><div class="side-cat-title">History</div>` +
+		`<div class="side-stat"><span style="color:var(--text)">${historyDir ? "30" : "0"}</span> scans stored</div>` +
+		`</div>` +
+		sidebarViews(totalIssues, fileIssues.size);
+	pages.set("trends.html", w("trends", trendsSidebar, trendsPage(historyDir)));
+
 	return pages;
 }
 
@@ -161,6 +170,7 @@ function wrap(proj: string, currentId: string, report: VibeReport, totalIssues: 
 	const navItems = [
 		{ id: "overview", label: "Overview", file: "index.html" },
 		...GROUPS.map((g) => ({ id: g.id, label: g.label, file: g.file })),
+		{ id: "trends", label: "Trends", file: "trends.html" },
 		{ id: "issues", label: `Issues (${totalIssues})`, file: "issues.html" },
 		{ id: "files", label: "Files", file: "files.html" },
 	];
