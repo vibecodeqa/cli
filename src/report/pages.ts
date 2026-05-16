@@ -133,23 +133,13 @@ ${fileHotspotsHtml}
 // ── Single category page ──────────────────────────────────────────
 
 export function categoryPage(cs: CatScore, fl: FL): string {
-	const subNav = cs.checks
-		.map((c, i) => {
-			const sk = det(c).skipped;
-			const premium = det(c).comingSoon;
-			const badge = premium ? "PRO" : sk ? "\u2014" : c.grade;
-			const clr = premium ? "#6366f1" : sk ? "#555" : gc(c.grade);
-			return `<a class="sn${i === 0 ? " active" : ""}${premium ? " sn-pro" : ""}" data-sub="${cs.id}-${c.name}" onclick="sub(this,'${cs.id}')">${e(c.name)} <span style="color:${clr}">${badge}</span></a>`;
-		})
-		.join("");
-
-	const subPages = cs.checks
-		.map((c, i) => {
+	const checkSections = cs.checks
+		.map((c) => {
 			const meta = getCheckMeta(c.name);
 			const sk = det(c).skipped;
 			const premium = det(c).comingSoon;
 			const detailsFiltered = Object.entries(c.details)
-				.filter(([k]) => k !== "skipped" && k !== "reason" && k !== "graph")
+				.filter(([k]) => k !== "skipped" && k !== "reason" && k !== "graph" && k !== "containerSvg" && k !== "assessment")
 				.map(([k, v]) => {
 					const d = Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : String(v);
 					return `<div class="kv"><span class="k">${e(k)}</span><span class="v">${e(d)}</span></div>`;
@@ -189,27 +179,18 @@ export function categoryPage(cs: CatScore, fl: FL): string {
 			if (premium) {
 				const d = c.details as Record<string, unknown>;
 				const desc = (d.description as string) || meta.description;
-				const detailKvs = Object.entries(d)
-					.filter(([k]) => !["premium", "comingSoon", "reason", "description"].includes(k))
-					.map(
-						([k, v]) =>
-							`<div class="kv"><span class="k">${e(k)}</span><span class="v">${e(Array.isArray(v) ? v.join(", ") : String(v))}</span></div>`,
-					)
-					.join("");
-
-				return `<div class="sp${i === 0 ? " active" : ""}" data-sub="${cs.id}-${c.name}">
+				return `<section class="check-section" id="${c.name}">
 <div class="pro-card">
 <div class="pro-badge">PRO</div>
 <h3 style="margin-bottom:0.5rem;color:var(--text)">${e(meta.label)}</h3>
 <p class="pro-desc">${e(desc)}</p>
 ${meta.risk ? `<div class="info-panel"><div class="ip-row"><span class="ip-label">Risk</span><span>${e(meta.risk)}</span></div></div>` : ""}
-${detailKvs ? `<div class="kvs" style="margin-top:0.8rem">${detailKvs}</div>` : ""}
 <p class="pro-cta">Coming soon with VibeCode QA Pro</p>
 </div>
-</div>`;
+</section>`;
 			}
 
-			return `<div class="sp${i === 0 ? " active" : ""}" data-sub="${cs.id}-${c.name}">
+			return `<section class="check-section" id="${c.name}">
 <div class="ch-head"><span class="ch-g" style="color:${sk ? "#555" : gc(c.grade)}">${sk ? "\u2014" : c.grade}</span><div><b>${e(meta.label)}</b><span class="ch-s">${sk ? "skipped" : `${c.score}/100`} \u00b7 weight ${meta.weight}% \u00b7 ${c.duration}ms \u00b7 ${c.issues.length} issues</span></div><span class="pri" style="color:${pc(meta.priority)}">${meta.priority}</span></div>
 ${meta.description ? `<div class="info-panel"><div class="ip-row"><span class="ip-label">What</span><span>${e(meta.description)}</span></div><div class="ip-row"><span class="ip-label">Risk</span><span>${e(meta.risk)}</span></div><div class="ip-row"><span class="ip-label">Fix</span><span>${e(meta.recommendation)}</span></div></div>` : ""}
 ${sk ? `<p class="skip-r">${e(det(c).reason || "skipped")}</p>` : ""}
@@ -217,7 +198,7 @@ ${c.name === "architecture" && !sk ? renderArchSection(c.details) : ""}
 ${c.name === "testing" && !sk && det(c).pyramid ? `<div class="arch-svg">${buildPyramid(det(c).pyramid as { unit: number; integration: number; component: number; e2e: number })}</div>` : ""}
 ${detailsFiltered ? `<div class="kvs">${detailsFiltered}</div>` : ""}
 ${issuesHtml ? `<div class="iss-list">${issuesHtml}</div>` : '<p style="color:var(--muted);font-size:0.8rem;margin-top:1rem">No issues found.</p>'}
-</div>`;
+</section>`;
 		})
 		.join("");
 
@@ -225,8 +206,7 @@ ${issuesHtml ? `<div class="iss-list">${issuesHtml}</div>` : '<p style="color:va
 	return `
 <div class="cat-head"><span style="color:${clr};font-size:1.8rem;font-weight:900">${cs.avg}</span><span style="color:${clr}">/100</span><span style="color:var(--muted);margin-left:0.5rem">${cs.label}</span></div>
 <div class="bar2"><div class="bf2" style="width:${cs.avg}%;background:${clr}"></div></div>
-<div class="sub-nav">${subNav}</div>
-${subPages}`;
+${checkSections}`;
 }
 
 // ── Issues view ──────────────────────────────────────────

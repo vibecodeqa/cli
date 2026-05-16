@@ -92,7 +92,7 @@ export function generatePages(report: VibeReport, historyDir?: string): Map<stri
 					const badge = premium
 						? `<span style="color:#6366f1">PRO</span>`
 						: `<span style="color:${sk ? "#555" : gc(c.grade)}">${sk ? "\u2014" : c.grade} ${sk ? "" : c.score}</span>`;
-					sb += `<a class="side-check" onclick="let t=document.querySelector('[data-sub=\\'${cs.id}-${c.name}\\']');if(t)sub(t,'${cs.id}')" title="${e(meta.label)}">${badge} ${e(meta.label)}</a>`;
+					sb += `<a class="side-check" href="${cs.file}#${c.name}" title="${e(meta.label)}">${badge} ${e(meta.label)}</a>`;
 				}
 			}
 		}

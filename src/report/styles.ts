@@ -85,13 +85,10 @@ h3{font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:
 
 /* ── Category pages ── */
 .cat-head{margin-bottom:0.3rem}
-.bar2{height:4px;background:var(--card);border-radius:2px;margin-bottom:1rem;overflow:hidden}
+.bar2{height:4px;background:var(--card);border-radius:2px;margin-bottom:1.5rem;overflow:hidden}
 .bf2{height:100%;border-radius:2px}
-.sub-nav{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:1rem;flex-wrap:wrap}
-.sn{padding:0.5rem 0.8rem;font-size:0.75rem;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
-.sn:hover{color:var(--text)}
-.sn.active{color:var(--text);border-bottom-color:var(--accent)}
-.sp{display:none}.sp.active{display:block}
+.check-section{margin-bottom:2.5rem;padding-top:0.5rem;border-top:1px solid var(--border)}
+.check-section:first-of-type{border-top:none}
 
 /* ── Check detail ── */
 .ch-head{display:flex;align-items:center;gap:0.7rem;margin-bottom:0.8rem}
