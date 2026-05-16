@@ -1,0 +1,9 @@
+# Global owners — all changes require review
+* @serge-ivo
+
+# CI/CD changes
+.github/ @serge-ivo
+
+# Core engine
+src/runners/ @serge-ivo
+src/report/ @serge-ivo

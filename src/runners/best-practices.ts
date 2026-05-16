@@ -286,12 +286,15 @@ export function runBestPractices(cwd: string): CheckResult {
 
 	// ── 9. Monitoring & Observability ──
 
-	// Error tracking (Sentry, Bugsnag, etc.)
-	practices++;
-	if (deps["@sentry/node"] || deps["@sentry/react"] || deps["@sentry/browser"] || deps.bugsnag || deps["@bugsnag/js"]) {
-		followed++;
-	} else {
-		issues.push({ severity: "info", message: "No error tracking (Sentry/Bugsnag) — production errors may go unnoticed", rule: "error-tracking" });
+	// Error tracking (Sentry, Bugsnag, etc.) — only for apps/servers, not CLI tools
+	const isApp = deps.react || deps.vue || deps.svelte || deps.express || deps.fastify || deps.hono || deps.next || deps.nuxt;
+	if (isApp) {
+		practices++;
+		if (deps["@sentry/node"] || deps["@sentry/react"] || deps["@sentry/browser"] || deps.bugsnag || deps["@bugsnag/js"]) {
+			followed++;
+		} else {
+			issues.push({ severity: "info", message: "No error tracking (Sentry/Bugsnag) — production errors may go unnoticed", rule: "error-tracking" });
+		}
 	}
 
 	// ── 10. API & Configuration ──
