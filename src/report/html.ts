@@ -105,7 +105,7 @@ export function generatePages(report: VibeReport, historyDir?: string): Map<stri
 					const badge = premium
 						? `<span style="color:#6366f1">PRO</span>`
 						: `<span style="color:${sk ? "#555" : gc(c.grade)}">${sk ? "\u2014" : c.grade} ${sk ? "" : c.score}</span>`;
-					return `<a class="side-check" onclick="var t=document.querySelector('[data-sub=\\'${cs.id}-${c.name}\\']');if(t)sub(t,'${cs.id}')" title="${e(meta.label)}">${badge} ${e(meta.label)}</a>`;
+					return `<a class="side-check" onclick="let t=document.querySelector('[data-sub=\\'${cs.id}-${c.name}\\']');if(t)sub(t,'${cs.id}')" title="${e(meta.label)}">${badge} ${e(meta.label)}</a>`;
 				})
 				.join("") +
 			`</div>` +
@@ -203,10 +203,10 @@ function sub(el,cat){
   document.querySelectorAll('.sp').forEach(s=>{s.classList.toggle('active',s.dataset.sub===id)});
 }
 document.addEventListener('click',function(ev){
-  var btn=ev.target.closest('.cp-btn');
+  const btn=ev.target.closest('.cp-btn');
   if(!btn)return;
-  var text=btn.dataset.prompt||'';
-  try{navigator.clipboard.writeText(text)}catch(e){var ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta)}
+  const text=btn.dataset.prompt||'';
+  try{navigator.clipboard.writeText(text)}catch(e){const ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta)}
   btn.textContent='\\u2713';setTimeout(function(){btn.textContent='\\ud83d\\udccb'},1000);
 });
 </script>

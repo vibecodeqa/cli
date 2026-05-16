@@ -70,7 +70,13 @@ function color(grade: string): string {
 	return "\x1b[31m";
 }
 
-function runChecks(cwd: string, stack: ReturnType<typeof detectStack>, skipTests: boolean, isDart: boolean, jsonOnly: boolean): CheckResult[] {
+function runChecks(
+	cwd: string,
+	stack: ReturnType<typeof detectStack>,
+	skipTests: boolean,
+	isDart: boolean,
+	jsonOnly: boolean,
+): CheckResult[] {
 	const runners: { name: string; fn: () => CheckResult }[] = [
 		// Foundations
 		{ name: "structure", fn: () => runStructure(cwd, stack) },

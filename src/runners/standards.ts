@@ -39,7 +39,12 @@ const CODE_SMELLS: PatternCheck[] = [
 		message: "dangerouslySetInnerHTML bypasses React's XSS protection",
 	},
 	{ name: "document.write", pattern: /document\.write\s*\(/, severity: "error", message: "document.write blocks rendering" },
-	{ name: "http:// URL", pattern: /['"]http:\/\/(?!localhost|127\.0\.0\.1|www\.w3\.org|schemas?\.)/, severity: "warning", message: "Non-HTTPS URL — use https://" },
+	{
+		name: "http:// URL",
+		pattern: /['"]http:\/\/(?!localhost|127\.0\.0\.1|www\.w3\.org|schemas?\.)/,
+		severity: "warning",
+		message: "Non-HTTPS URL — use https://",
+	},
 	{ name: "TODO/FIXME", pattern: /\b(TODO|FIXME|HACK|XXX)\b/, severity: "warning", message: "Unresolved TODO/FIXME comment" },
 	{
 		name: "magic number",

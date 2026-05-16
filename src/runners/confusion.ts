@@ -268,8 +268,7 @@ function extractExports(content: string): string[] {
 		/export\s+type\s+(\w+)/g,
 	];
 	for (const pat of patterns) {
-		let match;
-		while ((match = pat.exec(content)) !== null) {
+		for (const match of content.matchAll(pat)) {
 			exports.push(match[1]);
 		}
 	}

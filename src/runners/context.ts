@@ -147,8 +147,7 @@ export function runContext(cwd: string): CheckResult {
 function parseImports(content: string): string[] {
 	const imports: string[] = [];
 	const regex = /import\s+(?:[\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g;
-	let match;
-	while ((match = regex.exec(content)) !== null) {
+	for (const match of content.matchAll(regex)) {
 		const path = match[1];
 		// Only count local imports (starting with . or /)
 		if (path.startsWith(".") || path.startsWith("/")) {
