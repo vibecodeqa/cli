@@ -15,6 +15,7 @@ export interface Issue {
 	file?: string;
 	line?: number;
 	rule?: string;
+	snippet?: string; // copyable code snippet (e.g., duplicated block for search)
 }
 
 export interface VibeReport {

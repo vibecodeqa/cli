@@ -94,12 +94,15 @@ export function runDuplication(cwd: string): CheckResult {
 		const lines = d.content.split("\n").slice(0, 3);
 		const preview = lines.join(" \u2502 "); // use │ separator
 		const maxLen = 120;
-		const truncated = preview.length > maxLen ? `${preview.slice(0, preview.lastIndexOf(" ", maxLen))}...` : preview;
+		const truncated = preview.length > maxLen ? `${preview.slice(0, preview.lastIndexOf(" ", maxLen) || maxLen)}...` : preview;
+		// First line of content is the best search string
+		const searchSnippet = d.content.split("\n")[0];
 		issues.push({
 			severity: "warning",
 			message: `Duplicate (${d.lines} lines): ${truncated}`,
 			file: `${d.fileA}:${d.lineA} ↔ ${d.fileB}:${d.lineB}`,
 			rule: "duplicate-code",
+			snippet: searchSnippet,
 		});
 	}
 
