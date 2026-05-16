@@ -53,4 +53,4 @@ jobs:
 
       - name: Publish via OIDC trusted publishing
         if: steps.decide.outputs.publish == 'true'
-        run: npx npm@latest publish --access public --provenance
+        run: npm publish --access public --provenance
