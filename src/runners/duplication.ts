@@ -13,6 +13,7 @@ interface DuplicateBlock {
 	fileB: string;
 	lineB: number;
 	lines: number;
+	content: string;
 }
 
 export function runDuplication(cwd: string): CheckResult {
@@ -71,7 +72,7 @@ export function runDuplication(cwd: string): CheckResult {
 	const duplicates: DuplicateBlock[] = [];
 	const seen = new Set<string>();
 
-	for (const [_key, locs] of lineMap) {
+	for (const [key, locs] of lineMap) {
 		if (locs.length < 2) continue;
 		// Deduplicate: same file, adjacent lines are the same block
 		const unique = locs.filter((l, i) => i === 0 || l.file !== locs[i - 1].file || l.line > locs[i - 1].line + MIN_LINES);
@@ -84,14 +85,17 @@ export function runDuplication(cwd: string): CheckResult {
 			const pairKey = `${a.file}:${a.line}-${b.file}:${b.line}`;
 			if (seen.has(pairKey)) continue;
 			seen.add(pairKey);
-			duplicates.push({ fileA: a.file, lineA: a.line, fileB: b.file, lineB: b.line, lines: MIN_LINES });
+			duplicates.push({ fileA: a.file, lineA: a.line, fileB: b.file, lineB: b.line, lines: MIN_LINES, content: key });
 		}
 	}
 
 	for (const d of duplicates.slice(0, 20)) {
+		// Show first 2 lines of the duplicated content as preview
+		const preview = d.content.split("\n").slice(0, 2).join(" | ");
+		const truncated = preview.length > 80 ? `${preview.slice(0, 80)}...` : preview;
 		issues.push({
 			severity: "warning",
-			message: `${MIN_LINES}-line duplicate block`,
+			message: `Duplicate (${d.lines} lines): ${truncated}`,
 			file: `${d.fileA}:${d.lineA} ↔ ${d.fileB}:${d.lineB}`,
 			rule: "duplicate-code",
 		});
