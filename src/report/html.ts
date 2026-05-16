@@ -15,6 +15,7 @@ import { getCheckMeta } from "../check-meta.js";
 import type { CheckResult, VibeReport } from "../types.js";
 import { e, fileLink, gc } from "./components.js";
 import { categoryPage, filesPage, issuesPage, overviewPage, type CatScore } from "./pages.js";
+import { FAVICON_SVG } from "./favicon.js";
 import { CSS } from "./styles.js";
 
 export const GROUPS: { id: string; label: string; file: string; checks: string[] }[] = [
@@ -156,6 +157,7 @@ function wrap(proj: string, currentId: string, report: VibeReport, totalIssues: 
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}">
 <title>VibeCode QA \u2014 ${e(proj)}</title>
 <style>${CSS}</style>
 </head>
