@@ -640,11 +640,10 @@ export function generateSequenceDiagram(details: Record<string, unknown>): strin
 		const toX = 20 + (i + 1) * lifelineSpacing + lifelineSpacing / 2;
 		const y = headerH + i * messageH;
 
-		// Arrow
+		// Arrow with target module name as label
 		svg += `<line x1="${fromX}" y1="${y}" x2="${toX - 6}" y2="${y}" stroke="#6d78d0" stroke-width="1.5" marker-end="url(#seq-arrow)"/>`;
-		// Label (the import)
-		const label = `import`;
-		svg += `<text x="${(fromX + toX) / 2}" y="${y - 6}" text-anchor="middle" fill="#6b7280" font-size="7">${label}</text>`;
+		const target = participants[i + 1];
+		svg += `<text x="${(fromX + toX) / 2}" y="${y - 6}" text-anchor="middle" fill="#6b7280" font-size="7">import ./${target}</text>`;
 	}
 
 	// Arrow marker
