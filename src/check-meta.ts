@@ -175,7 +175,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		label: "Architecture",
 		category: "Architecture",
 		priority: "high",
-		weight: 6,
+		weight: 5,
 		description:
 			"Analyzes the import graph to detect structural problems: circular dependencies, god modules (imported by >50% of files), orphan modules (dead code), high fan-out (importing too many modules), and connector modules (high coupling). Generates an SVG architecture diagram.",
 		risk: "Circular dependencies create build order issues and make refactoring impossible without breaking changes. God modules become bottlenecks — any change ripples through the entire codebase. High coupling means you can't change one module without testing everything it touches.",
@@ -187,7 +187,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		label: "Confusion Index",
 		category: "LLM Readiness",
 		priority: "high",
-		weight: 7,
+		weight: 6,
 		description:
 			"Measures naming ambiguity that causes LLMs to misunderstand or edit the wrong code. Checks: file name confusability (Levenshtein distance + synonym detection), generic function/variable names, export name collisions across files, and ambiguous abbreviations.",
 		risk: "GPT-4o drops 28.6 percentage points on code summarization when names are ambiguous (arXiv:2510.03178). LLMs editing similar-named files is the #1 reported failure mode in AI-assisted development. Generic names like process(), handle(), data cause models to misinterpret intent.",
@@ -199,7 +199,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		label: "Context Locality",
 		category: "LLM Readiness",
 		priority: "high",
-		weight: 6,
+		weight: 5,
 		description:
 			"Measures how self-contained code is for LLM consumption. Checks: token density per file, import count, circular dependencies, and context sinks (files that import many modules but export little). Based on the finding that LLMs lose 30%+ accuracy for information in the middle of long contexts.",
 		risk: "Files over ~4000 tokens exceed the 'sweet spot' for LLM attention (Liu et al. 2023 'Lost in the Middle'). Circular dependencies create infinite loops in LLM code navigation. Heavy import chains force LLMs to load many files, burning context window budget (Chroma 'Context Rot' 2025).",
@@ -241,6 +241,18 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		risk: "Barrel files (index.ts re-exports) prevent bundlers from tree-shaking unused code, bloating bundles by 2-10x. Heavy dependencies like moment.js add 300KB when date-fns does the same in 7KB. Static imports of visualization libraries delay initial page load.",
 		recommendation:
 			"Replace barrel re-exports with direct imports. Swap heavy deps for lighter alternatives. Use dynamic import() for large libraries only needed on interaction. Prefer zero-runtime CSS (Tailwind, CSS Modules) over styled-components.",
+	},
+	"best-practices": {
+		name: "best-practices",
+		label: "Best Practices",
+		category: "Quality",
+		priority: "medium",
+		weight: 3,
+		description:
+			"Advisory check for industry-standard CI/CD, supply chain, and repo hygiene practices. Checks: GitHub Actions with explicit permissions, OIDC instead of long-lived tokens, pinned action SHAs, frozen lockfile in CI, committed lockfile, engine constraints, SECURITY.md, CODEOWNERS, CONTRIBUTING.md, .env.example, pre-commit hooks, automated dependency updates (Dependabot/Renovate).",
+		risk: "Missing CI/CD practices lead to supply chain attacks (tj-actions breach affected 23,000 repos in 2025). Long-lived tokens can be stolen from CI logs. Unpinned actions allow tag-poisoning. No lockfile means non-reproducible builds. No SECURITY.md means vulnerabilities go unreported.",
+		recommendation:
+			"Pin third-party actions to SHA. Use OIDC trusted publishing instead of tokens. Set explicit permissions in workflows. Add SECURITY.md, CODEOWNERS, and CONTRIBUTING.md. Configure Dependabot or Renovate for automated dependency updates. Add pre-commit hooks.",
 	},
 	"doc-coherence": {
 		name: "doc-coherence",

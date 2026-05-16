@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { detectRepoUrl, detectStack } from "./detect.js";
 import { generatePages } from "./report/html.js";
 import { runArchitecture } from "./runners/architecture.js";
+import { runBestPractices } from "./runners/best-practices.js";
 import { runComplexity } from "./runners/complexity.js";
 import { runConfusion } from "./runners/confusion.js";
 import { runContext } from "./runners/context.js";
@@ -88,6 +89,7 @@ async function main() {
 		{ name: "react", fn: () => runReact(cwd, stack) },
 		{ name: "accessibility", fn: () => runAccessibility(cwd) },
 		{ name: "docs", fn: () => runDocs(cwd) },
+		{ name: "best-practices", fn: () => runBestPractices(cwd) },
 		// Testing
 		{ name: "testing", fn: () => runTesting(cwd, stack, skipTests) },
 		// Security

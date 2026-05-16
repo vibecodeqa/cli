@@ -19,7 +19,7 @@ import { CSS } from "./styles.js";
 
 export const GROUPS: { id: string; label: string; file: string; checks: string[] }[] = [
 	{ id: "foundations", label: "Foundations", file: "foundations.html", checks: ["structure", "lint", "types", "type-safety", "standards"] },
-	{ id: "quality", label: "Quality", file: "quality.html", checks: ["complexity", "duplication", "error-handling", "react", "accessibility", "docs"] },
+	{ id: "quality", label: "Quality", file: "quality.html", checks: ["complexity", "duplication", "error-handling", "react", "accessibility", "docs", "best-practices"] },
 	{ id: "testing", label: "Testing", file: "testing.html", checks: ["testing"] },
 	{ id: "arch", label: "Architecture", file: "architecture.html", checks: ["architecture", "performance"] },
 	{ id: "security", label: "Security", file: "security.html", checks: ["secrets", "security", "dependencies"] },
