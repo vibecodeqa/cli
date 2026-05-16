@@ -23,8 +23,9 @@ code{font-family:"SF Mono",Menlo,monospace;font-size:0.85em}
 .side-section:last-child{border-bottom:none}
 .side-label{padding:0.2rem 0.8rem;font-size:0.6rem;text-transform:uppercase;letter-spacing:0.05em;color:#444;font-weight:600}
 .side-score{font-size:1.4rem;font-weight:900;padding:0.2rem 0.8rem}
-.side-cat{display:block;padding:0.3rem 0.8rem;color:var(--text);font-weight:700;cursor:pointer;text-decoration:none;font-size:0.72rem}
-.side-cat:hover{background:#14141a}
+.side-cat{display:block;padding:0.3rem 0.8rem;color:var(--muted);font-weight:600;cursor:pointer;text-decoration:none;font-size:0.72rem}
+.side-cat:hover{background:#14141a;color:var(--text)}
+.side-cat-active{color:var(--text);font-weight:700;border-left:2px solid var(--accent);padding-left:calc(0.8rem - 2px)}
 .side-cat-title{padding:0.3rem 0.8rem;font-size:0.65rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--accent);font-weight:700}
 .side-check{display:block;padding:0.15rem 0.8rem 0.15rem 0.8rem;color:var(--muted);cursor:pointer;text-decoration:none;font-size:0.65rem}
 .side-check:hover{color:var(--text);background:#14141a}
