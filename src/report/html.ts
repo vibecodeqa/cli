@@ -13,7 +13,7 @@
 
 import { getCheckMeta } from "../check-meta.js";
 import type { CheckResult, VibeReport } from "../types.js";
-import { e, fileLink, gc } from "./components.js";
+import { det, e, fileLink, gc } from "./components.js";
 import { categoryPage, filesPage, issuesPage, overviewPage, type CatScore } from "./pages.js";
 import { FAVICON_SVG } from "./favicon.js";
 import { CSS } from "./styles.js";
@@ -32,7 +32,7 @@ export function generatePages(report: VibeReport, historyDir?: string): Map<stri
 	const pages = new Map<string, string>();
 	const allChecks = report.checks;
 	const checkMap = new Map(allChecks.map((c) => [c.name, c]));
-	const active = allChecks.filter((c) => !(c.details as any).skipped && !(c.details as any).comingSoon);
+	const active = allChecks.filter((c) => !det(c).skipped && !det(c).comingSoon);
 	const ru = report.meta.repoUrl;
 	const br = report.meta.branch;
 	const fl = (path: string, line?: number) => fileLink(path, line, ru, br);
@@ -58,7 +58,7 @@ export function generatePages(report: VibeReport, historyDir?: string): Map<stri
 
 	const catScores: CatScore[] = GROUPS.map((g) => {
 		const checks = g.checks.map((n) => checkMap.get(n)).filter(Boolean) as CheckResult[];
-		const scored = checks.filter((c) => !(c.details as any).skipped);
+		const scored = checks.filter((c) => !det(c).skipped);
 		const avg = scored.length > 0 ? Math.round(scored.reduce((s, c) => s + c.score, 0) / scored.length) : 0;
 		return { ...g, avg, checks };
 	});
@@ -68,7 +68,7 @@ export function generatePages(report: VibeReport, historyDir?: string): Map<stri
 	// ── Overview: sidebar shows score + category summary ──
 	const overviewSidebar = sidebarScore(report)
 		+ catScores.map((cs) => {
-			const isPremium = cs.checks.every((c) => (c.details as any).comingSoon);
+			const isPremium = cs.checks.every((c) => det(c).comingSoon);
 			const clr = isPremium ? "#6366f1" : gc(cs.avg >= 90 ? "A" : cs.avg >= 75 ? "B" : cs.avg >= 60 ? "C" : cs.avg >= 40 ? "D" : "F");
 			const label = isPremium
 				? `<span class="pro-badge" style="font-size:0.5rem;padding:0.08rem 0.35rem">PRO</span>`
@@ -87,8 +87,8 @@ export function generatePages(report: VibeReport, historyDir?: string): Map<stri
 		const catSidebar = sidebarScore(report)
 			+ `<div class="side-section"><div class="side-cat-title">${cs.label}</div>`
 			+ cs.checks.map((c) => {
-				const sk = (c.details as any).skipped;
-				const premium = (c.details as any).comingSoon;
+				const sk = det(c).skipped;
+				const premium = det(c).comingSoon;
 				const meta = getCheckMeta(c.name);
 				const badge = premium ? `<span style="color:#6366f1">PRO</span>` : `<span style="color:${sk ? "#555" : gc(c.grade)}">${sk ? "\u2014" : c.grade} ${sk ? "" : c.score}</span>`;
 				return `<a class="side-check" onclick="var t=document.querySelector('[data-sub=\\'${cs.id}-${c.name}\\']');if(t)sub(t,'${cs.id}')" title="${e(meta.label)}">${badge} ${e(meta.label)}</a>`;

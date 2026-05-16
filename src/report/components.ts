@@ -1,6 +1,12 @@
 /** Reusable HTML components and helpers for the report. */
 
 import type { Priority } from "../check-meta.js";
+import type { CheckResult } from "../types.js";
+
+/** Type-safe accessor for check detail flags. */
+export function det(c: CheckResult): { skipped?: boolean; comingSoon?: boolean; reason?: string; [k: string]: unknown } {
+	return c.details as { skipped?: boolean; comingSoon?: boolean; reason?: string; [k: string]: unknown };
+}
 
 /** HTML-escape a string. */
 export function e(s: string): string {

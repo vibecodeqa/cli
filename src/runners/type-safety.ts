@@ -57,8 +57,9 @@ export function runTypeSafety(cwd: string, isDart = false): CheckResult {
 			const line = lines[i];
 			const trimmed = line.trim();
 			if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
-			// Skip pattern definition lines (prevents false positives when scanning own code)
+			// Skip pattern definition lines and string-heavy lines (prevents false positives)
 			if (/\bpattern\s*:|name:\s*["']|message:\s*["']|description:\s*["']|risk:\s*["']|recommendation:\s*["']/.test(trimmed)) continue;
+			if (/^\s*["'`].*["'`][,;]?\s*$/.test(line)) continue;
 
 			for (const p of PATTERNS) {
 				const matches = line.match(p.pattern);

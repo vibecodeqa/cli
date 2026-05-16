@@ -4,7 +4,7 @@ import { getCheckMeta } from "../check-meta.js";
 import { loadHistory } from "../history.js";
 import { generateArchSVG, generateDSM, generatePackageDiagram } from "../runners/architecture.js";
 import type { CheckResult, VibeReport } from "../types.js";
-import { e, gc, pc } from "./components.js";
+import { det, e, gc, pc } from "./components.js";
 import { buildPyramid, buildRadar, buildRing, buildTimeline } from "./svg.js";
 
 export interface CatScore {
@@ -46,7 +46,7 @@ export function overviewPage(
     </div>
   </div>`;
 
-	const scoredCats = catScores.filter((cs) => cs.checks.some((c) => !(c.details as any).skipped && !(c.details as any).comingSoon));
+	const scoredCats = catScores.filter((cs) => cs.checks.some((c) => !det(c).skipped && !det(c).comingSoon));
 	const radarSvg = scoredCats.length >= 3 ? buildRadar(scoredCats.map((cs) => ({ label: cs.label, score: cs.avg }))) : "";
 
 	const catCards = catScores
@@ -54,7 +54,7 @@ export function overviewPage(
 			const clr = gc(cs.avg >= 90 ? "A" : cs.avg >= 75 ? "B" : cs.avg >= 60 ? "C" : cs.avg >= 40 ? "D" : "F");
 			const mini = cs.checks
 				.map((c) => {
-					const sk = (c.details as any).skipped;
+					const sk = det(c).skipped;
 					return `<span class="mc" style="color:${sk ? "#555" : gc(c.grade)}" title="${e(c.name)}: ${sk ? "skip" : c.score}">${sk ? "\u2014" : c.grade}</span>`;
 				})
 				.join("");
@@ -129,8 +129,8 @@ ${fileHotspotsHtml}
 export function categoryPage(cs: CatScore, fl: FL): string {
 	const subNav = cs.checks
 		.map((c, i) => {
-			const sk = (c.details as any).skipped;
-			const premium = (c.details as any).comingSoon;
+			const sk = det(c).skipped;
+			const premium = det(c).comingSoon;
 			const badge = premium ? "PRO" : sk ? "\u2014" : c.grade;
 			const clr = premium ? "#6366f1" : sk ? "#555" : gc(c.grade);
 			return `<a class="sn${i === 0 ? " active" : ""}${premium ? " sn-pro" : ""}" data-sub="${cs.id}-${c.name}" onclick="sub(this,'${cs.id}')">${e(c.name)} <span style="color:${clr}">${badge}</span></a>`;
@@ -140,8 +140,8 @@ export function categoryPage(cs: CatScore, fl: FL): string {
 	const subPages = cs.checks
 		.map((c, i) => {
 			const meta = getCheckMeta(c.name);
-			const sk = (c.details as any).skipped;
-			const premium = (c.details as any).comingSoon;
+			const sk = det(c).skipped;
+			const premium = det(c).comingSoon;
 			const detailsFiltered = Object.entries(c.details)
 				.filter(([k]) => k !== "skipped" && k !== "reason" && k !== "graph")
 				.map(([k, v]) => {
@@ -181,9 +181,9 @@ export function categoryPage(cs: CatScore, fl: FL): string {
 			}
 
 			if (premium) {
-				const det = c.details as Record<string, unknown>;
-				const desc = (det.description as string) || meta.description;
-				const detailKvs = Object.entries(det)
+				const d = c.details as Record<string, unknown>;
+				const desc = (d.description as string) || meta.description;
+				const detailKvs = Object.entries(d)
 					.filter(([k]) => !["premium", "comingSoon", "reason", "description"].includes(k))
 					.map(([k, v]) => `<div class="kv"><span class="k">${e(k)}</span><span class="v">${e(Array.isArray(v) ? v.join(", ") : String(v))}</span></div>`)
 					.join("");
@@ -203,9 +203,9 @@ ${detailKvs ? `<div class="kvs" style="margin-top:0.8rem">${detailKvs}</div>` : 
 			return `<div class="sp${i === 0 ? " active" : ""}" data-sub="${cs.id}-${c.name}">
 <div class="ch-head"><span class="ch-g" style="color:${sk ? "#555" : gc(c.grade)}">${sk ? "\u2014" : c.grade}</span><div><b>${e(meta.label)}</b><span class="ch-s">${sk ? "skipped" : `${c.score}/100`} \u00b7 weight ${meta.weight}% \u00b7 ${c.duration}ms \u00b7 ${c.issues.length} issues</span></div><span class="pri" style="color:${pc(meta.priority)}">${meta.priority}</span></div>
 ${meta.description ? `<div class="info-panel"><div class="ip-row"><span class="ip-label">What</span><span>${e(meta.description)}</span></div><div class="ip-row"><span class="ip-label">Risk</span><span>${e(meta.risk)}</span></div><div class="ip-row"><span class="ip-label">Fix</span><span>${e(meta.recommendation)}</span></div></div>` : ""}
-${sk ? `<p class="skip-r">${e((c.details as any).reason || "skipped")}</p>` : ""}
+${sk ? `<p class="skip-r">${e(det(c).reason || "skipped")}</p>` : ""}
 ${c.name === "architecture" && !sk ? `<h3 style="margin-top:1.5rem">Dependency Graph</h3><div class="arch-svg">${generateArchSVG(c.details)}</div><h3 style="margin-top:1.5rem">Package Diagram</h3><div class="arch-svg">${generatePackageDiagram(c.details)}</div><h3 style="margin-top:1.5rem">Dependency Matrix (DSM)</h3><div class="arch-svg">${generateDSM(c.details)}</div>` : ""}
-${c.name === "testing" && !sk && (c.details as any).pyramid ? `<div class="arch-svg">${buildPyramid((c.details as any).pyramid)}</div>` : ""}
+${c.name === "testing" && !sk && det(c).pyramid ? `<div class="arch-svg">${buildPyramid(det(c).pyramid as { unit: number; integration: number; component: number; e2e: number })}</div>` : ""}
 ${detailsFiltered ? `<div class="kvs">${detailsFiltered}</div>` : ""}
 ${issuesHtml ? `<div class="iss-list">${issuesHtml}</div>` : '<p style="color:var(--muted);font-size:0.8rem;margin-top:1rem">No issues found.</p>'}
 </div>`;
