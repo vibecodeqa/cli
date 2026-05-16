@@ -8,8 +8,9 @@ code{font-family:"SF Mono",Menlo,monospace;font-size:0.85em}
 
 /* ── Top nav ── */
 .top{position:sticky;top:0;z-index:30;background:#0c0c0fdd;backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:0 1.5rem;display:flex;align-items:center;height:var(--top-h)}
-.logo{font-weight:800;font-size:1rem;margin-right:1rem;flex-shrink:0;text-decoration:none;color:var(--text)}
+.logo{font-weight:800;font-size:1rem;margin-right:0.5rem;flex-shrink:0;text-decoration:none;color:var(--text)}
 .logo span{color:var(--accent)}
+.nav-project{font-size:0.72rem;color:var(--muted);font-weight:600;margin-right:1rem;padding:0.2rem 0.5rem;background:var(--card);border:1px solid var(--border);border-radius:4px;flex-shrink:0}
 .nav-scroll{display:flex;align-items:center;gap:0;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;flex:1}
 .nav-scroll::-webkit-scrollbar{display:none}
 .tn{padding:0 0.7rem;font-size:0.78rem;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;transition:all 0.15s;white-space:nowrap;line-height:var(--top-h)}

@@ -166,6 +166,7 @@ function wrap(proj: string, currentId: string, report: VibeReport, totalIssues: 
 
 <nav class="top">
   <a class="logo" href="index.html"><span>VibeCode</span> QA</a>
+  <span class="nav-project">${e(proj)}</span>
   <button class="hamburger" onclick="toggleMenu()" aria-label="Menu">&#9776;</button>
   <div class="nav-scroll">${nav}</div>
 </nav>
