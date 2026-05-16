@@ -57,7 +57,7 @@ src/
     └── components.ts   # Helpers (HTML escape, file links, grade/priority colors)
 ```
 
-## 21 Checks across 7 categories
+## 22 Checks across 7 categories
 
 Weights sum to 100 (premium checks have weight 0).
 
