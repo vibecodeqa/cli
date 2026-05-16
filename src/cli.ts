@@ -43,6 +43,7 @@ const skipTests = flags.has("--skip-tests");
 const watchMode = flags.has("--watch");
 const badgeMode = flags.has("--badge");
 const sarifMode = flags.has("--sarif");
+const uploadMode = flags.has("--upload");
 
 function color(grade: string): string {
 	if (grade === "A") return "\x1b[32m";
@@ -180,6 +181,27 @@ async function main() {
 	if (sarifMode) {
 		const { generateSARIF } = await import("./report/sarif.js");
 		writeFileSync(join(outputDir, "report.sarif"), generateSARIF(report));
+	}
+
+	// Upload to VibeCode QA dashboard
+	if (uploadMode) {
+		const repo = report.meta.repoUrl?.replace(/^https:\/\/github\.com\//, "") || cwd.split("/").pop() || "project";
+		const token = process.env.VCQA_TOKEN || "";
+		try {
+			const res = await fetch("https://api.vibecodeqa.online/api/reports", {
+				method: "POST",
+				headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+				body: JSON.stringify({ repo, report }),
+			});
+			if (res.ok) {
+				const data = await res.json() as { totalReports?: number };
+				if (!jsonOnly) console.log(`  \x1b[32m\u2713 Uploaded to dashboard\x1b[0m \x1b[2m(${data.totalReports || 1} reports)\x1b[0m`);
+			} else if (!jsonOnly) {
+				console.log(`  \x1b[33m\u26a0 Upload failed: ${res.status}\x1b[0m \x1b[2m(set VCQA_TOKEN env var)\x1b[0m`);
+			}
+		} catch {
+			if (!jsonOnly) console.log(`  \x1b[33m\u26a0 Upload failed (network error)\x1b[0m`);
+		}
 	}
 
 	if (jsonOnly) {
