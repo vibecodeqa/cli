@@ -25,7 +25,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
@@ -51,9 +51,6 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Update npm for OIDC support
-        run: npm install -g npm@latest
-
       - name: Publish via OIDC trusted publishing
         if: steps.decide.outputs.publish == 'true'
-        run: npm publish --access public --provenance
+        run: npx npm@latest publish --access public --provenance
