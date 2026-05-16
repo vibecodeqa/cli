@@ -22,7 +22,9 @@ export function runDependencies(cwd: string, stack: StackInfo): CheckResult {
 					if (pkg.current.version.split(".")[0] !== pkg.latest.version.split(".")[0]) majorOutdated++;
 				}
 			}
-		} catch { /* parse failed */ }
+		} catch {
+			/* parse failed */
+		}
 		if (majorOutdated > 0) issues.push({ severity: "warning", message: `${majorOutdated} packages behind by a major version` });
 		const score = Math.max(0, Math.min(100, 100 - majorOutdated));
 		return {

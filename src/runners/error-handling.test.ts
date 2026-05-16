@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { runErrorHandling } from "./error-handling.js";
-import type { StackInfo } from "../types.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import type { StackInfo } from "../types.js";
+import { runErrorHandling } from "./error-handling.js";
 
 function makeProject(files: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-erh-"));
@@ -15,8 +15,22 @@ function makeProject(files: Record<string, string>): string {
 	return dir;
 }
 
-const tsStack: StackInfo = { language: "typescript", framework: "none", bundler: "none", testRunner: "vitest", linter: "biome", packageManager: "pnpm" };
-const reactStack: StackInfo = { language: "typescript", framework: "react", bundler: "vite", testRunner: "vitest", linter: "biome", packageManager: "pnpm" };
+const tsStack: StackInfo = {
+	language: "typescript",
+	framework: "none",
+	bundler: "none",
+	testRunner: "vitest",
+	linter: "biome",
+	packageManager: "pnpm",
+};
+const reactStack: StackInfo = {
+	language: "typescript",
+	framework: "react",
+	bundler: "vite",
+	testRunner: "vitest",
+	linter: "biome",
+	packageManager: "pnpm",
+};
 
 describe("runErrorHandling", () => {
 	it("returns skipped when no source files", () => {

@@ -175,4 +175,3 @@ export function runStandards(cwd: string, stack: StackInfo): CheckResult {
 		duration: Date.now() - start,
 	};
 }
-

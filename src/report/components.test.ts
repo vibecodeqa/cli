@@ -38,7 +38,7 @@ describe("fileLink", () => {
 	});
 
 	it("escapes special characters in path", () => {
-		const result = fileLink('src/a&b.ts', undefined, "https://github.com/org/repo", "main");
+		const result = fileLink("src/a&b.ts", undefined, "https://github.com/org/repo", "main");
 		expect(result).toContain("&amp;");
 	});
 });

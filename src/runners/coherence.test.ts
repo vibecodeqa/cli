@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { runDocCoherence } from "./doc-coherence.js";
-import { runCodeCoherence } from "./code-coherence.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { runCodeCoherence } from "./code-coherence.js";
+import { runDocCoherence } from "./doc-coherence.js";
 
 function makeProject(files?: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-coh-"));
@@ -11,7 +11,10 @@ function makeProject(files?: Record<string, string>): string {
 	mkdirSync(join(dir, "src"), { recursive: true });
 	if (files) {
 		for (const [name, content] of Object.entries(files)) {
-			writeFileSync(join(dir, name.startsWith("src/") ? name.replace("src/", join(dir, "src") + "/").replace(join(dir, ""), "") : name), content);
+			writeFileSync(
+				join(dir, name.startsWith("src/") ? name.replace("src/", join(dir, "src") + "/").replace(join(dir, ""), "") : name),
+				content,
+			);
 		}
 	}
 	return dir;

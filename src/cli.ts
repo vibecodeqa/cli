@@ -5,21 +5,21 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import { join, resolve } from "node:path";
 import { detectRepoUrl, detectStack } from "./detect.js";
 import { generatePages } from "./report/html.js";
+import { runAccessibility } from "./runners/accessibility.js";
 import { runArchitecture } from "./runners/architecture.js";
 import { runBestPractices } from "./runners/best-practices.js";
+import { runCodeCoherence } from "./runners/code-coherence.js";
 import { runComplexity } from "./runners/complexity.js";
 import { runConfusion } from "./runners/confusion.js";
 import { runContext } from "./runners/context.js";
 import { runDependencies } from "./runners/dependencies.js";
+import { runDocCoherence } from "./runners/doc-coherence.js";
 import { runDocs } from "./runners/docs.js";
 import { runDuplication } from "./runners/duplication.js";
-import { runPerformance } from "./runners/performance.js";
 import { runErrorHandling } from "./runners/error-handling.js";
 import { runLint } from "./runners/lint.js";
+import { runPerformance } from "./runners/performance.js";
 import { runReact } from "./runners/react.js";
-import { runAccessibility } from "./runners/accessibility.js";
-import { runDocCoherence } from "./runners/doc-coherence.js";
-import { runCodeCoherence } from "./runners/code-coherence.js";
 import { runSecrets } from "./runners/secrets.js";
 import { runSecurity } from "./runners/security.js";
 import { runStandards } from "./runners/standards.js";
@@ -196,7 +196,7 @@ async function main() {
 				body: JSON.stringify({ repo, report }),
 			});
 			if (res.ok) {
-				const data = await res.json() as { totalReports?: number };
+				const data = (await res.json()) as { totalReports?: number };
 				if (!jsonOnly) console.log(`  \x1b[32m\u2713 Uploaded to dashboard\x1b[0m \x1b[2m(${data.totalReports || 1} reports)\x1b[0m`);
 			} else if (!jsonOnly) {
 				console.log(`  \x1b[33m\u26a0 Upload failed: ${res.status}\x1b[0m \x1b[2m(set VCQA_TOKEN env var)\x1b[0m`);

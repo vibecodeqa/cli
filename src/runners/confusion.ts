@@ -275,4 +275,3 @@ function extractExports(content: string): string[] {
 	}
 	return exports;
 }
-

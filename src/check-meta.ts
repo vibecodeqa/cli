@@ -82,9 +82,11 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		category: "Quality",
 		priority: "high",
 		weight: 3,
-		description: "Detects poor error handling: empty catch blocks, throw with string literals, catch-and-rethrow without context, Promise.then() without .catch(), missing React Error Boundaries.",
+		description:
+			"Detects poor error handling: empty catch blocks, throw with string literals, catch-and-rethrow without context, Promise.then() without .catch(), missing React Error Boundaries.",
 		risk: "Empty catch blocks silently swallow errors. throw 'string' loses stack traces. Missing Error Boundaries in React cause the entire app to crash on render errors.",
-		recommendation: "Handle or log every catch. Use throw new Error() for stack traces. Add Error Boundaries in React. Chain .catch() on promises.",
+		recommendation:
+			"Handle or log every catch. Use throw new Error() for stack traces. Add Error Boundaries in React. Chain .catch() on promises.",
 	},
 	complexity: {
 		name: "complexity",
@@ -228,7 +230,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 			"Checks common accessibility violations: images without alt text, click handlers on non-interactive elements without keyboard support, form controls without labels, autoFocus usage, positive tabIndex, and missing html lang attribute.",
 		risk: "1 in 4 adults has a disability (CDC). Missing alt text makes images invisible to screen readers. Click-only divs exclude keyboard users. Unlabeled inputs are unusable with assistive technology. Missing lang attribute breaks screen reader pronunciation.",
 		recommendation:
-			"Add alt text to all images (use alt=\"\" for decorative). Use <button> for clickable elements, not <div onClick>. Label all form controls with <label>, aria-label, or aria-labelledby. Set lang on <html>.",
+			'Add alt text to all images (use alt="" for decorative). Use <button> for clickable elements, not <div onClick>. Label all form controls with <label>, aria-label, or aria-labelledby. Set lang on <html>.',
 	},
 	performance: {
 		name: "performance",

@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { runReact } from "./react.js";
-import type { StackInfo } from "../types.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import type { StackInfo } from "../types.js";
+import { runReact } from "./react.js";
 
 function makeProject(files: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-react-"));
@@ -17,8 +17,22 @@ function makeProject(files: Record<string, string>): string {
 	return dir;
 }
 
-const reactStack: StackInfo = { language: "typescript", framework: "react", bundler: "vite", testRunner: "vitest", linter: "biome", packageManager: "pnpm" };
-const nodeStack: StackInfo = { language: "typescript", framework: "none", bundler: "none", testRunner: "vitest", linter: "biome", packageManager: "pnpm" };
+const reactStack: StackInfo = {
+	language: "typescript",
+	framework: "react",
+	bundler: "vite",
+	testRunner: "vitest",
+	linter: "biome",
+	packageManager: "pnpm",
+};
+const nodeStack: StackInfo = {
+	language: "typescript",
+	framework: "none",
+	bundler: "none",
+	testRunner: "vitest",
+	linter: "biome",
+	packageManager: "pnpm",
+};
 
 describe("runReact", () => {
 	it("skips for non-React projects", () => {

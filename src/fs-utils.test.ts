@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { collectSourceFiles, getProductionFiles, getTestFiles, readSafe, readDeps } from "./fs-utils.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { collectSourceFiles, getProductionFiles, getTestFiles, readDeps, readSafe } from "./fs-utils.js";
 
 function makeProject(files: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-fs-"));

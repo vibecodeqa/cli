@@ -13,7 +13,18 @@ export interface SourceFile {
 	isTest: boolean;
 }
 
-const SKIP_DIRS = new Set(["node_modules", "dist", ".git", ".vibe-check", "coverage", "test-results", "__pycache__", ".dart_tool", "build", ".flutter-plugins"]);
+const SKIP_DIRS = new Set([
+	"node_modules",
+	"dist",
+	".git",
+	".vibe-check",
+	"coverage",
+	"test-results",
+	"__pycache__",
+	".dart_tool",
+	"build",
+	".flutter-plugins",
+]);
 const CODE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".dart"]);
 const ALL_EXTS = new Set([...CODE_EXTS, ".json", ".env", ".yaml", ".yml", ".toml"]);
 
@@ -85,7 +96,12 @@ function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>): v
 			if (statSync(full).size > 1_000_000) continue;
 			const content = readFileSync(full, "utf-8");
 			const relPath = full.replace(`${cwd}/`, "");
-			const isTest = entry.includes(".test.") || entry.includes(".spec.") || entry.endsWith("_test.dart") || relPath.includes("__tests__") || relPath.includes("test/");
+			const isTest =
+				entry.includes(".test.") ||
+				entry.includes(".spec.") ||
+				entry.endsWith("_test.dart") ||
+				relPath.includes("__tests__") ||
+				relPath.includes("test/");
 			out.push({
 				path: relPath,
 				fullPath: full,

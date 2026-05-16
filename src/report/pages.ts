@@ -81,7 +81,10 @@ export function overviewPage(
 
 	const allIssues = allChecks.flatMap((c) => c.issues.map((i) => ({ check: c.name, ...i })));
 	const sortedIssues = allIssues
-		.sort((a, b) => (a.severity === "error" ? 0 : a.severity === "warning" ? 1 : 2) - (b.severity === "error" ? 0 : b.severity === "warning" ? 1 : 2))
+		.sort(
+			(a, b) =>
+				(a.severity === "error" ? 0 : a.severity === "warning" ? 1 : 2) - (b.severity === "error" ? 0 : b.severity === "warning" ? 1 : 2),
+		)
 		.slice(0, 10);
 
 	let topIssuesHtml = "";
@@ -98,10 +101,13 @@ export function overviewPage(
 
 	let fileHotspotsHtml = "";
 	if (topFiles.length > 0) {
-		const fileRows = topFiles.slice(0, 5).map((f) => {
-			const pct = Math.min(100, f.total * 5);
-			return `<div class="fr"><span class="ff">${fl(f.file)}</span><div class="fb"><div class="fbf" style="width:${pct}%;background:${f.errors > 0 ? "var(--fail)" : "var(--warn)"}"></div></div><span class="fv">${f.errors}E ${f.warnings}W</span></div>`;
-		}).join("");
+		const fileRows = topFiles
+			.slice(0, 5)
+			.map((f) => {
+				const pct = Math.min(100, f.total * 5);
+				return `<div class="fr"><span class="ff">${fl(f.file)}</span><div class="fb"><div class="fbf" style="width:${pct}%;background:${f.errors > 0 ? "var(--fail)" : "var(--warn)"}"></div></div><span class="fv">${f.errors}E ${f.warnings}W</span></div>`;
+			})
+			.join("");
 		const viewAll = topFiles.length > 5 ? `<a class="ov-link" href="files.html">View all ${topFiles.length} files \u2192</a>` : "";
 		fileHotspotsHtml = `<div class="ov-section"><h3>File Hotspots</h3>${fileRows}${viewAll}</div>`;
 	}
@@ -185,7 +191,10 @@ export function categoryPage(cs: CatScore, fl: FL): string {
 				const desc = (d.description as string) || meta.description;
 				const detailKvs = Object.entries(d)
 					.filter(([k]) => !["premium", "comingSoon", "reason", "description"].includes(k))
-					.map(([k, v]) => `<div class="kv"><span class="k">${e(k)}</span><span class="v">${e(Array.isArray(v) ? v.join(", ") : String(v))}</span></div>`)
+					.map(
+						([k, v]) =>
+							`<div class="kv"><span class="k">${e(k)}</span><span class="v">${e(Array.isArray(v) ? v.join(", ") : String(v))}</span></div>`,
+					)
 					.join("");
 
 				return `<div class="sp${i === 0 ? " active" : ""}" data-sub="${cs.id}-${c.name}">
@@ -229,7 +238,10 @@ export function issuesPage(allChecks: CheckResult[], totalIssues: number, fl: FL
 	const infoCount = allIssues.filter((i) => i.severity === "info").length;
 
 	const issueRows = allIssues
-		.sort((a, b) => (a.severity === "error" ? 0 : a.severity === "warning" ? 1 : 2) - (b.severity === "error" ? 0 : b.severity === "warning" ? 1 : 2))
+		.sort(
+			(a, b) =>
+				(a.severity === "error" ? 0 : a.severity === "warning" ? 1 : 2) - (b.severity === "error" ? 0 : b.severity === "warning" ? 1 : 2),
+		)
 		.slice(0, 200)
 		.map((i) => {
 			const loc = i.file ? fl(i.file.split(":")[0]!, i.line) : "";
@@ -270,6 +282,11 @@ export function filesPage(
 
 	return `
 <h2>File Health</h2>
-<p style="color:var(--muted);font-size:0.78rem;margin-bottom:1rem">${fileIssues.size} files with issues across ${topFiles.reduce((s, f) => { for (const c of f.checks) s.add(c); return s; }, new Set<string>()).size} checks.</p>
+<p style="color:var(--muted);font-size:0.78rem;margin-bottom:1rem">${fileIssues.size} files with issues across ${
+		topFiles.reduce((s, f) => {
+			for (const c of f.checks) s.add(c);
+			return s;
+		}, new Set<string>()).size
+	} checks.</p>
 ${heatmapRows}`;
 }

@@ -14,8 +14,8 @@
  * Currently returns a "coming soon" placeholder.
  */
 
-import type { CheckResult } from "../types.js";
 import { getProductionFiles } from "../fs-utils.js";
+import type { CheckResult } from "../types.js";
 
 export function runCodeCoherence(cwd: string): CheckResult {
 	const start = Date.now();
@@ -36,7 +36,8 @@ export function runCodeCoherence(cwd: string): CheckResult {
 			filesAnalyzed: files.length,
 			totalExports,
 			totalFunctions,
-			description: "Detects internal contradictions: inconsistent validation, conflicting defaults, naming drift, dead config flags, and behavioral mismatches across modules.",
+			description:
+				"Detects internal contradictions: inconsistent validation, conflicting defaults, naming drift, dead config flags, and behavioral mismatches across modules.",
 		},
 		issues: [],
 		duration: Date.now() - start,

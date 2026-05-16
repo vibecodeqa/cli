@@ -45,7 +45,17 @@ export function runDuplication(cwd: string): CheckResult {
 			const block = lines
 				.slice(i, i + MIN_LINES)
 				.map((l) => l.trim())
-				.filter((l) => l.length > 0 && !l.startsWith("//") && !l.startsWith("*") && !l.startsWith("import ") && !l.startsWith("export {") && l !== "{" && l !== "}" && l !== "");
+				.filter(
+					(l) =>
+						l.length > 0 &&
+						!l.startsWith("//") &&
+						!l.startsWith("*") &&
+						!l.startsWith("import ") &&
+						!l.startsWith("export {") &&
+						l !== "{" &&
+						l !== "}" &&
+						l !== "",
+				);
 
 			if (block.length < MIN_LINES - 2) continue; // too many empty/trivial lines
 			const key = block.join("\n");

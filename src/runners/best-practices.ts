@@ -23,7 +23,13 @@ export function runBestPractices(cwd: string): CheckResult {
 	let followed = 0;
 
 	const has = (f: string) => existsSync(join(cwd, f));
-	const read = (f: string) => { try { return readFileSync(join(cwd, f), "utf-8"); } catch { return ""; } };
+	const read = (f: string) => {
+		try {
+			return readFileSync(join(cwd, f), "utf-8");
+		} catch {
+			return "";
+		}
+	};
 
 	// ── 1. CI/CD Best Practices ──
 
@@ -32,16 +38,16 @@ export function runBestPractices(cwd: string): CheckResult {
 	practices++;
 	if (hasWorkflows) {
 		followed++;
-		const workflows = readdirSync(join(cwd, ".github/workflows")).filter(f => f.endsWith(".yml") || f.endsWith(".yaml"));
+		const workflows = readdirSync(join(cwd, ".github/workflows")).filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"));
 
 		for (const wf of workflows) {
 			const content = read(`.github/workflows/${wf}`);
 
 			// Check: actions pinned to SHA (not @v4, @main)
 			const actionUses = content.match(/uses:\s*([^\n]+)/g) || [];
-			const unpinned = actionUses.filter(u => !u.includes("@") || (!u.match(/@[a-f0-9]{40}/) && !u.includes("@sha")));
+			const unpinned = actionUses.filter((u) => !u.includes("@") || (!u.match(/@[a-f0-9]{40}/) && !u.includes("@sha")));
 			// Only flag third-party actions (not actions/*)
-			const unpinnedThirdParty = unpinned.filter(u => !u.includes("actions/") && !u.includes("pnpm/"));
+			const unpinnedThirdParty = unpinned.filter((u) => !u.includes("actions/") && !u.includes("pnpm/"));
 			if (unpinnedThirdParty.length > 0) {
 				issues.push({
 					severity: "info",
@@ -117,7 +123,11 @@ export function runBestPractices(cwd: string): CheckResult {
 	if (pkg.includes('"engines"') || has(".nvmrc") || has(".node-version") || has(".tool-versions")) {
 		followed++;
 	} else {
-		issues.push({ severity: "info", message: "No engine constraints (engines in package.json or .nvmrc) — Node version not pinned", rule: "pin-node-version" });
+		issues.push({
+			severity: "info",
+			message: "No engine constraints (engines in package.json or .nvmrc) — Node version not pinned",
+			rule: "pin-node-version",
+		});
 	}
 
 	// npm provenance / package.json has repository field
@@ -126,7 +136,11 @@ export function runBestPractices(cwd: string): CheckResult {
 		if (pkg.includes('"repository"')) {
 			followed++;
 		} else {
-			issues.push({ severity: "info", message: "package.json missing repository field — provenance attestation won't link to source", rule: "repository-field" });
+			issues.push({
+				severity: "info",
+				message: "package.json missing repository field — provenance attestation won't link to source",
+				rule: "repository-field",
+			});
 		}
 	}
 
@@ -153,7 +167,11 @@ export function runBestPractices(cwd: string): CheckResult {
 	if (has("CONTRIBUTING.md") || has(".github/CONTRIBUTING.md")) {
 		followed++;
 	} else {
-		issues.push({ severity: "info", message: "No CONTRIBUTING.md — onboarding is harder for new contributors", rule: "contributing-guide" });
+		issues.push({
+			severity: "info",
+			message: "No CONTRIBUTING.md — onboarding is harder for new contributors",
+			rule: "contributing-guide",
+		});
 	}
 
 	// ── 4. Developer Experience ──
@@ -162,7 +180,11 @@ export function runBestPractices(cwd: string): CheckResult {
 	practices++;
 	const hasEnvFiles = has(".env") || has(".env.local") || has(".env.development");
 	if (hasEnvFiles && !has(".env.example")) {
-		issues.push({ severity: "info", message: "Has .env files but no .env.example — new developers won't know what vars are needed", rule: "env-example" });
+		issues.push({
+			severity: "info",
+			message: "Has .env files but no .env.example — new developers won't know what vars are needed",
+			rule: "env-example",
+		});
 	} else {
 		followed++;
 	}
@@ -173,7 +195,11 @@ export function runBestPractices(cwd: string): CheckResult {
 	if (deps.husky || deps.lefthook || deps["lint-staged"] || has(".husky") || has(".lefthook.yml")) {
 		followed++;
 	} else {
-		issues.push({ severity: "info", message: "No pre-commit hooks (husky/lefthook) — lint/format not enforced before commit", rule: "pre-commit-hooks" });
+		issues.push({
+			severity: "info",
+			message: "No pre-commit hooks (husky/lefthook) — lint/format not enforced before commit",
+			rule: "pre-commit-hooks",
+		});
 	}
 
 	// Renovate/Dependabot for automated dependency updates
@@ -181,17 +207,32 @@ export function runBestPractices(cwd: string): CheckResult {
 	if (has(".github/dependabot.yml") || has("renovate.json") || has(".renovaterc") || has(".renovaterc.json")) {
 		followed++;
 	} else {
-		issues.push({ severity: "info", message: "No Dependabot/Renovate — dependency updates are manual and often forgotten", rule: "automated-deps" });
+		issues.push({
+			severity: "info",
+			message: "No Dependabot/Renovate — dependency updates are manual and often forgotten",
+			rule: "automated-deps",
+		});
 	}
 
 	// ── 5. Code Quality Tooling ──
 
 	// Linter configured
 	practices++;
-	if (has("biome.json") || has(".eslintrc.json") || has(".eslintrc.js") || has("eslint.config.js") || has("eslint.config.ts") || has("analysis_options.yaml")) {
+	if (
+		has("biome.json") ||
+		has(".eslintrc.json") ||
+		has(".eslintrc.js") ||
+		has("eslint.config.js") ||
+		has("eslint.config.ts") ||
+		has("analysis_options.yaml")
+	) {
 		followed++;
 	} else {
-		issues.push({ severity: "warning", message: "No linter config (ESLint/Biome/dart analyze) — code style not enforced", rule: "linter-config" });
+		issues.push({
+			severity: "warning",
+			message: "No linter config (ESLint/Biome/dart analyze) — code style not enforced",
+			rule: "linter-config",
+		});
 	}
 
 	// Formatter configured
@@ -199,7 +240,11 @@ export function runBestPractices(cwd: string): CheckResult {
 	if (has("biome.json") || has(".prettierrc") || has(".prettierrc.json") || has("prettier.config.js") || has(".editorconfig")) {
 		followed++;
 	} else {
-		issues.push({ severity: "info", message: "No formatter config (Prettier/Biome/.editorconfig) — inconsistent code formatting", rule: "formatter-config" });
+		issues.push({
+			severity: "info",
+			message: "No formatter config (Prettier/Biome/.editorconfig) — inconsistent code formatting",
+			rule: "formatter-config",
+		});
 	}
 
 	// TypeScript strict mode
@@ -208,7 +253,11 @@ export function runBestPractices(cwd: string): CheckResult {
 	if (!tsconfig || tsconfig.includes('"strict": true') || tsconfig.includes('"strict":true')) {
 		followed++;
 	} else {
-		issues.push({ severity: "info", message: "TypeScript strict mode not enabled — allows implicit any and null errors", rule: "ts-strict-mode" });
+		issues.push({
+			severity: "info",
+			message: "TypeScript strict mode not enabled — allows implicit any and null errors",
+			rule: "ts-strict-mode",
+		});
 	}
 
 	// ── 6. Testing Best Practices ──
@@ -226,7 +275,11 @@ export function runBestPractices(cwd: string): CheckResult {
 	if (pkg.includes("coverage") || has("vitest.config.ts") || has("jest.config.ts") || has("jest.config.js")) {
 		followed++;
 	} else {
-		issues.push({ severity: "info", message: "No test coverage configuration — coverage thresholds not enforced", rule: "coverage-config" });
+		issues.push({
+			severity: "info",
+			message: "No test coverage configuration — coverage thresholds not enforced",
+			rule: "coverage-config",
+		});
 	}
 
 	// ── 7. Docker / Deployment ──
@@ -238,7 +291,11 @@ export function runBestPractices(cwd: string): CheckResult {
 		if (dockerfile.includes("FROM") && !dockerfile.includes("latest")) {
 			followed++;
 		} else if (dockerfile.includes(":latest")) {
-			issues.push({ severity: "warning", message: "Dockerfile uses :latest tag — pin to a specific version for reproducible builds", rule: "docker-pin-version" });
+			issues.push({
+				severity: "warning",
+				message: "Dockerfile uses :latest tag — pin to a specific version for reproducible builds",
+				rule: "docker-pin-version",
+			});
 		} else {
 			followed++;
 		}
@@ -249,7 +306,11 @@ export function runBestPractices(cwd: string): CheckResult {
 		if (fromCount >= 2) {
 			followed++;
 		} else if (dockerfile.length > 100) {
-			issues.push({ severity: "info", message: "Dockerfile is single-stage — consider multi-stage to reduce image size", rule: "docker-multi-stage" });
+			issues.push({
+				severity: "info",
+				message: "Dockerfile is single-stage — consider multi-stage to reduce image size",
+				rule: "docker-multi-stage",
+			});
 		} else {
 			followed++;
 		}
@@ -259,7 +320,11 @@ export function runBestPractices(cwd: string): CheckResult {
 		if (has(".dockerignore")) {
 			followed++;
 		} else {
-			issues.push({ severity: "info", message: "No .dockerignore — node_modules and build artifacts will bloat Docker image", rule: "dockerignore" });
+			issues.push({
+				severity: "info",
+				message: "No .dockerignore — node_modules and build artifacts will bloat Docker image",
+				rule: "dockerignore",
+			});
 		}
 	}
 
@@ -271,7 +336,11 @@ export function runBestPractices(cwd: string): CheckResult {
 	if (gitignore.includes("node_modules") || gitignore.includes(".dart_tool") || gitignore.includes("build/")) {
 		followed++;
 	} else if (gitignore) {
-		issues.push({ severity: "info", message: ".gitignore exists but may be incomplete — ensure build artifacts are excluded", rule: "gitignore-complete" });
+		issues.push({
+			severity: "info",
+			message: ".gitignore exists but may be incomplete — ensure build artifacts are excluded",
+			rule: "gitignore-complete",
+		});
 	} else {
 		followed++; // no gitignore = handled by structure check
 	}
@@ -281,7 +350,11 @@ export function runBestPractices(cwd: string): CheckResult {
 	if (deps.commitlint || deps["@commitlint/cli"] || has("commitlint.config.js") || has(".commitlintrc.json") || has(".changeset")) {
 		followed++;
 	} else {
-		issues.push({ severity: "info", message: "No commit convention enforcement (commitlint/changesets) — changelog generation is manual", rule: "conventional-commits" });
+		issues.push({
+			severity: "info",
+			message: "No commit convention enforcement (commitlint/changesets) — changelog generation is manual",
+			rule: "conventional-commits",
+		});
 	}
 
 	// ── 9. Monitoring & Observability ──
@@ -293,7 +366,11 @@ export function runBestPractices(cwd: string): CheckResult {
 		if (deps["@sentry/node"] || deps["@sentry/react"] || deps["@sentry/browser"] || deps.bugsnag || deps["@bugsnag/js"]) {
 			followed++;
 		} else {
-			issues.push({ severity: "info", message: "No error tracking (Sentry/Bugsnag) — production errors may go unnoticed", rule: "error-tracking" });
+			issues.push({
+				severity: "info",
+				message: "No error tracking (Sentry/Bugsnag) — production errors may go unnoticed",
+				rule: "error-tracking",
+			});
 		}
 	}
 
@@ -304,9 +381,14 @@ export function runBestPractices(cwd: string): CheckResult {
 	if (deps.zod || deps.joi || deps.envalid || deps["@t3-oss/env-core"] || deps["@t3-oss/env-nextjs"]) {
 		followed++;
 	} else {
-		const hasEnvUsage = pkg.includes("process.env") || read("src/index.ts").includes("process.env") || read("src/main.ts").includes("process.env");
+		const hasEnvUsage =
+			pkg.includes("process.env") || read("src/index.ts").includes("process.env") || read("src/main.ts").includes("process.env");
 		if (hasEnvUsage) {
-			issues.push({ severity: "info", message: "Uses env vars but no validation library (zod/envalid) — missing vars crash at runtime", rule: "env-validation" });
+			issues.push({
+				severity: "info",
+				message: "Uses env vars but no validation library (zod/envalid) — missing vars crash at runtime",
+				rule: "env-validation",
+			});
 		} else {
 			followed++;
 		}

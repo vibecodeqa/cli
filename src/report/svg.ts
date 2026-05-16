@@ -47,10 +47,7 @@ export function buildRadar(items: { label: string; score: number }[]): string {
 }
 
 /** Score timeline — larger chart showing score history over last N runs. */
-export function buildTimeline(
-	entries: { score: number; timestamp: string }[],
-	opts?: { width?: number; height?: number },
-): string {
+export function buildTimeline(entries: { score: number; timestamp: string }[], opts?: { width?: number; height?: number }): string {
 	const width = opts?.width ?? 600;
 	const height = opts?.height ?? 120;
 	const pad = { top: 20, right: 20, bottom: 25, left: 35 };
@@ -77,7 +74,8 @@ export function buildTimeline(
 	// Grade colors per dot
 	const dots = entries
 		.map((e, i) => {
-			const color = e.score >= 90 ? "#22c55e" : e.score >= 75 ? "#84cc16" : e.score >= 60 ? "#eab308" : e.score >= 40 ? "#f97316" : "#ef4444";
+			const color =
+				e.score >= 90 ? "#22c55e" : e.score >= 75 ? "#84cc16" : e.score >= 60 ? "#eab308" : e.score >= 40 ? "#f97316" : "#ef4444";
 			return `<circle cx="${xScale(i).toFixed(1)}" cy="${yScale(e.score).toFixed(1)}" r="3" fill="${color}"><title>${e.timestamp.split("T")[0]} — ${e.score}</title></circle>`;
 		})
 		.join("");
@@ -107,7 +105,8 @@ export function buildPyramid(layers: { unit: number; integration: number; compon
 	const total = layers.unit + layers.integration + layers.component + layers.e2e;
 	if (total === 0) return "";
 
-	const w = 200, h = 160;
+	const w = 200,
+		h = 160;
 	const cx = w / 2;
 
 	// Pyramid: e2e at top (smallest), unit at bottom (largest)
@@ -130,8 +129,10 @@ export function buildPyramid(layers: { unit: number; integration: number; compon
 		const botW = ((i + 1.5) / 4) * (w - 40);
 		const opacity = item.count > 0 ? 1 : 0.2;
 
-		const x1t = cx - topW / 2, x2t = cx + topW / 2;
-		const x1b = cx - botW / 2, x2b = cx + botW / 2;
+		const x1t = cx - topW / 2,
+			x2t = cx + topW / 2;
+		const x1b = cx - botW / 2,
+			x2b = cx + botW / 2;
 
 		svg += `<polygon points="${x1t},${y} ${x2t},${y} ${x2b},${y + layerH} ${x1b},${y + layerH}" fill="${item.color}" opacity="${opacity * 0.25}" stroke="${item.color}" stroke-opacity="${opacity * 0.6}" stroke-width="1"/>`;
 		svg += `<text x="${cx}" y="${y + layerH / 2 + 3}" text-anchor="middle" fill="${item.count > 0 ? "#e5e5e5" : "#555"}" font-size="9" font-weight="600">${item.label} (${item.count})</text>`;
@@ -145,8 +146,11 @@ export function buildBadge(score: number, grade: string): string {
 	const color = score >= 90 ? "#22c55e" : score >= 75 ? "#84cc16" : score >= 60 ? "#eab308" : score >= 40 ? "#f97316" : "#ef4444";
 	const label = "vcqa";
 	const value = `${grade} ${score}`;
-	const labelW = 36, valueW = 44, totalW = labelW + valueW;
-	const h = 20, r = 3;
+	const labelW = 36,
+		valueW = 44,
+		totalW = labelW + valueW;
+	const h = 20,
+		r = 3;
 
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${h}">
 <linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
@@ -182,11 +186,13 @@ export function buildSparkline(values: number[], opts?: { width?: number; height
 
 	const points = values.map((v, i) => `${(i * step).toFixed(1)},${(height - ((v - min) / range) * (height - 4) - 2).toFixed(1)}`).join(" ");
 
-	const dots = values.map((v, i) => {
-		const x = (i * step).toFixed(1);
-		const y = (height - ((v - min) / range) * (height - 4) - 2).toFixed(1);
-		return `<circle cx="${x}" cy="${y}" r="1.5" fill="${color}"/>`;
-	}).join("");
+	const dots = values
+		.map((v, i) => {
+			const x = (i * step).toFixed(1);
+			const y = (height - ((v - min) / range) * (height - 4) - 2).toFixed(1);
+			return `<circle cx="${x}" cy="${y}" r="1.5" fill="${color}"/>`;
+		})
+		.join("");
 
 	return `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/>${dots}</svg>`;
 }

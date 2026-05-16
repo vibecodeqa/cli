@@ -272,7 +272,8 @@ export function generateArchSVG(details: Record<string, unknown>): string {
 
 	const nodes = Object.entries(graph);
 	const nodeCount = nodes.length;
-	if (nodeCount > 50) return `<div style="color:#6b7280;font-size:0.75rem">${nodeCount} modules — too many to render. Consider splitting into smaller packages.</div>`;
+	if (nodeCount > 50)
+		return `<div style="color:#6b7280;font-size:0.75rem">${nodeCount} modules — too many to render. Consider splitting into smaller packages.</div>`;
 
 	// Detect cycles for highlighting
 	const cycleEdges = new Set<string>();
@@ -298,7 +299,8 @@ export function generateArchSVG(details: Record<string, unknown>): string {
 		dirs.set(dir, arr);
 	}
 
-	const W = 800, padding = 50;
+	const W = 800,
+		padding = 50;
 	const dirEntries = [...dirs.entries()];
 	const dirWidth = (W - padding * 2) / Math.max(dirEntries.length, 1);
 	const nodeSpacing = 38;
@@ -386,9 +388,12 @@ export function generateArchSVG(details: Record<string, unknown>): string {
 		const isInCycle = [...cycleEdges].some((e) => e.startsWith(path + "->") || e.endsWith("->" + path));
 
 		let nodeColor = "#6d78d0"; // default: softer accent
-		if (isInCycle) nodeColor = "#d97706"; // amber for cycle participant
-		else if (isGod) nodeColor = "#dc2626"; // red for god module
-		else if (isOrphan) nodeColor = "#4b5563"; // dim for orphan
+		if (isInCycle)
+			nodeColor = "#d97706"; // amber for cycle participant
+		else if (isGod)
+			nodeColor = "#dc2626"; // red for god module
+		else if (isOrphan)
+			nodeColor = "#4b5563"; // dim for orphan
 		else if (isHighFanOut) nodeColor = "#ca8a04"; // yellow for high fan-out
 
 		const size = Math.min(9, 3 + Math.floor(fanIn * 0.8));
@@ -432,7 +437,8 @@ export function generateDSM(details: Record<string, unknown>): string {
 	const graph = details.graph as Record<string, { imports: string[]; importedBy: string[]; dir: string }> | undefined;
 	if (!graph || Object.keys(graph).length === 0) return "";
 	const entries = Object.entries(graph);
-	if (entries.length > 40) return `<div style="color:#6b7280;font-size:0.75rem">${entries.length} modules — too many for matrix view.</div>`;
+	if (entries.length > 40)
+		return `<div style="color:#6b7280;font-size:0.75rem">${entries.length} modules — too many for matrix view.</div>`;
 	if (entries.length < 3) return "";
 
 	// Sort by directory then name for clustering
@@ -457,7 +463,8 @@ export function generateDSM(details: Record<string, unknown>): string {
 	}
 
 	let svg = "";
-	const ox = labelW, oy = labelW;
+	const ox = labelW,
+		oy = labelW;
 
 	// Grid
 	for (let i = 0; i <= n; i++) {
@@ -519,7 +526,8 @@ export function generatePackageDiagram(details: Record<string, unknown>): string
 	const graph = details.graph as Record<string, { imports: string[]; importedBy: string[]; dir: string }> | undefined;
 	if (!graph || Object.keys(graph).length === 0) return "";
 	const entries = Object.entries(graph);
-	if (entries.length > 50) return `<div style="color:#6b7280;font-size:0.75rem">${entries.length} modules — too many for package view.</div>`;
+	if (entries.length > 50)
+		return `<div style="color:#6b7280;font-size:0.75rem">${entries.length} modules — too many for package view.</div>`;
 
 	// Group by directory
 	const dirs = new Map<string, { path: string; fanIn: number; fanOut: number }[]>();

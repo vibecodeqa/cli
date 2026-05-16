@@ -13,8 +13,8 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { CheckResult } from "../types.js";
 import { getProductionFiles } from "../fs-utils.js";
+import type { CheckResult } from "../types.js";
 
 export function runDocCoherence(cwd: string): CheckResult {
 	const start = Date.now();
@@ -44,7 +44,8 @@ export function runDocCoherence(cwd: string): CheckResult {
 			reason: "LLM-powered analysis — coming soon",
 			docFiles,
 			hasJSDoc,
-			description: "Detects contradictions between documentation and code. Finds stale README claims, incorrect JSDoc, outdated API docs, and misleading comments.",
+			description:
+				"Detects contradictions between documentation and code. Finds stale README claims, incorrect JSDoc, outdated API docs, and misleading comments.",
 		},
 		issues: [],
 		duration: Date.now() - start,

@@ -146,7 +146,9 @@ export function runPerformance(cwd: string): CheckResult {
 		if (existsSync(distPath)) {
 			try {
 				bundleSizeKB = Math.round(dirSizeKB(distPath));
-			} catch { /* can't read dist */ }
+			} catch {
+				/* can't read dist */
+			}
 			break;
 		}
 	}
