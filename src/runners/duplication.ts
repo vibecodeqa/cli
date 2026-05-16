@@ -90,9 +90,11 @@ export function runDuplication(cwd: string): CheckResult {
 	}
 
 	for (const d of duplicates.slice(0, 20)) {
-		// Show first 2 lines of the duplicated content as preview
-		const preview = d.content.split("\n").slice(0, 2).join(" | ");
-		const truncated = preview.length > 80 ? `${preview.slice(0, 80)}...` : preview;
+		// Show first 3 lines of the duplicated content, truncate at word boundary
+		const lines = d.content.split("\n").slice(0, 3);
+		const preview = lines.join(" \u2502 "); // use │ separator
+		const maxLen = 120;
+		const truncated = preview.length > maxLen ? `${preview.slice(0, preview.lastIndexOf(" ", maxLen))}...` : preview;
 		issues.push({
 			severity: "warning",
 			message: `Duplicate (${d.lines} lines): ${truncated}`,
