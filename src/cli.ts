@@ -440,9 +440,9 @@ async function main() {
 		await handleUpload(report, cwd, jsonOnly);
 	}
 
-	// CI exit code: fail if score below threshold
+	// CI exit code: fail if score below threshold (skip in watch mode)
 	const failUnder = flags.failUnder ?? (ciMode ? 60 : 0);
-	if (failUnder > 0 && score < failUnder) {
+	if (failUnder > 0 && score < failUnder && !watchMode) {
 		if (!jsonOnly) console.log(`  \x1b[31mFailing: score ${score} < ${failUnder}\x1b[0m\n`);
 		process.exit(1);
 	}

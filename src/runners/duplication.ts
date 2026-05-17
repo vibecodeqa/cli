@@ -1,6 +1,8 @@
 /** Code duplication — delegates to jscpd when available, falls back to built-in line-hash. */
 
-import { getProductionFiles } from "../fs-utils.js";
+import { readFileSync, rmdirSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
+import { getProductionFiles, readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
@@ -20,8 +22,9 @@ interface DuplicateBlock {
 export function runDuplication(cwd: string): CheckResult {
 	const start = Date.now();
 
-	// Try jscpd first (AST-token based, more accurate)
-	const jscpdResult = tryJscpd(cwd);
+	// Try jscpd if it's an explicit project dependency (opt-in, not auto-npx)
+	const deps = readDeps(cwd);
+	const jscpdResult = deps.jscpd ? tryJscpd(cwd) : null;
 	if (jscpdResult) {
 		jscpdResult.duration = Date.now() - start;
 		return jscpdResult;
@@ -130,9 +133,18 @@ export function runDuplication(cwd: string): CheckResult {
 }
 
 function tryJscpd(cwd: string): CheckResult | null {
-	const { stdout } = run("npx jscpd src/ --reporters json --silent 2>/dev/null || true", cwd, 30_000);
+	// jscpd writes JSON to a file, not stdout. Use a temp output dir.
+	const tmpDir = join(cwd, ".vibe-check", "jscpd-tmp");
+	const ignores = "node_modules/**,dist/**,build/**,.vibe-check/**,coverage/**,.next/**,.nuxt/**,**/*.json,**/*.lock,**/*.yaml,**/*.md";
+	run(`npx jscpd . --min-lines 6 --min-tokens 50 --reporters json --output "${tmpDir}" --ignore "${ignores}" --silent 2>/dev/null || true`, cwd, 30_000);
+	const reportPath = join(tmpDir, "jscpd-report.json");
+	let rawData: string;
+	try { rawData = readFileSync(reportPath, "utf-8"); } catch { return null; }
+	// Clean up temp
+	try { unlinkSync(reportPath); rmdirSync(tmpDir); } catch { /* ignore */ }
+
 	try {
-		const data = JSON.parse(stdout);
+		const data = JSON.parse(rawData);
 		if (!data.statistics) return null;
 
 		const issues: Issue[] = [];
@@ -150,7 +162,15 @@ function tryJscpd(cwd: string): CheckResult | null {
 		}
 
 		const dupPct = Math.round((data.statistics.total?.percentage || 0) * 100) / 100;
-		const score = Math.max(0, Math.min(100, Math.round(100 - dupPct * 5)));
+		// jscpd token-level detection is more aggressive than line-hash
+		// Industry benchmarks: <10% good, 10-20% acceptable, 20-40% needs work, >40% poor
+		const score = dupPct <= 5 ? 100
+			: dupPct <= 10 ? 90
+			: dupPct <= 20 ? 75
+			: dupPct <= 30 ? 60
+			: dupPct <= 40 ? 45
+			: dupPct <= 50 ? 30
+			: Math.max(10, Math.round(30 - (dupPct - 50)));
 
 		return {
 			name: "duplication",
