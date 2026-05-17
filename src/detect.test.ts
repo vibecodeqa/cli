@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { detectStack } from "./detect.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { detectStack, detectWorkspace } from "./detect.js";
 
 const TMP = join(import.meta.dirname!, "__test_fixture__");
 
@@ -105,5 +105,93 @@ describe("detectStack", () => {
 		expect(stack.bundler).toBe("webpack");
 		expect(stack.packageManager).toBe("yarn");
 		cleanup();
+	});
+});
+
+describe("detectWorkspace", () => {
+	afterEach(() => cleanup());
+
+	it("detects pnpm workspace with glob", () => {
+		setup({
+			"pnpm-workspace.yaml": 'packages:\n  - "packages/*"\n',
+			"package.json": "{}",
+			"packages/sdk/package.json": JSON.stringify({ name: "@org/sdk" }),
+			"packages/sdk/src/index.ts": "",
+			"packages/cli/package.json": JSON.stringify({ name: "@org/cli" }),
+			"packages/cli/src/main.ts": "",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.tool).toBe("pnpm");
+		expect(ws.packages).toHaveLength(2);
+		expect(ws.packages.map((p) => p.name).sort()).toEqual(["@org/cli", "@org/sdk"]);
+		expect(ws.srcRoots.some((r) => r.includes("packages/sdk/src"))).toBe(true);
+	});
+
+	it("detects npm workspaces with explicit paths", () => {
+		setup({
+			"package.json": JSON.stringify({ workspaces: ["packages/web", "packages/api"] }),
+			"packages/web/package.json": JSON.stringify({ name: "web" }),
+			"packages/web/src/app.ts": "",
+			"packages/api/package.json": JSON.stringify({ name: "api" }),
+			"packages/api/src/server.ts": "",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.tool).toBe("npm");
+		expect(ws.packages).toHaveLength(2);
+	});
+
+	it("detects packages without src/ (root code)", () => {
+		setup({
+			"pnpm-workspace.yaml": 'packages:\n  - "packages/*"\n',
+			"package.json": "{}",
+			"packages/utils/package.json": JSON.stringify({ name: "utils" }),
+			"packages/utils/index.ts": "export const x = 1;",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.packages[0]!.hasRootCode).toBe(true);
+		expect(ws.packages[0]!.hasSrc).toBe(true); // hasSrc includes rootCode
+		expect(ws.srcRoots.some((r) => r === "packages/utils")).toBe(true);
+	});
+
+	it("detects melos (Dart monorepo)", () => {
+		setup({
+			"melos.yaml": "name: my_project\npackages:\n  - packages/*\n",
+			"pubspec.yaml": "name: root\n",
+			"packages/core/pubspec.yaml": "name: core\n",
+			"packages/core/lib/core.dart": "",
+			"packages/ui/pubspec.yaml": "name: ui\n",
+			"packages/ui/lib/ui.dart": "",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.tool).toBe("melos");
+		expect(ws.packages).toHaveLength(2);
+	});
+
+	it("returns non-monorepo for single package", () => {
+		setup({
+			"package.json": JSON.stringify({ name: "my-app" }),
+			"src/index.ts": "",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(false);
+		expect(ws.tool).toBe("none");
+	});
+
+	it("detects conventional server/client layout", () => {
+		setup({
+			"package.json": "{}",
+			"server/package.json": JSON.stringify({ name: "server" }),
+			"server/src/index.ts": "",
+			"client/package.json": JSON.stringify({ name: "client" }),
+			"client/src/App.tsx": "",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.tool).toBe("none");
+		expect(ws.packages).toHaveLength(2);
 	});
 });

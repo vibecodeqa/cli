@@ -115,6 +115,51 @@ export function runReact(cwd: string, stack: StackInfo): CheckResult {
 		}
 	}
 
+	// 6. useEffect with missing/empty dependency array
+	let effectNoDeps = 0;
+	for (const f of files) {
+		const lines = f.content.split("\n");
+		for (let i = 0; i < lines.length; i++) {
+			const trimmed = lines[i].trim();
+			// useEffect(() => { ... }) without second argument
+			if (/\buseEffect\s*\(\s*(?:\(\)|function|\([^)]*\)\s*=>)/.test(trimmed)) {
+				// Look at the next few lines for closing ), ] pattern
+				const block = lines.slice(i, Math.min(i + 20, lines.length)).join("\n");
+				// Check if there's NO dependency array (no `], [` or `, []` pattern)
+				const closingMatch = block.match(/\}\s*\)\s*;/);
+				if (closingMatch && !block.includes("], [") && !block.includes("], []") && !/,\s*\[/.test(block)) {
+					effectNoDeps++;
+					issues.push({
+						severity: "warning",
+						message: "useEffect without dependency array — runs on every render",
+						file: f.path,
+						line: i + 1,
+						rule: "effect-no-deps",
+					});
+				}
+			}
+		}
+	}
+
+	// 7. Direct DOM manipulation in React components
+	let domManipulation = 0;
+	for (const f of files) {
+		const lines = f.content.split("\n");
+		for (let i = 0; i < lines.length; i++) {
+			const trimmed = lines[i].trim();
+			if (/document\.(?:getElementById|querySelector|getElementsBy)\s*\(/.test(trimmed)) {
+				domManipulation++;
+				issues.push({
+					severity: "warning",
+					message: "Direct DOM query in React component — use refs instead",
+					file: f.path,
+					line: i + 1,
+					rule: "direct-dom",
+				});
+			}
+		}
+	}
+
 	// Only warn about inline handlers if there are many
 	if (inlineHandlers > 15) {
 		issues.push({
@@ -126,7 +171,10 @@ export function runReact(cwd: string, stack: StackInfo): CheckResult {
 
 	const errors = issues.filter((i) => i.severity === "error").length;
 	const warnings = issues.filter((i) => i.severity === "warning").length;
-	const score = Math.max(0, Math.min(100, 100 - errors * 8 - warnings * 3));
+	const totalFiles = files.length || 1;
+	const errorPenalty = Math.min(50, (errors / totalFiles) * 200);
+	const warnPenalty = Math.min(30, (warnings / totalFiles) * 80);
+	const score = Math.max(0, Math.min(100, Math.round(100 - errorPenalty - warnPenalty)));
 
 	return {
 		name: "react",

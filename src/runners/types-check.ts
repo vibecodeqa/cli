@@ -1,17 +1,20 @@
-/** TypeScript type checking runner. */
+/** TypeScript type checking runner.
+ *
+ * Monorepo-aware: if tsconfig.json references project references or a build tsconfig,
+ * uses `tsc -b --noEmit`. Also accepts tsconfig.base.json.
+ */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { CheckResult, Issue } from "../types.js";
+import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
 
-export function runTypeCheck(cwd: string, isDart = false): CheckResult {
+export function runTypeCheck(cwd: string, isDart = false, workspace?: WorkspaceInfo): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 
 	if (isDart) {
-		// Dart uses dart analyze for type checking — errors are type errors
 		const { stdout } = run("dart analyze --format=machine 2>/dev/null || true", cwd, 30_000);
 		for (const line of stdout.split("\n")) {
 			const parts = line.split("|");
@@ -25,7 +28,12 @@ export function runTypeCheck(cwd: string, isDart = false): CheckResult {
 			});
 		}
 	} else {
-		if (!existsSync(join(cwd, "tsconfig.json")) && !existsSync(join(cwd, "tsconfig.app.json"))) {
+		const hasTsconfig =
+			existsSync(join(cwd, "tsconfig.json")) ||
+			existsSync(join(cwd, "tsconfig.app.json")) ||
+			existsSync(join(cwd, "tsconfig.base.json"));
+
+		if (!hasTsconfig) {
 			return {
 				name: "types",
 				score: 0,
@@ -36,19 +44,24 @@ export function runTypeCheck(cwd: string, isDart = false): CheckResult {
 			};
 		}
 
-		const { stdout } = run("npx tsc --noEmit 2>&1 || true", cwd, 30_000);
-		const lines = stdout.split("\n");
-		for (const line of lines) {
-			const match = line.match(/^(.+)\((\d+),\d+\): error (TS\d+): (.+)/);
-			if (match) {
-				issues.push({
-					severity: "error",
-					file: match[1],
-					line: parseInt(match[2], 10),
-					rule: match[3],
-					message: match[4],
-				});
+		// Monorepo: use `tsc -b` (project references) if available, else run per-package
+		if (workspace?.isMonorepo) {
+			const rootTsconfig = readTsconfig(cwd, "tsconfig.json");
+			const hasProjectRefs = (rootTsconfig?.references?.length ?? 0) > 0;
+
+			if (hasProjectRefs) {
+				// Project references — `tsc -b` will check all referenced projects
+				parseTscOutput(run("npx tsc -b --noEmit 2>&1 || true", cwd, 60_000).stdout, issues);
+			} else {
+				// No project refs — run tsc per-package that has a tsconfig
+				for (const pkg of workspace.packages) {
+					const pkgDir = join(cwd, pkg.path);
+					if (!existsSync(join(pkgDir, "tsconfig.json"))) continue;
+					parseTscOutput(run("npx tsc --noEmit 2>&1 || true", pkgDir, 30_000).stdout, issues);
+				}
 			}
+		} else {
+			parseTscOutput(run("npx tsc --noEmit 2>&1 || true", cwd, 30_000).stdout, issues);
 		}
 	}
 
@@ -63,4 +76,30 @@ export function runTypeCheck(cwd: string, isDart = false): CheckResult {
 		issues,
 		duration: Date.now() - start,
 	};
+}
+
+function parseTscOutput(stdout: string, issues: Issue[]): void {
+	for (const line of stdout.split("\n")) {
+		const match = line.match(/^(.+)\((\d+),\d+\): error (TS\d+): (.+)/);
+		if (match) {
+			issues.push({
+				severity: "error",
+				file: match[1],
+				line: parseInt(match[2], 10),
+				rule: match[3],
+				message: match[4],
+			});
+		}
+	}
+}
+
+function readTsconfig(cwd: string, name: string): { references?: { path: string }[] } | null {
+	try {
+		// Strip comments from tsconfig before parsing
+		const raw = readFileSync(join(cwd, name), "utf-8");
+		const stripped = raw.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+		return JSON.parse(stripped);
+	} catch {
+		return null;
+	}
 }

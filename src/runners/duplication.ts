@@ -107,7 +107,8 @@ export function runDuplication(cwd: string): CheckResult {
 	}
 
 	const dupPct = totalSourceLines > 0 ? Math.round((duplicates.length * MIN_LINES * 100) / totalSourceLines) : 0;
-	const score = Math.max(0, Math.min(100, 100 - dupPct * 3 - duplicates.length));
+	// Score based on duplication percentage (not absolute count)
+	const score = Math.max(0, Math.min(100, 100 - dupPct * 5));
 
 	return {
 		name: "duplication",

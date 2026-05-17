@@ -12,7 +12,7 @@
 
 import { basename, dirname, extname } from "node:path";
 import { getProductionFiles, type SourceFile } from "../fs-utils.js";
-import type { CheckResult, Issue } from "../types.js";
+import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { generateContainerDiagram } from "./diagrams.js";
 
@@ -31,7 +31,7 @@ export interface ArchGraph {
 	orphans: string[];
 }
 
-export function runArchitecture(cwd: string): CheckResult {
+export function runArchitecture(cwd: string, workspace?: WorkspaceInfo): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 	const files = getProductionFiles(cwd);
@@ -52,7 +52,7 @@ export function runArchitecture(cwd: string): CheckResult {
 	// ── Circular dependencies ──
 	const cycles = findCycles(graph.nodes);
 	for (const cycle of cycles.slice(0, 5)) {
-		issues.push({ severity: "error", message: `Circular: ${cycle.map(short).join(" → ")}`, rule: "circular-dep" });
+		issues.push({ severity: "error", message: `Circular: ${cycle.map(short).join(" \u2192 ")}`, file: cycle[0], rule: "circular-dep" });
 	}
 	if (cycles.length > 5) {
 		issues.push({ severity: "error", message: `...and ${cycles.length - 5} more cycles`, rule: "circular-dep" });
@@ -74,13 +74,17 @@ export function runArchitecture(cwd: string): CheckResult {
 	}
 
 	// ── Orphan files (not imported by anyone) ──
+	// Skip in monorepos — cross-package imports use package names (not relative paths)
+	// so the graph is incomplete and would produce many false positives.
 	const entrypoints = new Set(["index.ts", "index.tsx", "main.ts", "main.tsx", "cli.ts", "App.tsx", "App.ts"]);
 	const orphans: string[] = [];
-	for (const [path, node] of graph.nodes) {
-		const isEntry = entrypoints.has(basename(path));
-		if (node.importedBy.length === 0 && !isEntry) {
-			orphans.push(path);
-			issues.push({ severity: "warning", message: `Orphan: not imported by any file (dead module?)`, file: path, rule: "orphan-module" });
+	if (!workspace?.isMonorepo) {
+		for (const [path, node] of graph.nodes) {
+			const isEntry = entrypoints.has(basename(path));
+			if (node.importedBy.length === 0 && !isEntry) {
+				orphans.push(path);
+				issues.push({ severity: "warning", message: `Orphan: not imported by any file (dead module?)`, file: path, rule: "orphan-module" });
+			}
 		}
 	}
 
@@ -112,9 +116,14 @@ export function runArchitecture(cwd: string): CheckResult {
 		}
 	}
 
-	// ── Score ──
-	const penalty = cycles.length * 15 + godModules.length * 5 + orphans.length * 2 + highFanOut * 3 + connectors * 4;
-	const score = Math.max(0, Math.min(100, 100 - penalty));
+	// ── Score ── proportional to module count
+	const totalModules = graph.nodes.size || 1;
+	const cyclePenalty = Math.min(30, cycles.length * Math.max(5, 30 / Math.sqrt(totalModules)));
+	const godPenalty = Math.min(15, (godModules.length / totalModules) * 100);
+	const orphanPenalty = Math.min(10, (orphans.length / totalModules) * 50);
+	const fanOutPenalty = Math.min(15, (highFanOut / totalModules) * 80);
+	const connectorPenalty = Math.min(10, (connectors / totalModules) * 60);
+	const score = Math.max(0, Math.min(100, Math.round(100 - cyclePenalty - godPenalty - orphanPenalty - fanOutPenalty - connectorPenalty)));
 
 	// ── Build details with graph data for visualization ──
 	const graphData: Record<string, { imports: string[]; importedBy: string[]; dir: string }> = {};
@@ -232,11 +241,11 @@ function findCycles(nodes: Map<string, ModuleNode>): string[][] {
 		if (inStack.has(node)) {
 			const cycleStart = path.indexOf(node);
 			if (cycleStart >= 0) {
-				const cycle = path.slice(cycleStart).map(short);
-				const key = [...cycle].sort().join(",");
+				const cycle = path.slice(cycleStart);
+				const key = cycle.map(short).sort().join(",");
 				if (!seen.has(key)) {
 					seen.add(key);
-					cycles.push([...cycle, short(node)]);
+					cycles.push([...cycle, node]); // full paths
 				}
 			}
 			return;

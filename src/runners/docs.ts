@@ -14,11 +14,13 @@ export function runDocs(cwd: string): CheckResult {
 
 	// Check README
 	const readmePath = join(cwd, "README.md");
+	let readmeLines = 0;
 	if (!existsSync(readmePath)) {
 		issues.push({ severity: "error", message: "No README.md — project has no documentation", rule: "no-readme" });
 	} else {
 		const readme = readFileSync(readmePath, "utf-8");
 		const lines = readme.split("\n").length;
+		readmeLines = lines;
 		if (lines < 5) {
 			issues.push({ severity: "warning", message: `README.md is only ${lines} lines — minimal documentation`, rule: "short-readme" });
 			readmeScore = 30;
@@ -76,17 +78,29 @@ export function runDocs(cwd: string): CheckResult {
 		exportDocScore = 100; // no exports = nothing to document
 	}
 
-	const score = Math.round(readmeScore * 0.5 + exportDocScore * 0.5);
+	// Check for CHANGELOG
+	let changelogScore = 50; // neutral by default
+	if (existsSync(join(cwd, "CHANGELOG.md")) || existsSync(join(cwd, "CHANGES.md"))) {
+		changelogScore = 100;
+	} else if (existsSync(join(cwd, ".changeset"))) {
+		changelogScore = 80; // using changesets = will have changelog
+	} else {
+		issues.push({ severity: "info", message: "No CHANGELOG.md — version history not documented", rule: "no-changelog" });
+		changelogScore = 30;
+	}
+
+	const score = Math.round(readmeScore * 0.4 + exportDocScore * 0.4 + changelogScore * 0.2);
 
 	return {
 		name: "docs",
 		score,
 		grade: gradeFromScore(score),
 		details: {
-			readmeLines: existsSync(join(cwd, "README.md")) ? readFileSync(join(cwd, "README.md"), "utf-8").split("\n").length : 0,
+			readmeLines,
 			totalExports,
 			documentedExports,
 			documentedPct: totalExports > 0 ? `${Math.round((documentedExports / totalExports) * 100)}%` : "n/a",
+			hasChangelog: changelogScore >= 80,
 		},
 		issues,
 		duration: Date.now() - start,

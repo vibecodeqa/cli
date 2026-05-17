@@ -171,7 +171,12 @@ export function runStandards(cwd: string, stack: StackInfo): CheckResult {
 
 	const errors = issues.filter((i) => i.severity === "error").length;
 	const warnings = issues.filter((i) => i.severity === "warning").length;
-	const score = Math.max(0, Math.min(100, 100 - errors * 8 - warnings * 3 - largeFiles * 5));
+	// Scale penalties relative to codebase size — cap individual penalties
+	const totalFiles = files.length || 1;
+	const errorPenalty = Math.min(40, (errors / totalFiles) * 150);
+	const warningPenalty = Math.min(30, (warnings / totalFiles) * 80);
+	const largePenalty = Math.min(20, (largeFiles / totalFiles) * 100);
+	const score = Math.max(0, Math.min(100, Math.round(100 - errorPenalty - warningPenalty - largePenalty)));
 
 	return {
 		name: "standards",

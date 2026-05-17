@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { collectSourceFiles } from "../fs-utils.js";
-import type { CheckResult, Issue, StackInfo } from "../types.js";
+import type { CheckResult, Issue, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
 interface FileCheck {
@@ -29,7 +29,7 @@ const DART_FILES: FileCheck[] = [
 	{ name: "README.md", path: "README.md", required: false, description: "Project documentation" },
 ];
 
-export function runStructure(cwd: string, stack: StackInfo): CheckResult {
+export function runStructure(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 	const found: string[] = [];
@@ -40,8 +40,24 @@ export function runStructure(cwd: string, stack: StackInfo): CheckResult {
 
 	// Check standard files
 	for (const fc of EXPECTED_FILES) {
-		// tsconfig is required only for TS projects
-		const required = fc.name === "tsconfig.json" ? stack.language === "typescript" : fc.required;
+		// tsconfig: in monorepos, tsconfig.base.json or per-package tsconfigis acceptable
+		let required = fc.name === "tsconfig.json" ? stack.language === "typescript" : fc.required;
+		if (fc.name === "tsconfig.json" && workspace?.isMonorepo) {
+			// Accept tsconfig.base.json or any tsconfig variant
+			if (existsSync(join(cwd, "tsconfig.base.json")) || existsSync(join(cwd, "tsconfig.json"))) {
+				found.push(fc.name);
+				continue;
+			}
+			// Check if packages have their own tsconfigs
+			const pkgHasTsconfig = workspace.packages.some(
+				(p) => existsSync(join(cwd, p.path, "tsconfig.json")),
+			);
+			if (pkgHasTsconfig) {
+				found.push("tsconfig (per-package)");
+				continue;
+			}
+			required = true; // still missing
+		}
 		if (existsSync(join(cwd, fc.path))) {
 			found.push(fc.name);
 		} else {
@@ -63,15 +79,19 @@ export function runStructure(cwd: string, stack: StackInfo): CheckResult {
 		issues.push({ severity: "warning", message: "No lockfile found — builds may not be reproducible", rule: "missing-lockfile" });
 	}
 
-	// Check for source directory
+	// Check for source directory — monorepos have source in packages/*/src/
 	const srcDirs = isDart ? ["lib"] : ["src", "web/src"];
-	const hasSrc = srcDirs.some((d) => existsSync(join(cwd, d)));
+	let hasSrc = srcDirs.some((d) => existsSync(join(cwd, d)));
+	if (!hasSrc && workspace?.isMonorepo) {
+		hasSrc = workspace.packages.some((p) => p.hasSrc);
+	}
 	if (!hasSrc) {
 		issues.push({ severity: "error", message: `No ${srcDirs[0]}/ directory found`, rule: "no-src" });
 	}
 
-	// Count source vs test files
-	const allFiles = collectSourceFiles(cwd, { includeTests: true });
+	// Count source vs test files (using workspace-aware roots)
+	const srcRoots = workspace?.isMonorepo ? workspace.srcRoots : undefined;
+	const allFiles = collectSourceFiles(cwd, { includeTests: true, srcRoots });
 	const srcCount = allFiles.filter((f) => !f.isTest).length;
 	const testCount = allFiles.filter((f) => f.isTest).length;
 	const testRatio = srcCount > 0 ? testCount / srcCount : 0;
@@ -91,8 +111,11 @@ export function runStructure(cwd: string, stack: StackInfo): CheckResult {
 		try {
 			const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf-8"));
 			const scripts = pkg.scripts || {};
-			if (!scripts.test) issues.push({ severity: "warning", message: "No 'test' script in package.json", rule: "no-test-script" });
-			if (!scripts.build && !scripts.dev)
+			// Monorepos often have test scripts in packages, not root
+			if (!scripts.test && !workspace?.isMonorepo) {
+				issues.push({ severity: "warning", message: "No 'test' script in package.json", rule: "no-test-script" });
+			}
+			if (!scripts.build && !scripts.dev && !workspace?.isMonorepo)
 				issues.push({ severity: "info", message: "No 'build' or 'dev' script in package.json", rule: "no-build-script" });
 		} catch {
 			/* no package.json or parse error */
@@ -107,7 +130,14 @@ export function runStructure(cwd: string, stack: StackInfo): CheckResult {
 		name: "structure",
 		score,
 		grade: gradeFromScore(score),
-		details: { found, missing, srcFiles: srcCount, testFiles: testCount, testRatio: `${Math.round(testRatio * 100)}%` },
+		details: {
+			found,
+			missing,
+			srcFiles: srcCount,
+			testFiles: testCount,
+			testRatio: `${Math.round(testRatio * 100)}%`,
+			...(workspace?.isMonorepo ? { monorepo: true, workspaceTool: workspace.tool, packages: workspace.packages.length } : {}),
+		},
 		issues,
 		duration: Date.now() - start,
 	};

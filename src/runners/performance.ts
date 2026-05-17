@@ -7,7 +7,7 @@
  *   4. CSS-in-JS overhead — detects runtime CSS solutions vs zero-runtime alternatives
  */
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { getProductionFiles, readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
@@ -25,6 +25,11 @@ const HEAVY_DEPS: Record<string, { kb: number; alt: string }> = {
 	firebase: { kb: 200, alt: "firebase/app + only needed modules" },
 	"aws-sdk": { kb: 400, alt: "@aws-sdk/client-* (v3 modular)" },
 	underscore: { kb: 25, alt: "native ES methods" },
+	"@angular/core": { kb: 500, alt: "consider lighter framework if possible" },
+	jquery: { kb: 90, alt: "native DOM APIs or Alpine.js" },
+	"core-js": { kb: 150, alt: "target modern browsers, use browserslist" },
+	numeral: { kb: 30, alt: "Intl.NumberFormat (built-in)" },
+	"date-fns": { kb: 40, alt: "import only needed functions: date-fns/format" },
 };
 
 export function runPerformance(cwd: string): CheckResult {
@@ -153,9 +158,13 @@ export function runPerformance(cwd: string): CheckResult {
 		}
 	}
 
-	// Score
-	const penalty = barrelImports * 3 + heavyDeps * 8 + dynamicOpportunities * 2 + cssInJsRuntime * 2;
-	const score = Math.max(0, Math.min(100, 100 - penalty));
+	// Score — proportional to codebase, capped per category
+	const totalFiles = sourceFiles.length || 1;
+	const barrelPenalty = Math.min(15, (barrelImports / totalFiles) * 200);
+	const heavyPenalty = Math.min(30, heavyDeps * 8);
+	const dynamicPenalty = Math.min(10, dynamicOpportunities * 3);
+	const cssPenalty = Math.min(10, cssInJsRuntime * 5);
+	const score = Math.max(0, Math.min(100, Math.round(100 - barrelPenalty - heavyPenalty - dynamicPenalty - cssPenalty)));
 
 	return {
 		name: "performance",
@@ -174,16 +183,23 @@ export function runPerformance(cwd: string): CheckResult {
 	};
 }
 
-function dirSizeKB(dir: string): number {
+function dirSizeKB(dir: string, depth = 0): number {
+	if (depth > 10) return 0; // prevent infinite recursion
 	let total = 0;
-	for (const entry of readdirSync(dir)) {
-		const full = join(dir, entry);
-		const stat = statSync(full);
-		if (stat.isDirectory()) {
-			total += dirSizeKB(full);
-		} else {
-			total += stat.size;
+	try {
+		for (const entry of readdirSync(dir)) {
+			if (entry === "node_modules" || entry === ".git") continue;
+			const full = join(dir, entry);
+			try {
+				const lst = lstatSync(full);
+				if (lst.isSymbolicLink()) continue; // skip symlinks
+				if (lst.isDirectory()) {
+					total += dirSizeKB(full, depth + 1);
+				} else {
+					total += lst.size;
+				}
+			} catch { /* skip inaccessible files */ }
 		}
-	}
+	} catch { /* skip inaccessible dirs */ }
 	return total / 1024;
 }

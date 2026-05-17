@@ -83,25 +83,33 @@ function countPatterns(content: string) {
 
 // ── File discovery ──
 
-function findTestFiles(cwd: string): TestFile[] {
+function findTestFiles(cwd: string, srcRoots?: string[]): TestFile[] {
 	const files: TestFile[] = [];
-	const dirs = ["src", "web/src", "test", "tests", "__tests__", "e2e", "playwright"];
+	const dirs = srcRoots
+		? [...srcRoots, "e2e", "playwright"]
+		: ["src", "web/src", "test", "tests", "__tests__", "e2e", "playwright"];
+	const seen = new Set<string>();
 	for (const dir of dirs) {
 		const full = join(cwd, dir);
+		if (seen.has(full)) continue;
+		seen.add(full);
 		if (existsSync(full)) walkTests(full, cwd, files);
 	}
-	// Also check root for standalone test configs (e.g. playwright.config.ts)
 	return files;
 }
 
 function walkTests(dir: string, cwd: string, out: TestFile[]): void {
-	for (const entry of readdirSync(dir)) {
+	let entries: string[];
+	try { entries = readdirSync(dir); } catch { return; }
+	for (const entry of entries) {
 		if (entry === "node_modules" || entry === "dist" || entry === ".git") continue;
 		const full = join(dir, entry);
-		if (statSync(full).isDirectory()) {
-			walkTests(full, cwd, out);
-			continue;
-		}
+		try {
+			if (statSync(full).isDirectory()) {
+				walkTests(full, cwd, out);
+				continue;
+			}
+		} catch { continue; }
 		const ext = extname(entry);
 		if (![".ts", ".tsx", ".js", ".jsx"].includes(ext)) continue;
 		if (
@@ -115,7 +123,8 @@ function walkTests(dir: string, cwd: string, out: TestFile[]): void {
 		)
 			continue;
 
-		const content = readFileSync(full, "utf-8");
+		let content: string;
+		try { content = readFileSync(full, "utf-8"); } catch { continue; }
 		const relPath = full.replace(`${cwd}/`, "");
 		const layer = classifyTestFile(relPath, content);
 		const patterns = countPatterns(content);
@@ -129,8 +138,8 @@ function walkTests(dir: string, cwd: string, out: TestFile[]): void {
 	}
 }
 
-function findSourceFiles(cwd: string): string[] {
-	return getProductionFiles(cwd).map((f) => f.path);
+function findSourceFiles(cwd: string, srcRoots?: string[]): string[] {
+	return getProductionFiles(cwd, srcRoots).map((f) => f.path);
 }
 
 // ── Pairing analysis ──
@@ -174,16 +183,39 @@ function detectE2E(cwd: string): { tool: string; configured: boolean } {
 	return { tool: "none", configured: false };
 }
 
-// ── Coverage collection ──
+// ── Combined test + coverage execution (single run) ──
 
-function collectCoverage(cwd: string, stack: StackInfo): CoverageData | null {
-	if (stack.testRunner === "none") return null;
+function runTestsWithCoverage(cwd: string, stack: StackInfo): { execution: { passed: number; failed: number; total: number } | null; coverage: CoverageData | null } {
+	if (stack.testRunner === "none") return { execution: null, coverage: null };
 
+	// Single command: run tests with JSON reporter AND coverage
 	const cmd =
 		stack.testRunner === "vitest"
-			? "npx vitest run --coverage 2>/dev/null || true"
-			: "npx jest --coverage --coverageReporters=json-summary 2>/dev/null || true";
-	run(cmd, cwd, 120_000);
+			? "npx vitest run --reporter=json --coverage 2>/dev/null || true"
+			: "npx jest --json --coverage --coverageReporters=json-summary 2>/dev/null || true";
+	const { stdout } = run(cmd, cwd, 120_000);
+
+	// Parse execution results from JSON output
+	let execution: { passed: number; failed: number; total: number } | null = null;
+	try {
+		const jsonStart = stdout.indexOf("{");
+		if (jsonStart >= 0) {
+			const data = JSON.parse(stdout.slice(jsonStart));
+			execution = {
+				passed: data.numPassedTests || 0,
+				failed: data.numFailedTests || 0,
+				total: data.numTotalTests || 0,
+			};
+		}
+	} catch { /* parse failed */ }
+
+	// Parse coverage from file
+	const coverage = readCoverageFile(cwd);
+
+	return { execution, coverage };
+}
+
+function readCoverageFile(cwd: string): CoverageData | null {
 
 	const searchPaths = ["coverage/coverage-summary.json", "test-results/coverage/coverage-summary.json"];
 	for (const p of searchPaths) {
@@ -208,28 +240,6 @@ function collectCoverage(cwd: string, stack: StackInfo): CoverageData | null {
 }
 
 // ── Test execution ──
-
-function executeTests(cwd: string, stack: StackInfo): { passed: number; failed: number; total: number } | null {
-	if (stack.testRunner === "none") return null;
-
-	const cmd = stack.testRunner === "vitest" ? "npx vitest run --reporter=json 2>/dev/null || true" : "npx jest --json 2>/dev/null || true";
-	const { stdout } = run(cmd, cwd, 120_000);
-
-	try {
-		const jsonStart = stdout.indexOf("{");
-		if (jsonStart >= 0) {
-			const data = JSON.parse(stdout.slice(jsonStart));
-			return {
-				passed: data.numPassedTests || 0,
-				failed: data.numFailedTests || 0,
-				total: data.numTotalTests || 0,
-			};
-		}
-	} catch {
-		/* parse failed */
-	}
-	return null;
-}
 
 // ── Quality analysis ──
 
@@ -271,13 +281,13 @@ function analyzeQuality(testFiles: TestFile[]): QualityMetrics {
 
 // ── Main runner ──
 
-export function runTesting(cwd: string, stack: StackInfo, skipExec: boolean): CheckResult {
+export function runTesting(cwd: string, stack: StackInfo, skipExec: boolean, srcRoots?: string[]): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 
 	// 1. Discover test files and classify by layer
-	const testFiles = findTestFiles(cwd);
-	const srcFiles = findSourceFiles(cwd);
+	const testFiles = findTestFiles(cwd, srcRoots);
+	const srcFiles = findSourceFiles(cwd, srcRoots);
 
 	if (testFiles.length === 0) {
 		return {
@@ -409,9 +419,10 @@ export function runTesting(cwd: string, stack: StackInfo, skipExec: boolean): Ch
 	let coverage: CoverageData | null = null;
 
 	if (!skipExec) {
-		// Run with coverage to get both results in one pass
-		coverage = collectCoverage(cwd, stack);
-		execution = executeTests(cwd, stack);
+		// Run tests ONCE with both coverage and JSON output
+		const combined = runTestsWithCoverage(cwd, stack);
+		execution = combined.execution;
+		coverage = combined.coverage;
 
 		if (execution) {
 			if (execution.failed > 0) {

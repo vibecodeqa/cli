@@ -26,7 +26,7 @@ export function runDependencies(cwd: string, stack: StackInfo): CheckResult {
 			/* parse failed */
 		}
 		if (majorOutdated > 0) issues.push({ severity: "warning", message: `${majorOutdated} packages behind by a major version` });
-		const score = Math.max(0, Math.min(100, 100 - majorOutdated));
+		const score = Math.max(0, Math.min(100, 100 - Math.min(30, majorOutdated * 3)));
 		return {
 			name: "dependencies",
 			score,
@@ -110,8 +110,12 @@ export function runDependencies(cwd: string, stack: StackInfo): CheckResult {
 			message: `${majorOutdated} packages behind by a major version`,
 		});
 
-	// Score: -25 per critical, -15 per high, -5 per moderate, -1 per major outdated
-	const score = Math.max(0, Math.min(100, 100 - vulnCritical * 25 - vulnHigh * 15 - vulnModerate * 5 - majorOutdated * 1));
+	// Score: harsh on critical/high, with diminishing returns for many vulns
+	const critPenalty = Math.min(50, vulnCritical * 20);
+	const highPenalty = Math.min(30, vulnHigh * 10);
+	const modPenalty = Math.min(15, vulnModerate * 3);
+	const outdatedPenalty = Math.min(10, majorOutdated);
+	const score = Math.max(0, Math.min(100, Math.round(100 - critPenalty - highPenalty - modPenalty - outdatedPenalty)));
 
 	return {
 		name: "dependencies",

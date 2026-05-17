@@ -92,13 +92,13 @@ describe("generateArchSVG", () => {
 		expect(svg).toContain("circular");
 	});
 
-	it("handles >50 nodes gracefully", () => {
+	it("handles >120 nodes gracefully", () => {
 		const graph: Record<string, { imports: string[]; importedBy: string[]; dir: string }> = {};
-		for (let i = 0; i < 55; i++) {
+		for (let i = 0; i < 125; i++) {
 			graph[`src/mod${i}.ts`] = { imports: [], importedBy: [], dir: "src" };
 		}
 		const result = generateArchSVG({ graph, circularDeps: 0 });
-		expect(result).toContain("55 modules"); // fallback message
+		expect(result).toContain("125 modules"); // fallback message
 		expect(result).not.toContain("<svg");
 	});
 });

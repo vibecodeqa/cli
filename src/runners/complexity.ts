@@ -7,6 +7,7 @@ import { gradeFromScore } from "../types.js";
 interface FunctionMetric {
 	file: string;
 	name: string;
+	startLine: number;
 	lines: number;
 	complexity: number;
 }
@@ -39,6 +40,7 @@ export function runComplexity(cwd: string): CheckResult {
 					severity: "warning",
 					message: `${f.name}: ${f.lines} lines (max ${MAX_FUNCTION_LINES})`,
 					file: f.file,
+					line: f.startLine,
 					rule: "long-function",
 				});
 			}
@@ -48,14 +50,18 @@ export function runComplexity(cwd: string): CheckResult {
 					severity: "warning",
 					message: `${f.name}: complexity ${f.complexity} (max ${MAX_COMPLEXITY})`,
 					file: f.file,
+					line: f.startLine,
 					rule: "high-complexity",
 				});
 			}
 		}
 	}
 
-	// Score: start at 100, -3 per long function, -5 per complex function
-	const score = Math.max(0, Math.min(100, 100 - longFunctions * 3 - complexFunctions * 5));
+	// Score: based on percentage of functions that are problematic
+	const totalFns = functions.length || 1;
+	const longPct = (longFunctions / totalFns) * 100;
+	const complexPct = (complexFunctions / totalFns) * 100;
+	const score = Math.max(0, Math.min(100, Math.round(100 - longPct * 1.5 - complexPct * 2.5)));
 
 	return {
 		name: "complexity",
@@ -112,6 +118,7 @@ function extractFunctions(content: string, filePath: string): FunctionMetric[] {
 				funcs.push({
 					file: filePath,
 					name: funcName,
+					startLine: funcStart + 1, // 1-indexed
 					lines: funcLines,
 					complexity: measureComplexity(funcContent),
 				});

@@ -1,5 +1,7 @@
-/** Secret detection — scans for hardcoded keys/tokens in source files. */
+/** Secret detection — scans for hardcoded keys/tokens in source files and .env audit. */
 
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { collectAllFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -65,7 +67,49 @@ export function runSecrets(cwd: string): CheckResult {
 		}
 	}
 
-	const score = issues.length === 0 ? 100 : Math.max(0, 100 - issues.length * 25);
+	// ── .env file audit ──
+	const envFiles = [".env", ".env.local", ".env.production", ".env.development"];
+	const gitignore = existsSync(join(cwd, ".gitignore"))
+		? readFileSync(join(cwd, ".gitignore"), "utf-8")
+		: "";
+
+	for (const envFile of envFiles) {
+		if (!existsSync(join(cwd, envFile))) continue;
+		// Check if .env is in .gitignore
+		const isIgnored = gitignore.split("\n").some((line) => {
+			const trimmed = line.trim();
+			return trimmed === envFile || trimmed === ".env" || trimmed === ".env*";
+		});
+		if (!isIgnored) {
+			issues.push({
+				severity: "error",
+				message: `${envFile} exists but is not in .gitignore — secrets may be committed`,
+				file: envFile,
+				rule: "env-not-ignored",
+			});
+		}
+
+		// Check for actual secrets in .env files
+		const content = readFileSync(join(cwd, envFile), "utf-8");
+		for (const line of content.split("\n")) {
+			if (line.startsWith("#") || !line.includes("=")) continue;
+			const [key, ...valueParts] = line.split("=");
+			const value = valueParts.join("=").trim().replace(/^["']|["']$/g, "");
+			if (value.length > 20 && /(?:KEY|SECRET|TOKEN|PASSWORD|PRIVATE)/i.test(key || "")) {
+				issues.push({
+					severity: "warning",
+					message: `${envFile} contains ${key?.trim()} with a long value — ensure this is not committed`,
+					file: envFile,
+					rule: "env-secret-value",
+				});
+			}
+		}
+	}
+
+	// Proportional: 1 secret in 100 files is minor; 1 secret in 3 files is critical
+	const totalFiles = sourceFiles.length || 1;
+	const secretPct = (issues.length / totalFiles) * 100;
+	const score = issues.length === 0 ? 100 : Math.max(0, Math.round(100 - secretPct * 20 - Math.min(issues.length, 3) * 10));
 
 	return {
 		name: "secrets",

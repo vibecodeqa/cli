@@ -84,6 +84,16 @@ h3{font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:
 .stack{display:flex;gap:0.35rem;flex-wrap:wrap;margin-top:1rem}
 .stack span{background:var(--card);border:1px solid var(--border);padding:0.1rem 0.45rem;border-radius:9999px;font-size:0.62rem;color:var(--muted)}
 
+/* ── Workspace / Repo structure ── */
+.ws-info{display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;font-size:0.72rem;color:var(--muted)}
+.ws-badge{background:var(--accent);color:#fff;padding:0.15rem 0.5rem;border-radius:4px;font-size:0.65rem;font-weight:700}
+.ws-pkgs{display:flex;flex-direction:column;gap:0.15rem}
+.ws-pkg{display:flex;gap:0.6rem;align-items:center;font-size:0.68rem;padding:0.15rem 0.4rem;background:var(--card);border-radius:4px}
+.ws-path{font-family:monospace;color:var(--text);min-width:140px}
+.ws-name{color:var(--muted);flex:1}
+.ws-flags{color:var(--muted);font-size:0.6rem}
+.ws-more{font-size:0.62rem;color:var(--muted);padding:0.2rem 0.4rem}
+
 /* ── Category pages ── */
 .cat-head{margin-bottom:0.3rem}
 .bar2{height:4px;background:var(--card);border-radius:2px;margin-bottom:1.5rem;overflow:hidden}
@@ -169,6 +179,7 @@ h3{font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:
 
 .footer{text-align:center;color:var(--muted);font-size:0.58rem;margin-top:2rem;padding:0.8rem 0;border-top:1px solid var(--border)}
 .footer a{color:var(--muted)}
+.muted{color:var(--muted)}
 .flink{color:var(--accent);text-decoration:none;font-family:"SF Mono",monospace}.flink:hover{text-decoration:underline}
 .arch-svg{margin:1rem 0;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .arch-svg svg{border-radius:8px}

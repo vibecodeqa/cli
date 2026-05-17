@@ -24,15 +24,33 @@ const SKIP_DIRS = new Set([
 	".dart_tool",
 	"build",
 	".flutter-plugins",
+	".next",
+	".nuxt",
+	".output",
+	"vendor",
+	"third_party",
 ]);
 const CODE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".dart"]);
 const ALL_EXTS = new Set([...CODE_EXTS, ".json", ".env", ".yaml", ".yml", ".toml"]);
 
+/** Default source directories for single-package repos */
+const DEFAULT_SRC_DIRS = ["src", "web/src", "lib", "app"];
+
+/**
+ * Set global source roots (called once from cli.ts after workspace detection).
+ * All subsequent calls to collectSourceFiles / getProductionFiles use these
+ * unless overridden per-call.
+ */
+let _globalSrcRoots: string[] | undefined;
+export function setGlobalSrcRoots(roots: string[] | undefined): void {
+	_globalSrcRoots = roots;
+}
+
 /** Walk source directories and return all code files. */
-export function collectSourceFiles(cwd: string, opts?: { includeTests?: boolean; extraExts?: boolean }): SourceFile[] {
+export function collectSourceFiles(cwd: string, opts?: { includeTests?: boolean; extraExts?: boolean; srcRoots?: string[] }): SourceFile[] {
 	const files: SourceFile[] = [];
-	const dirs = ["src", "web/src", "lib"];
-	if (opts?.includeTests) dirs.push("test", "tests", "__tests__");
+	const dirs = [...(opts?.srcRoots || _globalSrcRoots || DEFAULT_SRC_DIRS)];
+	if (opts?.includeTests && !opts?.srcRoots && !_globalSrcRoots) dirs.push("test", "tests", "__tests__");
 	for (const dir of dirs) {
 		try {
 			walk(join(cwd, dir), cwd, files, opts?.extraExts ? ALL_EXTS : CODE_EXTS);
@@ -44,8 +62,8 @@ export function collectSourceFiles(cwd: string, opts?: { includeTests?: boolean;
 }
 
 /** Get only production source files (no tests). */
-export function getProductionFiles(cwd: string): SourceFile[] {
-	return collectSourceFiles(cwd).filter((f) => !f.isTest);
+export function getProductionFiles(cwd: string, srcRoots?: string[]): SourceFile[] {
+	return collectSourceFiles(cwd, { srcRoots }).filter((f) => !f.isTest);
 }
 
 /** Get only test files. */
@@ -100,8 +118,11 @@ function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>): v
 				entry.includes(".test.") ||
 				entry.includes(".spec.") ||
 				entry.endsWith("_test.dart") ||
-				relPath.includes("__tests__") ||
-				relPath.includes("test/");
+				relPath.includes("__tests__/") ||
+				relPath.includes("/test/") ||
+				relPath.startsWith("test/") ||
+				relPath.includes("/tests/") ||
+				relPath.startsWith("tests/");
 			out.push({
 				path: relPath,
 				fullPath: full,

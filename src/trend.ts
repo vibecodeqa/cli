@@ -47,15 +47,35 @@ export function computeTrend(report: VibeReport, outputDir: string): TrendDelta 
 	return { scoreDelta, checkDeltas, newIssues, fixedIssues, prevTimestamp: prev.timestamp };
 }
 
-/** Render trend delta as terminal-friendly string. */
-export function formatTrend(trend: TrendDelta): string {
-	const arrow = trend.scoreDelta > 0 ? "↑" : trend.scoreDelta < 0 ? "↓" : "=";
+/** Render trend delta as terminal-friendly string with sparkline. */
+export function formatTrend(trend: TrendDelta, historyScores?: number[]): string {
+	const arrow = trend.scoreDelta > 0 ? "\u2191" : trend.scoreDelta < 0 ? "\u2193" : "=";
 	const color = trend.scoreDelta > 0 ? "\x1b[32m" : trend.scoreDelta < 0 ? "\x1b[31m" : "\x1b[2m";
 	let out = `  ${color}${arrow} ${Math.abs(trend.scoreDelta)} pts${trend.scoreDelta > 0 ? " improved" : trend.scoreDelta < 0 ? " declined" : " unchanged"}\x1b[0m`;
 	out += `  \x1b[2mvs ${trend.prevTimestamp.split("T")[0]}\x1b[0m`;
 	if (trend.fixedIssues > 0) out += `  \x1b[32m${trend.fixedIssues} fixed\x1b[0m`;
 	if (trend.newIssues > 0) out += `  \x1b[31m${trend.newIssues} new\x1b[0m`;
+
+	// Terminal sparkline from history
+	if (historyScores && historyScores.length >= 2) {
+		out += `\n  \x1b[2m${terminalSparkline(historyScores)}\x1b[0m`;
+	}
+
 	return out;
+}
+
+/** Render a sparkline using unicode block characters. */
+function terminalSparkline(values: number[]): string {
+	const blocks = ["\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587", "\u2588"];
+	const last = Math.min(values.length, 20);
+	const slice = values.slice(-last);
+	const min = Math.min(...slice);
+	const max = Math.max(...slice);
+	const range = max - min || 1;
+	return slice.map((v) => {
+		const idx = Math.min(7, Math.floor(((v - min) / range) * 7));
+		return blocks[idx];
+	}).join("");
 }
 
 /** Render trend HTML for the report. */

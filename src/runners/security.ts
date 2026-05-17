@@ -9,7 +9,7 @@ import { gradeFromScore } from "../types.js";
 interface SecurityPattern {
 	name: string;
 	pattern: RegExp;
-	severity: "error" | "warning";
+	severity: "error" | "warning" | "info";
 	message: string;
 	cwe?: string; // Common Weakness Enumeration ID
 }
@@ -129,6 +129,52 @@ const PATTERNS: SecurityPattern[] = [
 		cwe: "CWE-598",
 	},
 
+	// Client-side storage of secrets
+	{
+		name: "token in localStorage key",
+		pattern: /localStorage\.setItem\s*\(\s*['"][^'"]*(?:token|secret|password|apiKey|api_key|auth|session)[^'"]*['"]/i,
+		severity: "warning",
+		message: "Storing auth/secret data in localStorage — vulnerable to XSS. Consider HttpOnly cookies",
+		cwe: "CWE-922",
+	},
+	{
+		name: "token var in localStorage",
+		pattern: /localStorage\.setItem\s*\([^,]+,\s*(?:token|secret|password|apiKey|accessToken|refreshToken|jwt)\b/i,
+		severity: "warning",
+		message: "Storing token/secret variable in localStorage — vulnerable to XSS",
+		cwe: "CWE-922",
+	},
+	{
+		name: "JSON with token in localStorage",
+		pattern: /localStorage\.setItem\s*\([^,]+,\s*JSON\.stringify\s*\(\s*(?:\{[^}]*(?:token|secret|password|auth)[^}]*\}|[a-zA-Z]*(?:[Uu]ser|[Aa]uth|[Ss]ession))/,
+		severity: "warning",
+		message: "Storing object with auth data in localStorage — token accessible to XSS",
+		cwe: "CWE-922",
+	},
+	{
+		name: "secret in localStorage",
+		pattern: /localStorage\.setItem\s*\([^)]*(?:private_?key|access_?token|refresh_?token|jwt)/i,
+		severity: "error",
+		message: "Secret/key in localStorage — accessible to any XSS attack. Use HttpOnly cookies",
+		cwe: "CWE-922",
+	},
+
+	// Cookie security
+	{
+		name: "cookie without HttpOnly",
+		pattern: /document\.cookie\s*=(?!.*[Hh]ttp[Oo]nly)/,
+		severity: "warning",
+		message: "Setting cookie via document.cookie (not HttpOnly) — accessible to XSS",
+		cwe: "CWE-1004",
+	},
+	{
+		name: "cookie without Secure",
+		pattern: /(?:Set-Cookie|setCookie)['"]\s*[,:].*(?!.*[Ss]ecure)/,
+		severity: "info",
+		message: "Cookie may be missing Secure flag — can be sent over HTTP",
+		cwe: "CWE-614",
+	},
+
 	// Missing security headers (in response construction)
 	{
 		name: "no-cache header missing",
@@ -185,6 +231,38 @@ export function runSecurity(cwd: string): CheckResult {
 		}
 	}
 
+	// ── Context-aware localStorage audit ──
+	// Files that handle auth AND use localStorage are risky even if variable names are ambiguous
+	for (const sf of sourceFiles) {
+		const hasLocalStorage = sf.content.includes("localStorage.setItem");
+		if (!hasLocalStorage) continue;
+
+		const hasAuthContext =
+			/\b(?:token|oauth|access_token|Bearer|authorization|authenticate|login|signIn)\b/i.test(sf.content);
+		if (!hasAuthContext) continue;
+
+		// This file handles auth and persists to localStorage
+		const lines = sf.content.split("\n");
+		for (let i = 0; i < lines.length; i++) {
+			if (lines[i].includes("localStorage.setItem")) {
+				// Check if this setItem wasn't already caught by pattern rules
+				const alreadyCaught = issues.some(
+					(iss) => iss.file === sf.path && iss.line === i + 1 && iss.rule === "CWE-922",
+				);
+				if (!alreadyCaught) {
+					issues.push({
+						severity: "info",
+						message: "localStorage.setItem in auth-related file — verify no tokens/secrets are persisted client-side",
+						file: sf.path,
+						line: i + 1,
+						rule: "CWE-922",
+					});
+					cwePrefixes.add("CWE-922");
+				}
+			}
+		}
+	}
+
 	// Check for security-critical HTML files
 	const htmlFiles = ["index.html", "web/index.html", "public/index.html"];
 	for (const h of htmlFiles) {
@@ -210,7 +288,11 @@ export function runSecurity(cwd: string): CheckResult {
 
 	const errors = issues.filter((i) => i.severity === "error").length;
 	const warnings = issues.filter((i) => i.severity === "warning").length;
-	const score = Math.max(0, Math.min(100, 100 - errors * 15 - warnings * 5));
+	// Errors are critical but scale slightly with codebase size
+	const totalFiles = sourceFiles.length || 1;
+	const errorPenalty = Math.min(70, errors * Math.max(10, 50 / Math.sqrt(totalFiles)));
+	const warnPenalty = Math.min(25, warnings * Math.max(3, 20 / Math.sqrt(totalFiles)));
+	const score = Math.max(0, Math.min(100, Math.round(100 - errorPenalty - warnPenalty)));
 
 	return {
 		name: "security",

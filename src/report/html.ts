@@ -47,7 +47,7 @@ export function generatePages(report: VibeReport, historyDir?: string): Map<stri
 	const fileIssues = new Map<string, { errors: number; warnings: number; checks: Set<string> }>();
 	for (const c of allChecks) {
 		for (const iss of c.issues) {
-			if (!iss.file) continue;
+			if (!iss.file || typeof iss.file !== "string") continue;
 			const f = iss.file.split(":")[0]!;
 			const entry = fileIssues.get(f) || { errors: 0, warnings: 0, checks: new Set() };
 			if (iss.severity === "error") entry.errors++;
@@ -63,7 +63,7 @@ export function generatePages(report: VibeReport, historyDir?: string): Map<stri
 
 	const catScores: CatScore[] = GROUPS.map((g) => {
 		const checks = g.checks.map((n) => checkMap.get(n)).filter(Boolean) as CheckResult[];
-		const scored = checks.filter((c) => !det(c).skipped);
+		const scored = checks.filter((c) => !det(c).skipped && !det(c).comingSoon);
 		const avg = scored.length > 0 ? Math.round(scored.reduce((s, c) => s + c.score, 0) / scored.length) : 0;
 		return { ...g, avg, checks };
 	});

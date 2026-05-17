@@ -1,9 +1,9 @@
-/** Auto-detect project stack and git repo from files in the working directory. */
+/** Auto-detect project stack, workspace layout, and git repo from files in the working directory. */
 
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { StackInfo } from "./types.js";
+import type { StackInfo, WorkspaceInfo, WorkspacePackage } from "./types.js";
 
 export function detectStack(cwd: string): StackInfo {
 	const has = (f: string) => existsSync(join(cwd, f));
@@ -42,15 +42,15 @@ export function detectStack(cwd: string): StackInfo {
 	}
 
 	const language =
-		has("tsconfig.json") || has("tsconfig.app.json") || allDeps.typescript
+		has("tsconfig.json") || has("tsconfig.app.json") || has("tsconfig.base.json") || allDeps.typescript
 			? "typescript"
 			: allDeps.react || allDeps.vue
 				? "javascript"
 				: "unknown";
 
-	const framework = allDeps.react ? "react" : allDeps.vue ? "vue" : allDeps.svelte ? "svelte" : "none";
+	const framework = allDeps.next ? "react" : allDeps.react ? "react" : allDeps.nuxt ? "vue" : allDeps.vue ? "vue" : allDeps.svelte ? "svelte" : "none";
 
-	const bundler = allDeps.vite ? "vite" : allDeps.webpack ? "webpack" : allDeps.esbuild ? "esbuild" : "none";
+	const bundler = allDeps.next ? "vite" : allDeps.vite ? "vite" : allDeps.webpack ? "webpack" : allDeps.esbuild ? "esbuild" : "none";
 
 	const testRunner = allDeps.vitest ? "vitest" : allDeps.jest ? "jest" : "none";
 
@@ -59,6 +59,255 @@ export function detectStack(cwd: string): StackInfo {
 	const packageManager = has("pnpm-lock.yaml") ? "pnpm" : has("bun.lockb") ? "bun" : has("yarn.lock") ? "yarn" : "npm";
 
 	return { language, framework, bundler, testRunner, linter, packageManager } as StackInfo;
+}
+
+/** Detect monorepo / workspace layout. */
+export function detectWorkspace(cwd: string): WorkspaceInfo {
+	const has = (f: string) => existsSync(join(cwd, f));
+	const read = (f: string) => {
+		try { return readFileSync(join(cwd, f), "utf-8"); } catch { return ""; }
+	};
+
+	// Detect workspace tool
+	let tool: WorkspaceInfo["tool"] = "none";
+	let globs: string[] = [];
+
+	// ── Dart/Flutter monorepo (melos) ──
+	if (has("melos.yaml")) {
+		tool = "melos";
+		const content = read("melos.yaml");
+		// Extract only the `packages:` section
+		const packagesMatch = content.match(/^packages:\s*\n((?:\s+-[^\n]*\n?)*)/m);
+		if (packagesMatch) {
+			const items = packagesMatch[1].match(/^\s+-\s+['"]?([^\s'"#]+)['"]?\s*$/gm) || [];
+			globs = items.map((m) => m.replace(/^\s+-\s+/, "").replace(/['"]/g, "").trim());
+		}
+		if (globs.length === 0) globs = ["packages/*"];
+	}
+
+	// ── Node.js workspace configs ──
+	if (tool === "none" && has("pnpm-workspace.yaml")) {
+		tool = "pnpm";
+		const content = read("pnpm-workspace.yaml");
+		// Extract only the `packages:` section (stop at next top-level key or EOF)
+		const packagesMatch = content.match(/^packages:\s*\n((?:\s+-[^\n]*\n?)*)/m);
+		if (packagesMatch) {
+			const items = packagesMatch[1].match(/^\s+-\s+['"]?([^\s'"#]+)['"]?\s*$/gm) || [];
+			globs = items.map((m) => m.replace(/^\s+-\s+/, "").replace(/['"]/g, "").trim());
+		}
+	}
+
+	if (tool === "none") {
+		const pkg = read("package.json");
+		if (pkg) {
+			try {
+				const parsed = JSON.parse(pkg);
+				if (parsed.workspaces) {
+					const ws = Array.isArray(parsed.workspaces) ? parsed.workspaces : parsed.workspaces.packages || [];
+					if (ws.length > 0) {
+						tool = has("yarn.lock") ? "yarn" : "npm";
+						globs = ws;
+					}
+				}
+			} catch { /* invalid json */ }
+		}
+	}
+
+	if (has("lerna.json") && tool === "none") {
+		tool = "lerna";
+		const lerna = read("lerna.json");
+		try {
+			const parsed = JSON.parse(lerna);
+			globs = parsed.packages || ["packages/*"];
+		} catch { globs = ["packages/*"]; }
+	}
+
+	// Detect orchestration tools (overlay on top of workspace tool)
+	if (has("turbo.json") && tool !== "none" && tool !== "melos") tool = "turborepo";
+	if (has("nx.json") && tool !== "none" && tool !== "melos") tool = "nx";
+
+	if (tool === "none" || globs.length === 0) {
+		// No workspace config — check for conventional multi-dir layouts
+		return detectConventionalLayout(cwd);
+	}
+
+	// Resolve workspace entries to actual package directories
+	const packages: WorkspacePackage[] = [];
+	for (const glob of globs) {
+		resolveGlob(cwd, glob, packages);
+	}
+
+	const srcRoots = buildSrcRoots(cwd, packages);
+	return { isMonorepo: true, tool, packages, srcRoots };
+}
+
+/** Resolve a workspace glob/path to package directories. */
+function resolveGlob(cwd: string, pattern: string, packages: WorkspacePackage[]): void {
+	if (pattern.includes("**")) {
+		// Recursive glob — e.g. "packages/**"
+		const base = pattern.replace(/\/?\*\*.*$/, "");
+		const baseDir = join(cwd, base);
+		if (!existsSync(baseDir) || !statSync(baseDir).isDirectory()) return;
+		walkForPackages(cwd, baseDir, base, packages);
+	} else if (pattern.includes("*")) {
+		// Single-level glob — e.g. "packages/*"
+		const base = pattern.replace(/\/?\*.*$/, "");
+		const baseDir = join(cwd, base);
+		if (!existsSync(baseDir) || !statSync(baseDir).isDirectory()) return;
+		for (const entry of readdirSync(baseDir)) {
+			const pkgDir = join(baseDir, entry);
+			if (!statSync(pkgDir).isDirectory()) continue;
+			addPackage(`${base}/${entry}`, pkgDir, packages);
+		}
+	} else {
+		// Explicit path — e.g. "packages/sdk"
+		const pkgDir = join(cwd, pattern);
+		if (existsSync(pkgDir) && statSync(pkgDir).isDirectory()) {
+			addPackage(pattern, pkgDir, packages);
+		}
+	}
+}
+
+/** Walk recursively for packages (for ** globs). */
+function walkForPackages(cwd: string, dir: string, relBase: string, packages: WorkspacePackage[]): void {
+	let entries: string[];
+	try { entries = readdirSync(dir); } catch { return; }
+	for (const entry of entries) {
+		if (entry === "node_modules" || entry === ".git" || entry === "dist" || entry === "build") continue;
+		const full = join(dir, entry);
+		try { if (lstatSync(full).isSymbolicLink() || !statSync(full).isDirectory()) continue; } catch { continue; }
+		const relPath = relBase ? `${relBase}/${entry}` : entry;
+
+		// If this dir has a package.json or pubspec.yaml, it's a package
+		if (existsSync(join(full, "package.json")) || existsSync(join(full, "pubspec.yaml"))) {
+			addPackage(relPath, full, packages);
+		} else {
+			// Keep looking deeper
+			walkForPackages(cwd, full, relPath, packages);
+		}
+	}
+}
+
+/** Add a single package to the list, detecting its capabilities. */
+function addPackage(relPath: string, pkgDir: string, packages: WorkspacePackage[]): void {
+	// Accept packages with or without package.json (some workspaces use them loosely)
+	const pkgJsonPath = join(pkgDir, "package.json");
+	let name = relPath.split("/").pop() || relPath;
+	if (existsSync(pkgJsonPath)) {
+		try {
+			const parsed = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
+			name = parsed.name || name;
+		} catch { /* use dir name */ }
+	}
+
+	const hasSrc = existsSync(join(pkgDir, "src")) || existsSync(join(pkgDir, "app")) || existsSync(join(pkgDir, "lib"));
+	// Some packages have code at root (no src/ dir) — check for .ts/.dart files
+	const hasRootCode = !hasSrc && readdirSync(pkgDir).some(
+		(f) => f.endsWith(".ts") || f.endsWith(".tsx") || f.endsWith(".js") || f.endsWith(".jsx") || f.endsWith(".dart"),
+	);
+	const hasTests =
+		existsSync(join(pkgDir, "test")) ||
+		existsSync(join(pkgDir, "tests")) ||
+		existsSync(join(pkgDir, "__tests__")) ||
+		hasSrc; // tests often live alongside src in monorepos
+	const hasLinter =
+		existsSync(join(pkgDir, "biome.json")) ||
+		existsSync(join(pkgDir, "biome.jsonc")) ||
+		existsSync(join(pkgDir, ".eslintrc.json")) ||
+		existsSync(join(pkgDir, ".eslintrc.js")) ||
+		existsSync(join(pkgDir, "eslint.config.js")) ||
+		existsSync(join(pkgDir, "eslint.config.ts")) ||
+		existsSync(join(pkgDir, "eslint.config.mjs"));
+
+	packages.push({ name, path: relPath, hasSrc: hasSrc || hasRootCode, hasRootCode, hasTests, hasLinter });
+}
+
+/** Build srcRoots from resolved packages. */
+function buildSrcRoots(cwd: string, packages: WorkspacePackage[]): string[] {
+	const srcRoots: string[] = [];
+	const seen = new Set<string>();
+
+	function add(dir: string) {
+		if (seen.has(dir)) return;
+		seen.add(dir);
+		if (existsSync(join(cwd, dir))) srcRoots.push(dir);
+	}
+
+	for (const pkg of packages) {
+		if (pkg.hasRootCode) {
+			// Source at package root — add the package itself
+			add(pkg.path);
+		} else {
+			// Source in subdirectories
+			for (const srcDir of ["src", "app", "lib"]) {
+				add(join(pkg.path, srcDir));
+			}
+		}
+		// Test directories
+		for (const testDir of ["test", "tests", "__tests__", "e2e"]) {
+			add(join(pkg.path, testDir));
+		}
+	}
+
+	// Also include root-level dirs if they exist
+	for (const d of ["src", "web/src", "lib", "app"]) add(d);
+
+	return srcRoots;
+}
+
+/**
+ * Detect conventional multi-directory layouts that aren't formal workspaces
+ * but still have a multi-root structure (e.g. server/ + client/, apps/ + libs/).
+ */
+function detectConventionalLayout(cwd: string): WorkspaceInfo {
+	const none: WorkspaceInfo = { isMonorepo: false, tool: "none", packages: [], srcRoots: ["src", "web/src", "lib", "app"] };
+
+	// Check for common multi-app layouts
+	const conventions = [
+		["apps", "packages"],     // Turborepo/Nx convention
+		["apps", "libs"],         // Nx convention
+		["services", "packages"], // Microservices
+		["server", "client"],     // Fullstack split
+		["backend", "frontend"],  // Fullstack split
+	];
+
+	for (const dirs of conventions) {
+		const existing = dirs.filter((d) => existsSync(join(cwd, d)) && statSync(join(cwd, d)).isDirectory());
+		if (existing.length < 2) continue;
+
+		// Found a conventional layout — treat like a monorepo
+		const packages: WorkspacePackage[] = [];
+		for (const dir of existing) {
+			const entries = readdirSync(join(cwd, dir));
+			const subDirs = entries.filter((e) => {
+				try { return statSync(join(cwd, dir, e)).isDirectory(); } catch { return false; }
+			});
+			const hasPkgJson = subDirs.some((e) => existsSync(join(cwd, dir, e, "package.json")));
+
+			if (hasPkgJson) {
+				for (const entry of subDirs) {
+					addPackage(`${dir}/${entry}`, join(cwd, dir, entry), packages);
+				}
+			} else {
+				// The directory itself is a "package" (server/, client/)
+				// Only if it has a package.json or source files
+				const dirPath = join(cwd, dir);
+				const hasManifest = existsSync(join(dirPath, "package.json")) || existsSync(join(dirPath, "pubspec.yaml"));
+				const hasCode = readdirSync(dirPath).some(
+					(f) => f.endsWith(".ts") || f.endsWith(".tsx") || f.endsWith(".js") || f.endsWith(".dart"),
+				);
+				if (hasManifest || hasCode) {
+					addPackage(dir, dirPath, packages);
+				}
+			}
+		}
+
+		if (packages.length > 0) {
+			return { isMonorepo: true, tool: "none", packages, srcRoots: buildSrcRoots(cwd, packages) };
+		}
+	}
+
+	return none;
 }
 
 /** Detect GitHub/GitLab repo URL from git remote. */

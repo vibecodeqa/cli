@@ -13,7 +13,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readDeps } from "../fs-utils.js";
-import type { CheckResult, Issue } from "../types.js";
+import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
 type HasFn = (f: string) => boolean;
@@ -231,21 +231,27 @@ function checkDevExperience(cwd: string, has: HasFn): CategoryResult {
 	return { practices, followed, issues };
 }
 
-function checkCodeQualityTooling(has: HasFn, read: ReadFn): CategoryResult {
+function checkCodeQualityTooling(cwd: string, has: HasFn, read: ReadFn, workspace?: WorkspaceInfo): CategoryResult {
 	const issues: Issue[] = [];
 	let practices = 0;
 	let followed = 0;
+	const deps = readDeps(cwd);
 
-	// Linter configured
+	// Linter configured — check root config, deps, workspace packages, or CI
 	practices++;
-	if (
+	const hasRootLinter =
 		has("biome.json") ||
+		has("biome.jsonc") ||
 		has(".eslintrc.json") ||
 		has(".eslintrc.js") ||
 		has("eslint.config.js") ||
 		has("eslint.config.ts") ||
-		has("analysis_options.yaml")
-	) {
+		has("eslint.config.mjs") ||
+		has("analysis_options.yaml");
+	const hasLinterDep = !!(deps["@biomejs/biome"] || deps.eslint);
+	const hasPackageLinter = workspace?.isMonorepo && workspace.packages.some((p) => p.hasLinter);
+
+	if (hasRootLinter || hasLinterDep || hasPackageLinter) {
 		followed++;
 	} else {
 		issues.push({
@@ -257,7 +263,7 @@ function checkCodeQualityTooling(has: HasFn, read: ReadFn): CategoryResult {
 
 	// Formatter configured
 	practices++;
-	if (has("biome.json") || has(".prettierrc") || has(".prettierrc.json") || has("prettier.config.js") || has(".editorconfig")) {
+	if (has("biome.json") || has("biome.jsonc") || has(".prettierrc") || has(".prettierrc.json") || has("prettier.config.js") || has(".editorconfig") || deps["@biomejs/biome"] || deps.prettier) {
 		followed++;
 	} else {
 		issues.push({
@@ -269,7 +275,7 @@ function checkCodeQualityTooling(has: HasFn, read: ReadFn): CategoryResult {
 
 	// TypeScript strict mode
 	practices++;
-	const tsconfig = read("tsconfig.json");
+	const tsconfig = read("tsconfig.json") || read("tsconfig.base.json");
 	if (!tsconfig || tsconfig.includes('"strict": true') || tsconfig.includes('"strict":true')) {
 		followed++;
 	} else {
@@ -440,8 +446,9 @@ function checkAPIConfig(cwd: string, read: ReadFn): CategoryResult {
 	if (deps.zod || deps.joi || deps.envalid || deps["@t3-oss/env-core"] || deps["@t3-oss/env-nextjs"]) {
 		followed++;
 	} else {
-		const hasEnvUsage =
-			pkg.includes("process.env") || read("src/index.ts").includes("process.env") || read("src/main.ts").includes("process.env");
+		// Check for process.env usage in common entry points (root and workspace packages)
+		const entryFiles = ["src/index.ts", "src/main.ts", "src/server.ts", "src/app.ts"];
+		const hasEnvUsage = pkg.includes("process.env") || entryFiles.some((f) => read(f).includes("process.env"));
 		if (hasEnvUsage) {
 			issues.push({
 				severity: "info",
@@ -456,7 +463,7 @@ function checkAPIConfig(cwd: string, read: ReadFn): CategoryResult {
 	return { practices, followed, issues };
 }
 
-export function runBestPractices(cwd: string): CheckResult {
+export function runBestPractices(cwd: string, workspace?: WorkspaceInfo): CheckResult {
 	const start = Date.now();
 
 	const has: HasFn = (f: string) => existsSync(join(cwd, f));
@@ -473,7 +480,7 @@ export function runBestPractices(cwd: string): CheckResult {
 		checkSupplyChain(has, read),
 		checkRepoHygiene(has),
 		checkDevExperience(cwd, has),
-		checkCodeQualityTooling(has, read),
+		checkCodeQualityTooling(cwd, has, read, workspace),
 		checkTesting(has, read),
 		checkDocker(has, read),
 		checkGitPractices(cwd, has, read),

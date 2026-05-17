@@ -74,7 +74,10 @@ export function runTypeSafety(cwd: string, isDart = false): CheckResult {
 		}
 	}
 
-	const score = Math.max(0, Math.min(100, Math.round(100 - totalPenalty)));
+	// Scale penalty relative to codebase size
+	const totalLines = sourceFiles.reduce((s, f) => s + f.lines, 0) || 1;
+	const penaltyPerKLOC = (totalPenalty / totalLines) * 1000;
+	const score = Math.max(0, Math.min(100, Math.round(100 - penaltyPerKLOC * 3)));
 
 	return {
 		name: "type-safety",

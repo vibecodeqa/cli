@@ -116,7 +116,10 @@ export function runAccessibility(cwd: string): CheckResult {
 
 	const errors = issues.filter((i) => i.severity === "error").length;
 	const warnings = issues.filter((i) => i.severity === "warning").length;
-	const score = Math.max(0, Math.min(100, 100 - errors * 10 - warnings * 4));
+	const totalFiles = files.length || 1;
+	const errorPenalty = Math.min(60, (errors / totalFiles) * 200);
+	const warnPenalty = Math.min(30, (warnings / totalFiles) * 100);
+	const score = Math.max(0, Math.min(100, Math.round(100 - errorPenalty - warnPenalty)));
 
 	return {
 		name: "accessibility",

@@ -49,7 +49,7 @@ export function generateSARIF(report: VibeReport): string {
 				message: { text: `[${check.name}] ${issue.message}` },
 			};
 
-			if (issue.file) {
+			if (issue.file && typeof issue.file === "string") {
 				const filePath = issue.file.split(":")[0]!;
 				result.locations = [
 					{

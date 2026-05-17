@@ -7,10 +7,12 @@ Code health scanner for the AI coding era. Zero runtime deps, pure TypeScript.
 ```bash
 pnpm install        # install dev deps
 pnpm build          # tsc → dist/
-pnpm test           # vitest run (109 tests)
+pnpm test           # vitest run (115 tests)
 pnpm lint           # biome check src/
 node dist/cli.js    # self-scan
 node dist/cli.js --skip-tests --badge  # fast scan + badge SVG
+node dist/cli.js --skip-tests --top    # fast scan + top 5 issues
+node dist/cli.js --help                # show all flags
 ```
 
 ## Architecture
@@ -50,11 +52,15 @@ src/
 │   └── exec.ts         # Shared execSync wrapper
 └── report/             # HTML report generation (self-contained single file)
     ├── html.ts         # Main generator — assembles nav, sidebar, pages
-    ├── pages.ts        # Page renderers (overview, categories, issues, files)
+    ├── pages.ts        # Page renderers (overview, categories, issues, files, trends)
     ├── svg.ts          # SVG builders (ring, radar, timeline, pyramid, badge, sparkline)
     ├── sarif.ts        # SARIF 2.1.0 output for GitHub Code Scanning
     ├── styles.ts       # All CSS as a template string
     └── components.ts   # Helpers (HTML escape, file links, grade/priority colors)
+├── diagrams/           # Architecture diagram generators (split from runners/diagrams.ts)
+│   ├── index.ts        # Barrel re-export
+│   ├── graph.ts        # Dependency graph SVG + DSM matrix (interactive)
+│   └── layers.ts       # Package, sequence, layer, container diagrams
 ```
 
 ## 22 Checks across 7 categories

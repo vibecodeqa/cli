@@ -120,8 +120,12 @@ export function runContext(cwd: string): CheckResult {
 	// ── Score ──
 	const avgImports = files.length > 0 ? totalImports / files.length : 0;
 	const avgTokens = files.length > 0 ? totalTokens / files.length : 0;
-	const penalty = highTokenFiles * 5 + heavyImportFiles * 3 + circularDeps * 15 + contextSinks * 2;
-	const score = Math.max(0, Math.min(100, 100 - penalty));
+	// Proportional scoring — penalize based on percentage of problematic files
+	const totalFiles = files.length || 1;
+	const highTokenPct = (highTokenFiles / totalFiles) * 100;
+	const heavyImportPct = (heavyImportFiles / totalFiles) * 100;
+	const penalty = highTokenPct * 1.5 + heavyImportPct * 1 + Math.min(circularDeps, 5) * 8 + contextSinks * 3;
+	const score = Math.max(0, Math.min(100, Math.round(100 - penalty)));
 
 	return {
 		name: "context",

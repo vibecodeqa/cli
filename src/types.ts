@@ -29,6 +29,7 @@ export interface VibeReport {
 		node: string;
 		duration: number; // total ms
 		stack: StackInfo;
+		workspace?: WorkspaceInfo;
 		repoUrl: string | null; // GitHub/GitLab URL for file links
 		branch: string;
 	};
@@ -41,6 +42,23 @@ export interface StackInfo {
 	testRunner: "vitest" | "jest" | "flutter_test" | "dart_test" | "none" | "unknown";
 	linter: "biome" | "eslint" | "dart_analyze" | "none" | "unknown";
 	packageManager: "pnpm" | "npm" | "yarn" | "bun" | "pub" | "unknown";
+}
+
+export interface WorkspacePackage {
+	name: string; // e.g. "@org/sdk"
+	path: string; // relative path e.g. "packages/sdk"
+	hasSrc: boolean; // has src/, app/, or lib/ directory
+	hasRootCode: boolean; // source files directly in package root (no src/ dir)
+	hasTests: boolean;
+	hasLinter: boolean;
+}
+
+export interface WorkspaceInfo {
+	isMonorepo: boolean;
+	tool: "pnpm" | "npm" | "yarn" | "lerna" | "turborepo" | "nx" | "melos" | "none";
+	packages: WorkspacePackage[];
+	/** All directories containing source code (resolved from workspace packages) */
+	srcRoots: string[];
 }
 
 export function gradeFromScore(score: number): "A" | "B" | "C" | "D" | "F" {

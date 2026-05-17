@@ -22,6 +22,8 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 
 	let emptyCatch = 0;
 	let throwString = 0;
+	let floatingPromises = 0;
+	let catchIgnored = 0;
 
 	for (const f of files) {
 		const lines = f.content.split("\n");
@@ -43,6 +45,37 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 					rule: "throw-string",
 				});
 			}
+
+			// Async anti-patterns
+			// .catch(() => {}) — silently swallowing promise errors
+			if (/\.catch\s*\(\s*\(\s*\)\s*=>\s*\{\s*\}\s*\)/.test(line)) {
+				catchIgnored++;
+				issues.push({
+					severity: "warning",
+					message: ".catch(() => {}) silently swallows errors — at least log them",
+					file: f.path,
+					line: i + 1,
+					rule: "swallowed-promise",
+				});
+			}
+
+			// Promise without .catch or await (floating promise)
+			if (
+				/^\s*(?:fetch|axios|new Promise)\s*\(/.test(line) &&
+				!line.includes("await") &&
+				!line.includes(".then") &&
+				!line.includes(".catch") &&
+				!line.includes("return")
+			) {
+				floatingPromises++;
+				issues.push({
+					severity: "warning",
+					message: "Floating promise — missing await, .catch(), or return",
+					file: f.path,
+					line: i + 1,
+					rule: "floating-promise",
+				});
+			}
 		}
 	}
 
@@ -59,10 +92,12 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 		}
 	}
 
-	const score = Math.max(
-		0,
-		Math.min(100, 100 - emptyCatch * 5 - throwString * 2 - (stack.framework === "react" && !hasErrorBoundary ? 3 : 0)),
-	);
+	const totalFiles = files.length || 1;
+	const emptyPenalty = Math.min(40, (emptyCatch / totalFiles) * 200);
+	const throwPenalty = Math.min(15, (throwString / totalFiles) * 100);
+	const promisePenalty = Math.min(15, ((floatingPromises + catchIgnored) / totalFiles) * 100);
+	const boundaryPenalty = stack.framework === "react" && !hasErrorBoundary ? 5 : 0;
+	const score = Math.max(0, Math.min(100, Math.round(100 - emptyPenalty - throwPenalty - promisePenalty - boundaryPenalty)));
 
 	return {
 		name: "error-handling",

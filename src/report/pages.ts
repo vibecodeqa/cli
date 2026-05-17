@@ -97,7 +97,7 @@ export function overviewPage(
 	if (sortedIssues.length > 0) {
 		const rows = sortedIssues
 			.map((i) => {
-				const loc = i.file ? fl(i.file.split(":")[0]!, i.line) : "";
+				const loc = i.file && typeof i.file === "string" ? fl(i.file.split(":")[0]!, i.line) : "";
 				return `<div class="ov-issue ${i.severity}"><span class="is">${i.severity[0]!.toUpperCase()}</span><span class="ov-check">${e(i.check)}</span>${loc ? `<span class="ov-loc">${loc}</span>` : ""}<span class="ov-msg">${e(i.message)}</span></div>`;
 			})
 			.join("");
@@ -123,12 +123,38 @@ export function overviewPage(
 		.map(([k, v]) => `<span>${k}: <b>${v}</b></span>`)
 		.join("");
 
+	// Workspace / repo understanding section
+	let repoUnderstandingHtml = "";
+	const ws = report.meta.workspace;
+	if (ws?.isMonorepo) {
+		const pkgRows = ws.packages
+			.slice(0, 12)
+			.map((p) => {
+				const flags = [p.hasSrc && "src", p.hasTests && "tests", p.hasLinter && "linter"].filter(Boolean).join(", ");
+				return `<div class="ws-pkg"><span class="ws-path">${e(p.path)}</span><span class="ws-name">${e(p.name)}</span><span class="ws-flags">${flags || "empty"}</span></div>`;
+			})
+			.join("");
+		const more = ws.packages.length > 12 ? `<div class="ws-more">...and ${ws.packages.length - 12} more packages</div>` : "";
+		repoUnderstandingHtml = `<div class="ov-section"><h3>Repository Structure</h3>
+<div class="ws-info">
+  <div class="ws-badge">Monorepo</div>
+  <span>Tool: <b>${ws.tool}</b></span>
+  <span>Packages: <b>${ws.packages.length}</b></span>
+  <span>Source roots: <b>${ws.srcRoots.length}</b></span>
+</div>
+<div class="ws-pkgs">${pkgRows}${more}</div></div>`;
+	} else {
+		repoUnderstandingHtml = `<div class="ov-section"><h3>Repository Structure</h3>
+<div class="ws-info"><div class="ws-badge">Single Package</div></div></div>`;
+	}
+
 	return `
 <div class="dash">
   ${hero}
   <div class="radar">${radarSvg}</div>
 </div>
 <div class="cats">${catCards}</div>
+${repoUnderstandingHtml}
 ${timelineSection}
 <div class="ov-section"><h3>All Checks</h3><div class="bars">${barChart}</div></div>
 ${topIssuesHtml}
@@ -155,7 +181,7 @@ export function categoryPage(cs: CatScore, fl: FL): string {
 			const byFile = new Map<string, typeof c.issues>();
 			const noFile: typeof c.issues = [];
 			for (const iss of c.issues) {
-				const f = iss.file?.split(":")[0];
+				const f = typeof iss.file === "string" ? iss.file.split(":")[0] : undefined;
 				if (f) {
 					const arr = byFile.get(f) || [];
 					arr.push(iss);
@@ -231,7 +257,7 @@ export function issuesPage(allChecks: CheckResult[], totalIssues: number, fl: FL
 		)
 		.slice(0, 200)
 		.map((i) => {
-			const loc = i.file ? fl(i.file.split(":")[0]!, i.line) : "";
+			const loc = i.file && typeof i.file === "string" ? fl(i.file.split(":")[0]!, i.line) : "";
 			return `<tr class="${i.severity}"><td class="is2">${i.severity[0]!.toUpperCase()}</td><td class="ic2">${e(i.check)}</td><td class="il2">${loc}</td><td>${e(i.message)}</td><td class="iru2">${e(i.rule || "")}</td></tr>`;
 		})
 		.join("");
@@ -302,9 +328,9 @@ function renderArchSection(details: Record<string, unknown>): string {
 		const ratingColor = ratingColors[assessment.rating] || "var(--muted)";
 
 		html += `<div class="info-panel" style="margin-top:1rem">`;
-		html += `<div class="ip-row"><span class="ip-label">Pattern</span><span><b>${assessment.pattern}</b> — ${assessment.patternDescription}</span></div>`;
-		html += `<div class="ip-row"><span class="ip-label">Rating</span><span style="color:${ratingColor};font-weight:700;text-transform:uppercase">${assessment.rating}</span></div>`;
-		html += `<div class="ip-row"><span class="ip-label">Layers</span><span>${assessment.layering} layering</span></div>`;
+		html += `<div class="ip-row"><span class="ip-label">Pattern</span><span><b>${e(assessment.pattern)}</b> — ${e(assessment.patternDescription)}</span></div>`;
+		html += `<div class="ip-row"><span class="ip-label">Rating</span><span style="color:${ratingColor};font-weight:700;text-transform:uppercase">${e(assessment.rating)}</span></div>`;
+		html += `<div class="ip-row"><span class="ip-label">Layers</span><span>${e(assessment.layering)} layering</span></div>`;
 		html += `<div class="ip-row"><span class="ip-label">Coupling</span><span>${assessment.crossCoupling}% cross-directory imports</span></div>`;
 		html += `<div class="ip-row"><span class="ip-label">Cohesion</span><span>${assessment.cohesion}% average internal cohesion</span></div>`;
 		html += `</div>`;
@@ -313,7 +339,7 @@ function renderArchSection(details: Record<string, unknown>): string {
 		if (assessment.insights.length > 0) {
 			html += `<div style="margin:0.8rem 0;font-size:0.75rem">`;
 			for (const insight of assessment.insights) {
-				html += `<div style="padding:0.2rem 0;color:var(--muted)">\u2022 ${insight}</div>`;
+				html += `<div style="padding:0.2rem 0;color:var(--muted)">\u2022 ${e(insight)}</div>`;
 			}
 			html += `</div>`;
 		}
@@ -325,7 +351,7 @@ function renderArchSection(details: Record<string, unknown>): string {
 			for (const s of assessment.stability) {
 				const barW = Math.round(s.instability * 100);
 				const color = s.instability > 0.7 ? "var(--warn)" : s.instability < 0.3 ? "var(--pass)" : "var(--accent)";
-				html += `<div class="brow"><span class="bl">${s.package.replace("src/", "")}</span><div class="bb"><div class="bf" style="width:${barW}%;background:${color}"></div></div><span class="bv" style="color:${color}">${s.instability.toFixed(2)}</span></div>`;
+				html += `<div class="brow"><span class="bl">${e(s.package.replace("src/", ""))}</span><div class="bb"><div class="bf" style="width:${barW}%;background:${color}"></div></div><span class="bv" style="color:${color}">${s.instability.toFixed(2)}</span></div>`;
 			}
 			html += `<div style="color:var(--muted);font-size:0.62rem;margin-top:0.3rem">I=0 = maximally stable (many dependents, hard to change). I=1 = maximally unstable (no dependents, easy to change).</div>`;
 			html += `</div>`;
@@ -388,7 +414,7 @@ export function trendsPage(historyDir: string | undefined): string {
 			const chart = buildTimeline(data, { width: 300, height: 60 });
 
 			return `<div class="trend-card">
-<div class="trend-header"><span class="trend-name">${name}</span><span class="trend-score" style="color:${color}">${current}</span>${deltaStr}</div>
+<div class="trend-header"><span class="trend-name">${e(name)}</span><span class="trend-score" style="color:${color}">${current}</span>${deltaStr}</div>
 <div class="trend-chart">${chart}</div>
 </div>`;
 		})
@@ -416,7 +442,7 @@ export function trendsPage(historyDir: string | undefined): string {
 	const deltaTable = deltaRows
 		.map((r) => {
 			const clr = r.delta > 0 ? "var(--pass)" : r.delta < 0 ? "var(--fail)" : "var(--muted)";
-			return `<div class="trend-row"><span class="trend-row-name">${r.name}</span><span class="trend-row-val">${r.first}</span><span class="trend-row-arrow">\u2192</span><span class="trend-row-val">${r.last}</span><span class="trend-row-delta" style="color:${clr}">${r.delta > 0 ? "+" : ""}${r.delta}</span></div>`;
+			return `<div class="trend-row"><span class="trend-row-name">${e(r.name)}</span><span class="trend-row-val">${r.first}</span><span class="trend-row-arrow">\u2192</span><span class="trend-row-val">${r.last}</span><span class="trend-row-delta" style="color:${clr}">${r.delta > 0 ? "+" : ""}${r.delta}</span></div>`;
 		})
 		.join("");
 

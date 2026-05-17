@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /** vibe-check — code health scanner for the AI coding era. */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { detectRepoUrl, detectStack } from "./detect.js";
+import { getCheckMeta } from "./check-meta.js";
+import { detectRepoUrl, detectStack, detectWorkspace } from "./detect.js";
+import { setGlobalSrcRoots } from "./fs-utils.js";
 import { generatePages } from "./report/html.js";
 import { runAccessibility } from "./runners/accessibility.js";
 import { runArchitecture } from "./runners/architecture.js";
@@ -29,7 +31,7 @@ import { runTypeSafety } from "./runners/type-safety.js";
 import { runTypeCheck } from "./runners/types-check.js";
 import { computeScore } from "./score.js";
 import { computeTrend, formatTrend } from "./trend.js";
-import type { CheckResult, VibeReport } from "./types.js";
+import type { CheckResult, VibeReport, WorkspaceInfo } from "./types.js";
 import { gradeFromScore } from "./types.js";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
@@ -45,12 +47,35 @@ interface ParsedFlags {
 	badgeMode: boolean;
 	sarifMode: boolean;
 	uploadMode: boolean;
+	topN: number; // 0 = don't show, N = show top N issues
+	failUnder: number | null; // exit 1 if score < this, null = use --ci default
 }
 
 function parseFlags(): ParsedFlags {
 	const args = process.argv.slice(2);
 	const flags = new Set(args.filter((a) => a.startsWith("--")));
-	const cwd = resolve(args.find((a) => !a.startsWith("--")) || ".");
+	// Parse flags with value arguments
+	const valueArgIndices = new Set<number>();
+
+	function parseValueFlag(flag: string, fallback?: number): number | null {
+		const idx = args.indexOf(flag);
+		if (idx === -1) return null;
+		const next = args[idx + 1];
+		if (next && !next.startsWith("--")) {
+			if (/^\d+$/.test(next)) {
+				valueArgIndices.add(idx + 1);
+				return parseInt(next, 10);
+			}
+			// Non-numeric value after flag — consume it to prevent misuse as cwd
+			valueArgIndices.add(idx + 1);
+		}
+		return fallback ?? null;
+	}
+
+	const topN = parseValueFlag("--top", 5) ?? 0;
+	const failUnder = parseValueFlag("--fail-under");
+
+	const cwd = resolve(args.find((a, i) => !a.startsWith("--") && !valueArgIndices.has(i)) || ".");
 	return {
 		cwd,
 		outputDir: join(cwd, ".vibe-check"),
@@ -61,6 +86,8 @@ function parseFlags(): ParsedFlags {
 		badgeMode: flags.has("--badge"),
 		sarifMode: flags.has("--sarif"),
 		uploadMode: flags.has("--upload"),
+		topN,
+		failUnder,
 	};
 }
 
@@ -73,15 +100,17 @@ function color(grade: string): string {
 function runChecks(
 	cwd: string,
 	stack: ReturnType<typeof detectStack>,
+	workspace: WorkspaceInfo,
 	skipTests: boolean,
 	isDart: boolean,
 	jsonOnly: boolean,
 ): CheckResult[] {
+	const srcRoots = workspace.isMonorepo ? workspace.srcRoots : undefined;
 	const runners: { name: string; fn: () => CheckResult }[] = [
 		// Foundations
-		{ name: "structure", fn: () => runStructure(cwd, stack) },
-		{ name: "lint", fn: () => runLint(cwd, stack) },
-		{ name: "types", fn: () => runTypeCheck(cwd, isDart) },
+		{ name: "structure", fn: () => runStructure(cwd, stack, workspace) },
+		{ name: "lint", fn: () => runLint(cwd, stack, workspace) },
+		{ name: "types", fn: () => runTypeCheck(cwd, isDart, workspace) },
 		{ name: "type-safety", fn: () => runTypeSafety(cwd, isDart) },
 		{ name: "standards", fn: () => runStandards(cwd, stack) },
 		// Quality
@@ -91,15 +120,15 @@ function runChecks(
 		{ name: "react", fn: () => runReact(cwd, stack) },
 		{ name: "accessibility", fn: () => runAccessibility(cwd) },
 		{ name: "docs", fn: () => runDocs(cwd) },
-		{ name: "best-practices", fn: () => runBestPractices(cwd) },
+		{ name: "best-practices", fn: () => runBestPractices(cwd, workspace) },
 		// Testing
-		{ name: "testing", fn: () => runTesting(cwd, stack, skipTests) },
+		{ name: "testing", fn: () => runTesting(cwd, stack, skipTests, srcRoots) },
 		// Security
 		{ name: "secrets", fn: () => runSecrets(cwd) },
 		{ name: "security", fn: () => runSecurity(cwd) },
 		{ name: "dependencies", fn: () => runDependencies(cwd, stack) },
 		// Architecture
-		{ name: "architecture", fn: () => runArchitecture(cwd) },
+		{ name: "architecture", fn: () => runArchitecture(cwd, workspace) },
 		{ name: "performance", fn: () => runPerformance(cwd) },
 		// LLM Readiness
 		{ name: "confusion", fn: () => runConfusion(cwd) },
@@ -112,7 +141,20 @@ function runChecks(
 	const checks: CheckResult[] = [];
 	for (const runner of runners) {
 		if (!jsonOnly) process.stdout.write(`  ${runner.name.padEnd(14)}`);
-		const result = runner.fn();
+		let result: CheckResult;
+		try {
+			result = runner.fn();
+		} catch (err) {
+			// Runner crashed — record as errored, don't kill the scan
+			result = {
+				name: runner.name,
+				score: 0,
+				grade: "F",
+				details: { skipped: true, reason: `runner error: ${err instanceof Error ? err.message : "unknown"}` },
+				issues: [],
+				duration: 0,
+			};
+		}
 		checks.push(result);
 		if (!jsonOnly) {
 			const det = result.details as Record<string, unknown>;
@@ -175,12 +217,12 @@ async function writeOutputs(report: VibeReport, outputDir: string, flags: Pick<P
 	}
 }
 
-function printResults(
+async function printResults(
 	report: VibeReport,
 	trend: ReturnType<typeof computeTrend>,
-	flags: Pick<ParsedFlags, "jsonOnly" | "badgeMode" | "sarifMode">,
+	flags: Pick<ParsedFlags, "jsonOnly" | "badgeMode" | "sarifMode" | "topN">,
 	outputDir: string,
-): void {
+): Promise<void> {
 	const { score, grade, checks } = report;
 	const totalIssues = checks.reduce((s, c) => s + c.issues.length, 0);
 
@@ -192,13 +234,48 @@ function printResults(
 		console.log(
 			`  ${gc}\x1b[1m${grade}\x1b[0m ${gc}${score}/100\x1b[0m  \x1b[2m${checks.length} checks · ${totalIssues} issues · ${report.meta.duration}ms\x1b[0m`,
 		);
-		if (trend) console.log(formatTrend(trend));
+		if (trend) {
+			// Load history for sparkline
+			const historyDir = join(outputDir, "history");
+			const { loadHistory } = await import("./history.js");
+			const history = loadHistory(historyDir);
+			const scores = history.map((h) => h.score);
+			if (report.score !== scores[scores.length - 1]) scores.push(report.score);
+			console.log(formatTrend(trend, scores));
+		}
 		console.log("");
 		console.log(`  \x1b[2mReport: ${join(outputDir, "report/index.html")}\x1b[0m`);
 		console.log(`  \x1b[2mJSON:   ${join(outputDir, "report.json")}\x1b[0m`);
 		if (flags.badgeMode) console.log(`  \x1b[2mBadge:  ${join(outputDir, "badge.svg")}\x1b[0m`);
 		if (flags.sarifMode) console.log(`  \x1b[2mSARIF:  ${join(outputDir, "report.sarif")}\x1b[0m`);
 		console.log("");
+
+		// Top actionable issues
+		if (flags.topN > 0) {
+			const allIssues = checks.flatMap((c) =>
+				c.issues.map((iss) => ({ check: c.name, weight: getCheckMeta(c.name).weight, ...iss })),
+			);
+			// Sort by: errors first, then by check weight (highest-impact first)
+			allIssues.sort((a, b) => {
+				const sevOrder = { error: 0, warning: 1, info: 2 };
+				const sevDiff = (sevOrder[a.severity] ?? 2) - (sevOrder[b.severity] ?? 2);
+				if (sevDiff !== 0) return sevDiff;
+				return b.weight - a.weight;
+			});
+			const top = allIssues.slice(0, flags.topN);
+			if (top.length > 0) {
+				console.log(`  \x1b[1mTop ${top.length} issues to fix:\x1b[0m`);
+				for (const iss of top) {
+					const sevColor = iss.severity === "error" ? "\x1b[31m" : iss.severity === "warning" ? "\x1b[33m" : "\x1b[2m";
+					const sevChar = iss.severity[0]!.toUpperCase();
+					const loc = iss.file && typeof iss.file === "string"
+						? `\x1b[2m${iss.file}${iss.line ? `:${iss.line}` : ""}\x1b[0m `
+						: "";
+					console.log(`  ${sevColor}${sevChar}\x1b[0m ${loc}${iss.message}`);
+				}
+				console.log("");
+			}
+		}
 	}
 }
 
@@ -224,7 +301,11 @@ async function handleUpload(report: VibeReport, cwd: string, jsonOnly: boolean):
 
 async function startWatch(cwd: string): Promise<void> {
 	const { watch } = await import("node:fs");
-	const srcDirs = ["src", "web/src"].map((d) => join(cwd, d)).filter((d) => existsSync(d));
+	const workspace = detectWorkspace(cwd);
+	const watchDirs = workspace.isMonorepo
+		? workspace.srcRoots.map((d) => join(cwd, d)).filter((d) => existsSync(d))
+		: ["src", "web/src"].map((d) => join(cwd, d)).filter((d) => existsSync(d));
+	const srcDirs = watchDirs;
 	if (srcDirs.length === 0) {
 		console.log("  \x1b[31mNo src/ directory to watch\x1b[0m");
 		process.exit(1);
@@ -254,9 +335,59 @@ async function startWatch(cwd: string): Promise<void> {
 }
 
 async function main() {
+	const args = process.argv.slice(2);
+
+	if (args.includes("--version") || args.includes("-v")) {
+		console.log(VERSION);
+		return;
+	}
+
+	if (args.includes("--help") || args.includes("-h")) {
+		console.log(`
+  \x1b[1m\x1b[38;5;141mvcqa\x1b[0m v${VERSION} — code health scanner
+
+  \x1b[1mUsage:\x1b[0m  npx @vibecodeqa/cli [path] [flags]
+
+  \x1b[1mFlags:\x1b[0m
+    --skip-tests      Skip test execution (faster scan)
+    --ci              CI mode (exit 1 if score < 60)
+    --fail-under N    Exit 1 if score below N (e.g. --fail-under 80)
+    --json            Output JSON only (no terminal UI)
+    --badge           Generate SVG badge
+    --sarif           Generate SARIF for GitHub Code Scanning
+    --upload          Upload report to app.vibecodeqa.online
+    --top [N]         Show top N issues to fix (default: 5)
+    --watch           Re-scan on file changes
+    -v, --version     Print version
+    -h, --help        Show this help
+
+  \x1b[1mExamples:\x1b[0m
+    npx @vibecodeqa/cli                     # scan current directory
+    npx @vibecodeqa/cli ./my-project        # scan specific path
+    npx @vibecodeqa/cli --skip-tests --top  # fast scan with top issues
+    npx @vibecodeqa/cli --ci --sarif        # CI with GitHub integration
+`);
+		return;
+	}
+
 	const flags = parseFlags();
 	const { cwd, outputDir, jsonOnly, ciMode, skipTests, watchMode } = flags;
 	const start = Date.now();
+
+	// Validate cwd
+	if (!existsSync(cwd)) {
+		console.error(`  \x1b[31mError: path does not exist: ${cwd}\x1b[0m`);
+		process.exit(1);
+	}
+	try {
+		if (!statSync(cwd).isDirectory()) {
+			console.error(`  \x1b[31mError: not a directory: ${cwd}\x1b[0m`);
+			process.exit(1);
+		}
+	} catch {
+		console.error(`  \x1b[31mError: cannot access: ${cwd}\x1b[0m`);
+		process.exit(1);
+	}
 
 	if (!jsonOnly) {
 		console.log("");
@@ -266,16 +397,26 @@ async function main() {
 	}
 
 	const stack = detectStack(cwd);
+	const workspace = detectWorkspace(cwd);
+	setGlobalSrcRoots(workspace.isMonorepo ? workspace.srcRoots : undefined);
 	if (!jsonOnly) {
 		const parts = [stack.language, stack.framework, stack.bundler, stack.testRunner, stack.linter, stack.packageManager].filter(
 			(v) => v !== "none" && v !== "unknown",
 		);
 		console.log(`  stack: ${parts.join(" + ")}`);
+		if (workspace.isMonorepo) {
+			console.log(`  workspace: ${workspace.tool} monorepo — ${workspace.packages.length} packages`);
+			for (const pkg of workspace.packages.slice(0, 8)) {
+				const flags = [pkg.hasSrc && "src", pkg.hasTests && "tests", pkg.hasLinter && "linter"].filter(Boolean).join(", ");
+				console.log(`    \x1b[2m${pkg.path}\x1b[0m (${flags || "empty"})`);
+			}
+			if (workspace.packages.length > 8) console.log(`    \x1b[2m...and ${workspace.packages.length - 8} more\x1b[0m`);
+		}
 		console.log("");
 	}
 
 	const isDart = stack.language === "dart";
-	const checks = runChecks(cwd, stack, skipTests, isDart, jsonOnly);
+	const checks = runChecks(cwd, stack, workspace, skipTests, isDart, jsonOnly);
 
 	const score = computeScore(checks);
 	const grade = gradeFromScore(score);
@@ -287,19 +428,22 @@ async function main() {
 		score,
 		grade,
 		checks,
-		meta: { cwd, node: process.version, duration, stack, ...detectRepoUrl(cwd) },
+		meta: { cwd, node: process.version, duration, stack, workspace, ...detectRepoUrl(cwd) },
 	};
 
 	const trend = computeTrend(report, outputDir);
 
 	await writeOutputs(report, outputDir, flags);
-	printResults(report, trend, flags, outputDir);
+	await printResults(report, trend, flags, outputDir);
 
 	if (flags.uploadMode) {
 		await handleUpload(report, cwd, jsonOnly);
 	}
 
-	if (ciMode && score < 60) {
+	// CI exit code: fail if score below threshold
+	const failUnder = flags.failUnder ?? (ciMode ? 60 : 0);
+	if (failUnder > 0 && score < failUnder) {
+		if (!jsonOnly) console.log(`  \x1b[31mFailing: score ${score} < ${failUnder}\x1b[0m\n`);
 		process.exit(1);
 	}
 

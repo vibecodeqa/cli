@@ -124,10 +124,16 @@ export function runConfusion(cwd: string): CheckResult {
 	let ambiguousAbbrevs = 0;
 
 	// ── 1. File name confusability ──
+	// Only compare files in the same directory tree (not across monorepo packages)
 	for (let i = 0; i < files.length; i++) {
 		for (let j = i + 1; j < files.length; j++) {
 			const a = files[i].base;
 			const b = files[j].base;
+
+			// Skip cross-package comparisons in monorepos
+			const dirA = files[i].path.split("/").slice(0, 2).join("/");
+			const dirB = files[j].path.split("/").slice(0, 2).join("/");
+			if (dirA !== dirB && files[i].path.includes("/") && files[j].path.includes("/")) continue;
 
 			// Near-identical (Levenshtein ≤ 2)
 			if (a !== b && levenshtein(a, b) <= 2) {
@@ -228,9 +234,14 @@ export function runConfusion(cwd: string): CheckResult {
 		}
 	}
 
-	// ── Score ──
-	const penalty = fileConfusability * 5 + genericNames * 1 + exportCollisions * 10 + ambiguousAbbrevs * 2;
-	const score = Math.max(0, Math.min(100, 100 - penalty));
+	// ── Score ── (proportional to codebase size)
+	const totalFiles = files.length || 1;
+	const confusePct = (fileConfusability / totalFiles) * 100;
+	const genericPct = (genericNames / totalFiles) * 100;
+	const collisionPct = (exportCollisions / totalFiles) * 100;
+	const abbrevPct = (ambiguousAbbrevs / totalFiles) * 100;
+	const penalty = confusePct * 2 + genericPct * 0.8 + collisionPct * 4 + abbrevPct * 1;
+	const score = Math.max(0, Math.min(100, Math.round(100 - penalty)));
 
 	return {
 		name: "confusion",
