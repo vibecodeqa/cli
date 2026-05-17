@@ -8,7 +8,8 @@ export interface SourceFile {
 	fullPath: string;
 	base: string; // filename without extension
 	ext: string;
-	content: string;
+	content: string; // for SFCs: extracted <script> content; for others: full file
+	rawContent?: string; // for SFCs: full file including template (used by a11y checks)
 	lines: number;
 	isTest: boolean;
 }
@@ -30,7 +31,7 @@ const SKIP_DIRS = new Set([
 	"vendor",
 	"third_party",
 ]);
-const CODE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".dart"]);
+const CODE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".dart", ".vue", ".svelte"]);
 const ALL_EXTS = new Set([...CODE_EXTS, ".json", ".env", ".yaml", ".yml", ".toml"]);
 
 /** Default source directories for single-package repos */
@@ -99,6 +100,18 @@ export function collectAllFiles(cwd: string, opts?: { extraExts?: boolean }): So
 	return files;
 }
 
+/** Extract <script> content from Vue/Svelte SFC files. Returns all script blocks concatenated. */
+function extractScript(content: string): string {
+	const scripts: string[] = [];
+	// Match <script ...> ... </script> blocks (including <script setup>, <script lang="ts">)
+	const regex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+	let match;
+	while ((match = regex.exec(content)) !== null) {
+		if (match[1]) scripts.push(match[1]);
+	}
+	return scripts.length > 0 ? scripts.join("\n") : content;
+}
+
 function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>): void {
 	for (const entry of readdirSync(dir)) {
 		if (SKIP_DIRS.has(entry)) continue;
@@ -112,7 +125,11 @@ function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>): v
 			if (!exts.has(ext)) continue;
 			// Skip files over 1MB to prevent memory issues (M1)
 			if (statSync(full).size > 1_000_000) continue;
-			const content = readFileSync(full, "utf-8");
+			const fileContent = readFileSync(full, "utf-8");
+			const isSFC = ext === ".vue" || ext === ".svelte";
+			// For SFCs, extract <script> block for logic analysis; keep raw for template checks
+			const content = isSFC ? extractScript(fileContent) : fileContent;
+			const rawContent = isSFC ? fileContent : undefined;
 			const relPath = full.replace(`${cwd}/`, "");
 			const isTest =
 				entry.includes(".test.") ||
@@ -129,6 +146,7 @@ function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>): v
 				base: basename(entry, ext),
 				ext,
 				content,
+				rawContent,
 				lines: content.split("\n").length,
 				isTest,
 			});

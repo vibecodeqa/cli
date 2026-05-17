@@ -44,21 +44,30 @@ export function detectStack(cwd: string): StackInfo {
 	const language =
 		has("tsconfig.json") || has("tsconfig.app.json") || has("tsconfig.base.json") || allDeps.typescript
 			? "typescript"
-			: allDeps.react || allDeps.vue
+			: allDeps.react || allDeps.vue || allDeps.svelte
 				? "javascript"
 				: "unknown";
 
-	const framework = allDeps.next ? "react" : allDeps.react ? "react" : allDeps.nuxt ? "vue" : allDeps.vue ? "vue" : allDeps.svelte ? "svelte" : "none";
+	// Framework detection — order matters (meta-frameworks before base)
+	let framework: StackInfo["framework"] = "none";
+	if (allDeps.next || allDeps.react) framework = "react";
+	else if (allDeps.nuxt || allDeps.vue) framework = "vue";
+	else if (allDeps["@sveltejs/kit"] || allDeps.svelte) framework = "svelte";
 
-	const bundler = allDeps.next ? "vite" : allDeps.vite ? "vite" : allDeps.webpack ? "webpack" : allDeps.esbuild ? "esbuild" : "none";
+	// Bundler — meta-frameworks use their own bundler
+	let bundler: StackInfo["bundler"] = "none";
+	if (allDeps.next || allDeps.nuxt) bundler = "vite"; // Next/Nuxt handle bundling
+	else if (allDeps.vite || allDeps["@sveltejs/kit"]) bundler = "vite";
+	else if (allDeps.webpack) bundler = "webpack";
+	else if (allDeps.esbuild) bundler = "esbuild";
 
-	const testRunner = allDeps.vitest ? "vitest" : allDeps.jest ? "jest" : "none";
+	const testRunner: StackInfo["testRunner"] = allDeps.vitest ? "vitest" : allDeps.jest ? "jest" : "none";
 
-	const linter = allDeps["@biomejs/biome"] ? "biome" : allDeps.eslint ? "eslint" : "none";
+	const linter: StackInfo["linter"] = allDeps["@biomejs/biome"] ? "biome" : allDeps.eslint ? "eslint" : "none";
 
-	const packageManager = has("pnpm-lock.yaml") ? "pnpm" : has("bun.lockb") ? "bun" : has("yarn.lock") ? "yarn" : "npm";
+	const packageManager: StackInfo["packageManager"] = has("pnpm-lock.yaml") ? "pnpm" : has("bun.lockb") ? "bun" : has("yarn.lock") ? "yarn" : "npm";
 
-	return { language, framework, bundler, testRunner, linter, packageManager } as StackInfo;
+	return { language, framework, bundler, testRunner, linter, packageManager };
 }
 
 /** Detect monorepo / workspace layout. */

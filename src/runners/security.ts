@@ -24,6 +24,20 @@ const PATTERNS: SecurityPattern[] = [
 		cwe: "CWE-79",
 	},
 	{
+		name: "v-html",
+		pattern: /v-html\s*=/,
+		severity: "warning",
+		message: "XSS: v-html renders raw HTML — sanitize user input first",
+		cwe: "CWE-79",
+	},
+	{
+		name: "svelte-html",
+		pattern: /\{@html\b/,
+		severity: "warning",
+		message: "XSS: {@html} renders raw HTML in Svelte — sanitize user input first",
+		cwe: "CWE-79",
+	},
+	{
 		name: "dangerouslySetInnerHTML",
 		pattern: /dangerouslySetInnerHTML/,
 		severity: "error",
@@ -205,7 +219,9 @@ export function runSecurity(cwd: string): CheckResult {
 	const cwePrefixes = new Set<string>();
 
 	for (const sf of sourceFiles) {
-		const lines = sf.content.split("\n");
+		// For SFC files (.vue/.svelte), scan both script AND template for security patterns
+		const scanContent = sf.rawContent || sf.content;
+		const lines = scanContent.split("\n");
 
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];

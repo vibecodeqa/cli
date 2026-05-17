@@ -10,7 +10,9 @@ import { gradeFromScore } from "../types.js";
 
 export function runAccessibility(cwd: string): CheckResult {
 	const start = Date.now();
-	const files = getProductionFiles(cwd).filter((f) => f.ext === ".tsx" || f.ext === ".jsx");
+	const files = getProductionFiles(cwd).filter((f) =>
+		f.ext === ".tsx" || f.ext === ".jsx" || f.ext === ".vue" || f.ext === ".svelte",
+	);
 
 	if (files.length === 0) {
 		return {
@@ -45,7 +47,9 @@ export function runAccessibility(cwd: string): CheckResult {
 	let positiveTabindex = 0;
 
 	for (const f of files) {
-		const lines = f.content.split("\n");
+		// For SFCs, use raw content (includes template) for a11y checks
+		const source = f.rawContent || f.content;
+		const lines = source.split("\n");
 
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];
@@ -62,9 +66,10 @@ export function runAccessibility(cwd: string): CheckResult {
 			}
 
 			// 2. Click handler on non-interactive element without role/keyboard
-			if (/onClick=/.test(trimmed) && /<(?:div|span|p|li|section|article|header|footer)\b/.test(trimmed)) {
+			// React: onClick=, Vue: @click/v-on:click, Svelte: on:click
+			if (/(?:onClick=|@click|v-on:click|on:click)/.test(trimmed) && /<(?:div|span|p|li|section|article|header|footer)\b/.test(trimmed)) {
 				const block = lines.slice(i, Math.min(i + 3, lines.length)).join(" ");
-				if (!(/role=/.test(block) && /(?:onKeyDown|onKeyUp|onKeyPress|tabIndex)/.test(block))) {
+				if (!(/role=/.test(block) && /(?:onKeyDown|onKeyUp|onKeyPress|tabIndex|@keydown|on:keydown)/.test(block))) {
 					clickDiv++;
 					issues.push({
 						severity: "warning",
