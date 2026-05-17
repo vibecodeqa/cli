@@ -180,7 +180,7 @@ export function runReact(cwd: string, stack: StackInfo): CheckResult {
 		name: "react",
 		score,
 		grade: gradeFromScore(score),
-		details: { jsxFiles: files.length, conditionalHooks, missingKeys, indexKeys, propSpreading, inlineHandlers },
+		details: { jsxFiles: files.length, conditionalHooks, missingKeys, indexKeys, propSpreading, inlineHandlers, effectNoDeps, domManipulation },
 		issues,
 		duration: Date.now() - start,
 	};

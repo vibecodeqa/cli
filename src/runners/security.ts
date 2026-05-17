@@ -234,6 +234,9 @@ export function runSecurity(cwd: string): CheckResult {
 	// ── Context-aware localStorage audit ──
 	// Files that handle auth AND use localStorage are risky even if variable names are ambiguous
 	for (const sf of sourceFiles) {
+		// Skip files that DEFINE security patterns (the scanner itself)
+		if (sf.path.includes("security") && sf.content.includes("SecurityPattern")) continue;
+
 		const hasLocalStorage = sf.content.includes("localStorage.setItem");
 		if (!hasLocalStorage) continue;
 
@@ -241,24 +244,24 @@ export function runSecurity(cwd: string): CheckResult {
 			/\b(?:token|oauth|access_token|Bearer|authorization|authenticate|login|signIn)\b/i.test(sf.content);
 		if (!hasAuthContext) continue;
 
-		// This file handles auth and persists to localStorage
 		const lines = sf.content.split("\n");
 		for (let i = 0; i < lines.length; i++) {
-			if (lines[i].includes("localStorage.setItem")) {
-				// Check if this setItem wasn't already caught by pattern rules
-				const alreadyCaught = issues.some(
-					(iss) => iss.file === sf.path && iss.line === i + 1 && iss.rule === "CWE-922",
-				);
-				if (!alreadyCaught) {
-					issues.push({
-						severity: "info",
-						message: "localStorage.setItem in auth-related file — verify no tokens/secrets are persisted client-side",
-						file: sf.path,
-						line: i + 1,
-						rule: "CWE-922",
-					});
-					cwePrefixes.add("CWE-922");
-				}
+			const trimmed = lines[i].trim();
+			if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
+			if (/\b(?:pattern|message|name)\s*[:=]\s*["'`\/]/.test(trimmed)) continue;
+			if (!trimmed.includes("localStorage.setItem")) continue;
+			const alreadyCaught = issues.some(
+				(iss) => iss.file === sf.path && iss.line === i + 1 && iss.rule === "CWE-922",
+			);
+			if (!alreadyCaught) {
+				issues.push({
+					severity: "info",
+					message: "localStorage.setItem in auth-related file — verify no tokens/secrets are persisted client-side",
+					file: sf.path,
+					line: i + 1,
+					rule: "CWE-922",
+				});
+				cwePrefixes.add("CWE-922");
 			}
 		}
 	}

@@ -46,8 +46,11 @@ export function buildRadar(items: { label: string; score: number }[]): string {
 	return `<svg viewBox="0 0 240 240">${grid}${axes}<polygon points="${dataPts}" fill="#818cf825" stroke="#818cf8" stroke-width="1.5"/>${dots}</svg>`;
 }
 
+let _timelineCounter = 0;
+
 /** Score timeline — larger chart showing score history over last N runs. */
 export function buildTimeline(entries: { score: number; timestamp: string }[], opts?: { width?: number; height?: number }): string {
+	const gradId = `tlg${++_timelineCounter}`;
 	const width = opts?.width ?? 600;
 	const height = opts?.height ?? 120;
 	const pad = { top: 20, right: 20, bottom: 25, left: 35 };
@@ -92,9 +95,9 @@ export function buildTimeline(entries: { score: number; timestamp: string }[], o
 	const areaPoints = `${xScale(0).toFixed(1)},${yScale(0).toFixed(1)} ${points} ${xScale(entries.length - 1).toFixed(1)},${yScale(0).toFixed(1)}`;
 
 	return `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
-<defs><linearGradient id="tlg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#818cf8" stop-opacity="0.3"/><stop offset="100%" stop-color="#818cf8" stop-opacity="0.02"/></linearGradient></defs>
+<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#818cf8" stop-opacity="0.3"/><stop offset="100%" stop-color="#818cf8" stop-opacity="0.02"/></linearGradient></defs>
 ${grid}
-<polygon points="${areaPoints}" fill="url(#tlg)"/>
+<polygon points="${areaPoints}" fill="url(#${gradId})"/>
 <polyline points="${points}" fill="none" stroke="#818cf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 ${dots}${xLabels}
 </svg>`;

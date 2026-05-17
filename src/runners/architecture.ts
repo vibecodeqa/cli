@@ -191,7 +191,8 @@ function buildGraph(files: SourceFile[]): { nodes: Map<string, ModuleNode> } {
 
 function parseImports(content: string): string[] {
 	const imports: string[] = [];
-	const regex = /import\s+(?:[\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g;
+	// Match both imports and re-exports (export { ... } from '...')
+	const regex = /(?:import|export)\s+(?:[\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g;
 	for (const match of content.matchAll(regex)) {
 		if (match[1].startsWith(".")) imports.push(match[1]);
 	}
