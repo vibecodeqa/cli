@@ -131,12 +131,15 @@ export function runConfusion(cwd: string): CheckResult {
 			const b = files[j].base;
 
 			// Skip cross-package comparisons in monorepos
-			const dirA = files[i].path.split("/").slice(0, 2).join("/");
-			const dirB = files[j].path.split("/").slice(0, 2).join("/");
-			if (dirA !== dirB && files[i].path.includes("/") && files[j].path.includes("/")) continue;
+			// Only skip when files are in DIFFERENT workspace packages (packages/X vs packages/Y)
+			const pathA = files[i].path;
+			const pathB = files[j].path;
+			const pkgPrefixA = pathA.match(/^(packages|apps|libs)\/[^/]+/)?.[0];
+			const pkgPrefixB = pathB.match(/^(packages|apps|libs)\/[^/]+/)?.[0];
+			if (pkgPrefixA && pkgPrefixB && pkgPrefixA !== pkgPrefixB) continue;
 
-			// Near-identical (Levenshtein ≤ 2)
-			if (a !== b && levenshtein(a, b) <= 2) {
+			// Near-identical (Levenshtein ≤ 2, but skip very short names where distance 1 is expected)
+			if (a !== b && a.length >= 3 && b.length >= 3 && levenshtein(a, b) <= 2) {
 				fileConfusability++;
 				issues.push({
 					severity: "warning",
