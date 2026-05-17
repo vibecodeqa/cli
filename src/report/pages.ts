@@ -225,7 +225,7 @@ ${meta.risk ? `<div class="info-panel"><div class="ip-row"><span class="ip-label
 
 			return `<section class="check-section" id="${c.name}">
 <div class="ch-head"><span class="ch-g" style="color:${sk ? "#555" : gc(c.grade)}">${sk ? "\u2014" : c.grade}</span><div><b>${e(meta.label)}</b><span class="ch-s">${sk ? "skipped" : `${c.score}/100`} \u00b7 weight ${meta.weight}% \u00b7 ${c.duration}ms \u00b7 ${c.issues.length} issues</span></div><span class="pri" style="color:${pc(meta.priority)}">${meta.priority}</span></div>
-${meta.description ? `<div class="info-panel"><div class="ip-row"><span class="ip-label">What</span><span>${e(meta.description)}</span></div><div class="ip-row"><span class="ip-label">Risk</span><span>${e(meta.risk)}</span></div><div class="ip-row"><span class="ip-label">Fix</span><span>${e(meta.recommendation)}</span></div></div>` : ""}
+${meta.description ? `<div class="info-panel"><div class="ip-row"><span class="ip-label">What</span><span>${e(meta.description)}</span></div><div class="ip-row"><span class="ip-label">Risk</span><span>${e(meta.risk)}</span></div><div class="ip-row"><span class="ip-label">Fix</span><span>${e(meta.recommendation)}</span></div>${meta.deeperTools?.length ? `<div class="ip-row"><span class="ip-label">Go deeper</span><span class="deeper-tools">${meta.deeperTools.map((t) => `<code>${e(t)}</code>`).join(" ")}</span></div>` : ""}</div>` : ""}
 ${sk ? `<p class="skip-r">${e(det(c).reason || "skipped")}</p>` : ""}
 ${c.name === "architecture" && !sk ? renderArchSection(c.details) : ""}
 ${c.name === "testing" && !sk && det(c).pyramid ? `<div class="arch-svg">${buildPyramid(det(c).pyramid as { unit: number; integration: number; component: number; e2e: number })}</div>` : ""}

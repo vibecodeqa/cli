@@ -180,6 +180,7 @@ h3{font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:
 .footer{text-align:center;color:var(--muted);font-size:0.58rem;margin-top:2rem;padding:0.8rem 0;border-top:1px solid var(--border)}
 .footer a{color:var(--muted)}
 .muted{color:var(--muted)}
+.deeper-tools code{background:var(--border);padding:0.1rem 0.4rem;border-radius:4px;font-size:0.62rem;color:var(--accent);margin-right:0.3rem}
 .flink{color:var(--accent);text-decoration:none;font-family:"SF Mono",monospace}.flink:hover{text-decoration:underline}
 .arch-svg{margin:1rem 0;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .arch-svg svg{border-radius:8px}

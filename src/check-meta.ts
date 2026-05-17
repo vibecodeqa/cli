@@ -13,6 +13,8 @@ export interface CheckMeta {
 	risk: string;
 	recommendation: string;
 	premium?: boolean;
+	/** Dedicated tools that do this check with deeper analysis. Shown as "go deeper" links in the report. */
+	deeperTools?: string[];
 }
 
 export const CHECK_META: Record<string, CheckMeta> = {
@@ -63,6 +65,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		risk: "'as any' silences the type checker at that point — any bug the types would have caught now slips through. @ts-ignore and @ts-nocheck disable type checking entirely for a line or file. Accumulated 'any' usage correlates with higher defect density.",
 		recommendation:
 			"Replace 'as any' with proper types or type guards. Use 'unknown' instead of 'any' when the type is genuinely unknown. Remove @ts-ignore comments by fixing the underlying type issue.",
+		deeperTools: ["@typescript-eslint/no-explicit-any", "@typescript-eslint/no-unsafe-assignment"],
 	},
 	standards: {
 		name: "standards",
@@ -83,10 +86,11 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		priority: "high",
 		weight: 3,
 		description:
-			"Detects poor error handling: empty catch blocks, throw with string literals, catch-and-rethrow without context, Promise.then() without .catch(), missing React Error Boundaries.",
-		risk: "Empty catch blocks silently swallow errors. throw 'string' loses stack traces. Missing Error Boundaries in React cause the entire app to crash on render errors.",
+			"Detects poor error handling: empty catch blocks, throw string literals, swallowed .catch(), floating promises, JSON.parse without try-catch, infinite loops, process.exit() in library code, and missing unhandledRejection handlers.",
+		risk: "Empty catch blocks silently swallow errors. throw 'string' loses stack traces. Unhandled JSON.parse crashes on malformed input. Missing Error Boundaries in React cause the entire app to crash on render errors. Unhandled promise rejections crash Node.js 15+.",
 		recommendation:
-			"Handle or log every catch. Use throw new Error() for stack traces. Add Error Boundaries in React. Chain .catch() on promises.",
+			"Handle or log every catch. Use throw new Error() for stack traces. Wrap JSON.parse in try-catch. Add Error Boundaries in React. Add process.on('unhandledRejection') in server entry points.",
+		deeperTools: ["@typescript-eslint/no-floating-promises", "eslint-plugin-promise"],
 	},
 	complexity: {
 		name: "complexity",
@@ -99,6 +103,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		risk: "Complex functions are the #1 source of bugs. Research shows defect density increases exponentially with cyclomatic complexity above 10 (McCabe, 1976). Complex code is also harder to review, test, and modify safely.",
 		recommendation:
 			"Extract complex functions into smaller ones. Use early returns to reduce nesting. Replace conditional chains with lookup tables or strategy patterns. Aim for functions under 30 lines with complexity under 10.",
+		deeperTools: ["biome (noExcessiveCognitiveComplexity)", "SonarQube"],
 	},
 	duplication: {
 		name: "duplication",
@@ -111,6 +116,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		risk: "Duplicated code means bugs must be fixed in multiple places. Miss one copy and the bug persists. DRY (Don't Repeat Yourself) violations increase maintenance cost linearly with each copy.",
 		recommendation:
 			"Extract duplicated logic into shared functions or modules. If two files share the same pattern, create a helper. If the duplication is across repos, consider vendoring a shared module.",
+		deeperTools: ["jscpd", "SonarQube"],
 	},
 	docs: {
 		name: "docs",
@@ -147,6 +153,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		risk: "Hardcoded secrets in source code are the #1 cause of credential leaks. Once pushed to Git, secrets are in the history forever — even if deleted in a later commit. Leaked API keys can be exploited within minutes by automated scanners.",
 		recommendation:
 			"Never hardcode secrets. Use environment variables or a secret manager (Bitwarden, AWS Secrets Manager, Cloudflare Secrets). If a secret was committed, rotate it immediately — deleting the file is not enough.",
+		deeperTools: ["gitleaks", "trufflehog"],
 	},
 	security: {
 		name: "security",
@@ -159,6 +166,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		risk: "These patterns represent the most commonly exploited vulnerabilities in web applications (OWASP Top 10). A single XSS or injection vulnerability can lead to account takeover, data theft, or complete system compromise.",
 		recommendation:
 			"Replace innerHTML with textContent or DOM APIs. Never use eval(). Use parameterized queries for SQL. Use crypto.randomUUID() instead of Math.random() for tokens. Validate all user input before use in file paths or URLs.",
+		deeperTools: ["semgrep", "eslint-plugin-security", "CodeQL"],
 	},
 	dependencies: {
 		name: "dependencies",
@@ -171,6 +179,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		risk: "Vulnerable dependencies are the most common attack vector for supply chain attacks. 84% of codebases contain at least one known vulnerability in their dependencies (Synopsys OSSRA 2024). Outdated major versions often have unpatched security issues.",
 		recommendation:
 			"Run 'pnpm audit' regularly and fix critical/high vulnerabilities immediately. Keep dependencies updated — use Dependabot or Renovate for automated PRs. Pin versions with a lockfile.",
+		deeperTools: ["snyk", "socket.dev", "npm audit"],
 	},
 	architecture: {
 		name: "architecture",
@@ -219,6 +228,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		risk: "Conditional hooks cause React to crash at runtime. Missing keys cause incorrect reconciliation — items can swap, duplicate, or lose state. Index keys break when lists are reordered or filtered.",
 		recommendation:
 			"Never call hooks inside conditions, loops, or nested functions. Always provide a unique, stable key in .map(). Avoid spreading unknown props onto DOM elements. Extract inline handlers for readability.",
+		deeperTools: ["eslint-plugin-react-hooks", "eslint-plugin-react"],
 	},
 	accessibility: {
 		name: "accessibility",
@@ -231,6 +241,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		risk: "1 in 4 adults has a disability (CDC). Missing alt text makes images invisible to screen readers. Click-only divs exclude keyboard users. Unlabeled inputs are unusable with assistive technology. Missing lang attribute breaks screen reader pronunciation.",
 		recommendation:
 			'Add alt text to all images (use alt="" for decorative). Use <button> for clickable elements, not <div onClick>. Label all form controls with <label>, aria-label, or aria-labelledby. Set lang on <html>.',
+		deeperTools: ["eslint-plugin-jsx-a11y", "axe-core"],
 	},
 	performance: {
 		name: "performance",
