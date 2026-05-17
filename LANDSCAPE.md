@@ -1,6 +1,8 @@
 # Competitive Landscape — Code Quality Tools
 
-How VibeCode QA compares to existing tools. Updated 2026-05-17.
+How VibeCode QA compares to existing tools. Updated 2026-05-18.
+
+**Public transparency page:** https://vibecodeqa.online/tools.html
 
 ## What We Check vs. Dedicated Tools
 
