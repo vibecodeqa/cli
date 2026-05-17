@@ -1,6 +1,8 @@
-/** React-specific checks — hooks rules, conditional hooks, missing keys, prop spreading. */
+/** React-specific checks — hooks rules, conditional hooks, missing keys, prop spreading.
+ *  Note: if eslint-plugin-react-hooks is installed, those rules run in the lint check.
+ *  This runner catches patterns beyond what the plugin covers. */
 
-import { getProductionFiles } from "../fs-utils.js";
+import { getProductionFiles, readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue, StackInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
@@ -31,6 +33,9 @@ export function runReact(cwd: string, stack: StackInfo): CheckResult {
 	}
 
 	const issues: Issue[] = [];
+	const deps = readDeps(cwd);
+	// If eslint-plugin-react-hooks is installed, lint runner already covers hooks rules
+	const hasHooksPlugin = !!(deps["eslint-plugin-react-hooks"] || deps["eslint-plugin-react"]);
 	let conditionalHooks = 0;
 	let missingKeys = 0;
 	let propSpreading = 0;
@@ -62,8 +67,8 @@ export function runReact(cwd: string, stack: StackInfo): CheckResult {
 				if (condBraceDepth < 0) condBraceDepth = 0;
 			}
 
-			// 1. Hooks called inside conditionals
-			if (condBraceDepth > 0 && /\buse[A-Z]\w*\s*\(/.test(trimmed) && !/\/\//.test(trimmed.split("use")[0]!)) {
+			// 1. Hooks called inside conditionals (skip if eslint-plugin-react-hooks handles this)
+			if (!hasHooksPlugin && condBraceDepth > 0 && /\buse[A-Z]\w*\s*\(/.test(trimmed) && !/\/\//.test(trimmed.split("use")[0]!)) {
 				conditionalHooks++;
 				issues.push({
 					severity: "error",

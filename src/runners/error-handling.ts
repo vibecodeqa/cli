@@ -187,7 +187,15 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 		name: "error-handling",
 		score,
 		grade: gradeFromScore(score),
-		details: { emptyCatch, throwString, hasErrorBoundary: stack.framework === "react" ? hasErrorBoundary : "n/a" },
+		details: {
+			emptyCatch,
+			throwString,
+			floatingPromises,
+			jsonParseUnsafe,
+			infiniteLoops,
+			hasErrorBoundary: stack.framework === "react" ? hasErrorBoundary : "n/a",
+			tool: "built-in",
+		},
 		issues,
 		duration: Date.now() - start,
 	};

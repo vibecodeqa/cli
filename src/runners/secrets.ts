@@ -1,10 +1,34 @@
-/** Secret detection — scans for hardcoded keys/tokens in source files and .env audit. */
+/** Secret detection — delegates to gitleaks when available, falls back to built-in regex. */
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { collectAllFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
+import { run } from "./exec.js";
+
+/** Try running gitleaks for secret detection. Returns true if gitleaks ran. */
+function tryGitleaks(cwd: string, issues: Issue[]): boolean {
+	const { stdout, ok } = run("gitleaks detect --no-git --report-format json --report-path /dev/stdout 2>/dev/null", cwd, 30_000);
+	if (!ok && !stdout.startsWith("[")) return false; // gitleaks not installed or errored
+
+	try {
+		const findings = JSON.parse(stdout);
+		if (!Array.isArray(findings)) return false;
+		for (const f of findings) {
+			issues.push({
+				severity: "error",
+				message: `${f.Description || f.RuleID || "Secret detected"} (${f.Match?.slice(0, 8)}...)`,
+				file: f.File,
+				line: f.StartLine,
+				rule: f.RuleID || "secret-detected",
+			});
+		}
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 const SECRET_PATTERNS: { name: string; pattern: RegExp }[] = [
 	{ name: "AWS Access Key", pattern: /AKIA[0-9A-Z]{16}/ },
@@ -41,27 +65,29 @@ export function runSecrets(cwd: string): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 
-	const sourceFiles = collectAllFiles(cwd, { extraExts: true });
+	// Try gitleaks first (industry standard, 800+ patterns)
+	const gitleaksResult = tryGitleaks(cwd, issues);
+	const tool = gitleaksResult ? "gitleaks" : "built-in";
 
-	for (const sf of sourceFiles) {
-		// Skip test files and mock data
-		if (sf.isTest || sf.path.includes("__mock")) continue;
-		const lines = sf.content.split("\n");
-
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i];
-			// Skip comments
-			if (line.trim().startsWith("//") || line.trim().startsWith("*")) continue;
-
-			for (const { name, pattern } of SECRET_PATTERNS) {
-				if (pattern.test(line)) {
-					issues.push({
-						severity: "error",
-						message: `Possible ${name}`,
-						file: sf.path,
-						line: i + 1,
-						rule: "secret-detected",
-					});
+	if (!gitleaksResult) {
+		// Fallback: built-in regex patterns
+		const sourceFiles = collectAllFiles(cwd, { extraExts: true });
+		for (const sf of sourceFiles) {
+			if (sf.isTest || sf.path.includes("__mock")) continue;
+			const lines = sf.content.split("\n");
+			for (let i = 0; i < lines.length; i++) {
+				const line = lines[i];
+				if (line.trim().startsWith("//") || line.trim().startsWith("*")) continue;
+				for (const { name, pattern } of SECRET_PATTERNS) {
+					if (pattern.test(line)) {
+						issues.push({
+							severity: "error",
+							message: `Possible ${name}`,
+							file: sf.path,
+							line: i + 1,
+							rule: "secret-detected",
+						});
+					}
 				}
 			}
 		}
@@ -106,16 +132,14 @@ export function runSecrets(cwd: string): CheckResult {
 		}
 	}
 
-	// Proportional: 1 secret in 100 files is minor; 1 secret in 3 files is critical
-	const totalFiles = sourceFiles.length || 1;
-	const secretPct = (issues.length / totalFiles) * 100;
-	const score = issues.length === 0 ? 100 : Math.max(0, Math.round(100 - secretPct * 20 - Math.min(issues.length, 3) * 10));
+	// Score based on issue count (secrets are always critical)
+	const score = issues.length === 0 ? 100 : Math.max(0, Math.round(100 - Math.min(issues.length, 5) * 15));
 
 	return {
 		name: "secrets",
 		score,
 		grade: gradeFromScore(score),
-		details: { secretsFound: issues.length },
+		details: { secretsFound: issues.length, tool },
 		issues,
 		duration: Date.now() - start,
 	};

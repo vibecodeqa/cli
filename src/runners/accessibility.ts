@@ -1,8 +1,10 @@
-/** Accessibility check — detects common a11y violations in JSX/TSX code. */
+/** Accessibility check — detects common a11y violations in JSX/TSX code.
+ *  If eslint-plugin-jsx-a11y is installed, lint runner handles most of these.
+ *  This runner catches additional patterns and provides a dedicated a11y score. */
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getProductionFiles } from "../fs-utils.js";
+import { getProductionFiles, readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
@@ -22,6 +24,19 @@ export function runAccessibility(cwd: string): CheckResult {
 	}
 
 	const issues: Issue[] = [];
+	const deps = readDeps(cwd);
+	// If jsx-a11y plugin is installed, most a11y rules are handled by lint runner
+	const hasA11yPlugin = !!(deps["eslint-plugin-jsx-a11y"]);
+	if (hasA11yPlugin) {
+		return {
+			name: "accessibility",
+			score: 100,
+			grade: "A",
+			details: { skipped: true, reason: "covered by eslint-plugin-jsx-a11y (see lint check)" },
+			issues: [],
+			duration: Date.now() - start,
+		};
+	}
 	let missingAlt = 0;
 	let clickDiv = 0;
 	let missingLabel = 0;

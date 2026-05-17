@@ -1,8 +1,9 @@
-/** Code duplication detection — finds copy-pasted blocks. */
+/** Code duplication — delegates to jscpd when available, falls back to built-in line-hash. */
 
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
+import { run } from "./exec.js";
 
 const MIN_LINES = 6; // minimum duplicate block size
 const MIN_TOKENS = 50; // minimum token count for a duplicate
@@ -18,8 +19,16 @@ interface DuplicateBlock {
 
 export function runDuplication(cwd: string): CheckResult {
 	const start = Date.now();
-	const issues: Issue[] = [];
 
+	// Try jscpd first (AST-token based, more accurate)
+	const jscpdResult = tryJscpd(cwd);
+	if (jscpdResult) {
+		jscpdResult.duration = Date.now() - start;
+		return jscpdResult;
+	}
+
+	// Fallback: built-in line-hash detection
+	const issues: Issue[] = [];
 	const sourceFiles = getProductionFiles(cwd);
 
 	if (sourceFiles.length < 2) {
@@ -27,7 +36,7 @@ export function runDuplication(cwd: string): CheckResult {
 			name: "duplication",
 			score: 100,
 			grade: "A",
-			details: { filesScanned: sourceFiles.length, duplicates: 0 },
+			details: { filesScanned: sourceFiles.length, duplicates: 0, tool: "built-in" },
 			issues: [],
 			duration: Date.now() - start,
 		};
@@ -114,8 +123,50 @@ export function runDuplication(cwd: string): CheckResult {
 		name: "duplication",
 		score,
 		grade: gradeFromScore(score),
-		details: { filesScanned: sourceFiles.length, totalSourceLines, duplicateBlocks: duplicates.length, duplicationPct: `${dupPct}%` },
+		details: { filesScanned: sourceFiles.length, totalSourceLines, duplicateBlocks: duplicates.length, duplicationPct: `${dupPct}%`, tool: "built-in" },
 		issues,
 		duration: Date.now() - start,
 	};
+}
+
+function tryJscpd(cwd: string): CheckResult | null {
+	const { stdout } = run("npx jscpd src/ --reporters json --silent 2>/dev/null || true", cwd, 30_000);
+	try {
+		const data = JSON.parse(stdout);
+		if (!data.statistics) return null;
+
+		const issues: Issue[] = [];
+		const clones = data.duplicates || [];
+		for (const d of clones.slice(0, 20)) {
+			const fileA = d.firstFile?.name || "?";
+			const fileB = d.secondFile?.name || "?";
+			const lines = d.lines || 0;
+			issues.push({
+				severity: "warning",
+				message: `Duplicate (${lines} lines)`,
+				file: `${fileA}:${d.firstFile?.start} \u2194 ${fileB}:${d.secondFile?.start}`,
+				rule: "duplicate-code",
+			});
+		}
+
+		const dupPct = Math.round((data.statistics.total?.percentage || 0) * 100) / 100;
+		const score = Math.max(0, Math.min(100, Math.round(100 - dupPct * 5)));
+
+		return {
+			name: "duplication",
+			score,
+			grade: gradeFromScore(score),
+			details: {
+				filesScanned: data.statistics.total?.sources || 0,
+				totalSourceLines: data.statistics.total?.lines || 0,
+				duplicateBlocks: clones.length,
+				duplicationPct: `${dupPct}%`,
+				tool: "jscpd",
+			},
+			issues,
+			duration: 0, // filled by caller
+		};
+	} catch {
+		return null;
+	}
 }
