@@ -162,17 +162,19 @@ function parseImports(content: string): string[] {
 }
 
 function resolveImport(fromPath: string, importPath: string): string | null {
-	// Simple resolution: join directory of fromPath with importPath
 	const dir = fromPath.includes("/") ? fromPath.replace(/\/[^/]+$/, "") : "";
 	let resolved = importPath;
 	if (importPath.startsWith("./")) {
 		resolved = dir ? `${dir}/${importPath.slice(2)}` : importPath.slice(2);
 	} else if (importPath.startsWith("../")) {
-		const parts = dir.split("/");
-		parts.pop();
-		resolved = [...parts, importPath.slice(3)].join("/");
+		const parts = dir.split("/").filter(Boolean);
+		let imp = importPath;
+		while (imp.startsWith("../")) {
+			parts.pop();
+			imp = imp.slice(3);
+		}
+		resolved = parts.length > 0 ? `${parts.join("/")}/${imp}` : imp;
 	}
-	// Strip known extension if present, then default to .ts
 	resolved = resolved.replace(/\.(js|ts|tsx|jsx)$/, "");
 	return `${resolved}.ts`;
 }
@@ -184,13 +186,18 @@ function findCycles(graph: Map<string, Set<string>>): string[][] {
 	const visited = new Set<string>();
 	const inStack = new Set<string>();
 	const path: string[] = [];
+	const seen = new Set<string>();
 
 	function dfs(node: string): void {
 		if (inStack.has(node)) {
-			// Found cycle — extract it
 			const cycleStart = path.indexOf(node);
 			if (cycleStart >= 0) {
-				cycles.push([...path.slice(cycleStart), node]);
+				const cycle = path.slice(cycleStart);
+				const key = [...cycle].sort().join(",");
+				if (!seen.has(key)) {
+					seen.add(key);
+					cycles.push([...cycle, node]);
+				}
 			}
 			return;
 		}

@@ -447,16 +447,6 @@ async function main() {
 		process.exit(1);
 	}
 
-	if (!jsonOnly && !ciMode && !watchMode) {
-		try {
-			const { execFileSync } = await import("node:child_process");
-			const openCmd = process.platform === "darwin" ? "open" : "xdg-open";
-			execFileSync(openCmd, [join(outputDir, "report/index.html")], { stdio: "ignore" });
-		} catch {
-			/* failed to open browser */
-		}
-	}
-
 	if (watchMode) {
 		await startWatch(cwd);
 	}
