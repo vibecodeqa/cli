@@ -254,7 +254,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		risk: "Barrel files (index.ts re-exports) prevent bundlers from tree-shaking unused code, bloating bundles by 2-10x. Heavy dependencies like moment.js add 300KB when date-fns does the same in 7KB. Static imports of visualization libraries delay initial page load.",
 		recommendation:
 			"Replace barrel re-exports with direct imports. Swap heavy deps for lighter alternatives. Use dynamic import() for large libraries only needed on interaction. Prefer zero-runtime CSS (Tailwind, CSS Modules) over styled-components.",
-		deeperTools: ["bundlephobia.com", "Lighthouse"],
+		deeperTools: ["knip", "bundlephobia.com", "Lighthouse"],
 	},
 	"best-practices": {
 		name: "best-practices",

@@ -10,6 +10,7 @@
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { getProductionFiles, readDeps } from "../fs-utils.js";
+import { run } from "./exec.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
@@ -158,13 +159,46 @@ export function runPerformance(cwd: string): CheckResult {
 		}
 	}
 
+	// ── 6. Dead code detection (via Knip) ──
+	let deadExports = 0;
+	let unusedFiles = 0;
+	let unusedDeps = 0;
+	const knipResult = tryKnip(cwd);
+	if (knipResult) {
+		deadExports = knipResult.exports;
+		unusedFiles = knipResult.files;
+		unusedDeps = knipResult.deps;
+		if (unusedFiles > 0) {
+			issues.push({
+				severity: "warning",
+				message: `${unusedFiles} unused files detected by Knip — consider removing`,
+				rule: "dead-files",
+			});
+		}
+		if (deadExports > 0) {
+			issues.push({
+				severity: "info",
+				message: `${deadExports} unused exports detected by Knip — dead code`,
+				rule: "dead-exports",
+			});
+		}
+		if (unusedDeps > 0) {
+			issues.push({
+				severity: "warning",
+				message: `${unusedDeps} unused dependencies detected by Knip — remove from package.json`,
+				rule: "unused-deps",
+			});
+		}
+	}
+
 	// Score — proportional to codebase, capped per category
 	const totalFiles = sourceFiles.length || 1;
 	const barrelPenalty = Math.min(15, (barrelImports / totalFiles) * 200);
 	const heavyPenalty = Math.min(30, heavyDeps * 8);
 	const dynamicPenalty = Math.min(10, dynamicOpportunities * 3);
 	const cssPenalty = Math.min(10, cssInJsRuntime * 5);
-	const score = Math.max(0, Math.min(100, Math.round(100 - barrelPenalty - heavyPenalty - dynamicPenalty - cssPenalty)));
+	const deadPenalty = knipResult ? Math.min(15, ((unusedFiles + unusedDeps) / totalFiles) * 100) : 0;
+	const score = Math.max(0, Math.min(100, Math.round(100 - barrelPenalty - heavyPenalty - dynamicPenalty - cssPenalty - deadPenalty)));
 
 	return {
 		name: "performance",
@@ -176,6 +210,7 @@ export function runPerformance(cwd: string): CheckResult {
 			heavyDeps,
 			dynamicOpportunities,
 			cssInJsRuntime,
+			...(knipResult ? { deadExports, unusedFiles, unusedDeps, deadCodeTool: "knip" } : {}),
 			...(bundleSizeKB > 0 ? { bundleSizeKB } : {}),
 		},
 		issues,
@@ -202,4 +237,19 @@ function dirSizeKB(dir: string, depth = 0): number {
 		}
 	} catch { /* skip inaccessible dirs */ }
 	return total / 1024;
+}
+
+/** Try running Knip for dead code detection. Returns counts or null if not available. */
+function tryKnip(cwd: string): { files: number; exports: number; deps: number } | null {
+	const { stdout } = run("npx knip --reporter json 2>/dev/null || true", cwd, 30_000);
+	try {
+		const data = JSON.parse(stdout);
+		return {
+			files: Array.isArray(data.files) ? data.files.length : 0,
+			exports: Array.isArray(data.exports) ? data.exports.length : 0,
+			deps: Array.isArray(data.dependencies) ? data.dependencies.length : 0,
+		};
+	} catch {
+		return null;
+	}
 }
