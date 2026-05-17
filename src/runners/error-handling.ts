@@ -83,6 +83,85 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 		}
 	}
 
+	// ── Dangerous runtime patterns ──
+	let jsonParseUnsafe = 0;
+	let infiniteLoops = 0;
+	let processExit = 0;
+
+	for (const f of files) {
+		const lines = f.content.split("\n");
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i].trim();
+			if (line.startsWith("//") || line.startsWith("*")) continue;
+			if (/\b(?:message|description|risk|recommendation|name)\s*:\s*["']/.test(line)) continue;
+
+			// JSON.parse of external input without try-catch
+			if (/\bJSON\.parse\s*\(/.test(line)) {
+				// Only flag if parsing user/network input (not internal known-safe files)
+				const isKnownSafe = /package\.json|tsconfig|\.json"/.test(line);
+				const isExternal = /\b(?:body|response|res|request|req|text|data|payload|input|event|stdout)\b/.test(line) ||
+					/\.text\(\)|\.json\(\)/.test(line);
+				// Check if we're inside a try block
+				const context = lines.slice(Math.max(0, i - 8), i).join("\n");
+				const inTry = context.includes("try");
+				if (isExternal && !inTry && !isKnownSafe) {
+					jsonParseUnsafe++;
+					issues.push({
+						severity: "warning",
+						message: "JSON.parse of external data without try-catch — crashes on malformed input",
+						file: f.path,
+						line: i + 1,
+						rule: "unsafe-json-parse",
+					});
+				}
+			}
+
+			// while(true) / for(;;) without obvious break
+			if (/\bwhile\s*\(\s*true\s*\)/.test(line) || /\bfor\s*\(\s*;\s*;\s*\)/.test(line)) {
+				const block = lines.slice(i, Math.min(i + 20, lines.length)).join("\n");
+				if (!block.includes("break") && !block.includes("return")) {
+					infiniteLoops++;
+					issues.push({
+						severity: "error",
+						message: "Potential infinite loop — no break or return found within 20 lines",
+						file: f.path,
+						line: i + 1,
+						rule: "infinite-loop",
+					});
+				}
+			}
+
+			// process.exit() in non-CLI files (library code shouldn't exit)
+			if (/\bprocess\.exit\s*\(/.test(line) && !f.path.includes("cli") && !f.path.includes("bin/")) {
+				processExit++;
+				issues.push({
+					severity: "warning",
+					message: "process.exit() in library code — throw an error instead",
+					file: f.path,
+					line: i + 1,
+					rule: "process-exit",
+				});
+			}
+		}
+	}
+
+	// ── Server entry point checks ──
+	const isServer = files.some((f) =>
+		f.content.includes("createServer") || f.content.includes("app.listen") || f.content.includes("Hono") || f.content.includes("express"),
+	);
+	if (isServer) {
+		const hasRejectionHandler = files.some((f) =>
+			f.content.includes("unhandledRejection") || f.content.includes("uncaughtException"),
+		);
+		if (!hasRejectionHandler) {
+			issues.push({
+				severity: "info",
+				message: "Server with no process.on('unhandledRejection') handler — uncaught promise rejections crash in Node 15+",
+				rule: "no-rejection-handler",
+			});
+		}
+	}
+
 	let hasErrorBoundary = false;
 	if (stack.framework === "react") {
 		for (const f of files) {
@@ -100,8 +179,9 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 	const emptyPenalty = Math.min(40, (emptyCatch / totalFiles) * 200);
 	const throwPenalty = Math.min(15, (throwString / totalFiles) * 100);
 	const promisePenalty = Math.min(15, ((floatingPromises + catchIgnored) / totalFiles) * 100);
+	const runtimePenalty = Math.min(15, ((jsonParseUnsafe + infiniteLoops + processExit) / totalFiles) * 100);
 	const boundaryPenalty = stack.framework === "react" && !hasErrorBoundary ? 5 : 0;
-	const score = Math.max(0, Math.min(100, Math.round(100 - emptyPenalty - throwPenalty - promisePenalty - boundaryPenalty)));
+	const score = Math.max(0, Math.min(100, Math.round(100 - emptyPenalty - throwPenalty - promisePenalty - runtimePenalty - boundaryPenalty)));
 
 	return {
 		name: "error-handling",
