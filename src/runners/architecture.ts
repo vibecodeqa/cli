@@ -78,10 +78,10 @@ export function runArchitecture(cwd: string, workspace?: WorkspaceInfo): CheckRe
 	// so the graph is incomplete and would produce many false positives.
 	const entrypoints = new Set([
 		"index.ts", "index.tsx", "index.js", "index.jsx",
-		"main.ts", "main.tsx", "main.js",
+		"main.ts", "main.tsx", "main.js", "main.dart",
 		"cli.ts", "cli.js",
 		"App.tsx", "App.ts", "App.vue", "App.svelte",
-		"app.ts", "app.tsx",
+		"app.ts", "app.tsx", "app.dart",
 		"+page.svelte", "+layout.svelte", "+server.ts",
 		"page.tsx", "layout.tsx",
 	]);

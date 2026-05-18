@@ -19,9 +19,13 @@ export function runTypeCheck(cwd: string, isDart = false, workspace?: WorkspaceI
 		for (const line of stdout.split("\n")) {
 			const parts = line.split("|");
 			if (parts.length < 8 || parts[0] !== "ERROR") continue;
+			// dart analyze returns absolute paths — strip cwd prefix
+			let filePath = parts[3];
+			if (filePath.startsWith(cwd)) filePath = filePath.slice(cwd.length + 1);
+			else if (filePath.startsWith(`/private${cwd}`)) filePath = filePath.slice(`/private${cwd}`.length + 1);
 			issues.push({
 				severity: "error",
-				file: parts[3],
+				file: filePath,
 				line: parseInt(parts[4], 10) || undefined,
 				rule: parts[2],
 				message: parts[7],

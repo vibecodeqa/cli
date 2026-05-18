@@ -85,7 +85,7 @@ function countPatterns(content: string) {
 
 function findTestFiles(cwd: string, srcRoots?: string[]): TestFile[] {
 	const files: TestFile[] = [];
-	const dirs = srcRoots ? [...srcRoots, "e2e", "playwright"] : ["src", "web/src", "test", "tests", "__tests__", "e2e", "playwright"];
+	const dirs = srcRoots ? [...srcRoots, "e2e", "playwright"] : ["src", "web/src", "lib", "test", "tests", "__tests__", "e2e", "playwright"];
 	const seen = new Set<string>();
 	for (const dir of dirs) {
 		const full = join(cwd, dir);
@@ -115,12 +115,13 @@ function walkTests(dir: string, cwd: string, out: TestFile[]): void {
 			continue;
 		}
 		const ext = extname(entry);
-		if (![".ts", ".tsx", ".js", ".jsx"].includes(ext)) continue;
+		if (![".ts", ".tsx", ".js", ".jsx", ".dart"].includes(ext)) continue;
 		if (
 			!entry.includes(".test.") &&
 			!entry.includes(".spec.") &&
 			!entry.includes(".e2e.") &&
 			!entry.includes(".int.") &&
+			!entry.endsWith("_test.dart") &&
 			!dir.includes("__tests__") &&
 			!dir.includes("/e2e") &&
 			!dir.includes("/test")

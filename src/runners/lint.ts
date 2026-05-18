@@ -65,10 +65,20 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 			const parts = line.split("|");
 			if (parts.length < 8) continue;
 			const severity = parts[0] === "ERROR" ? "error" : parts[0] === "WARNING" ? "warning" : "info";
+			// dart analyze returns absolute paths — strip cwd prefix
+			// macOS: /var/folders may resolve to /private/var/folders
+			let filePath = parts[3];
+			if (filePath.startsWith(cwd)) filePath = filePath.slice(cwd.length + 1);
+			else if (filePath.startsWith(`/private${cwd}`)) filePath = filePath.slice(`/private${cwd}`.length + 1);
+			else if (filePath.includes(cwd.split("/").pop()!)) {
+				// Last resort: find the cwd basename in the path
+				const idx = filePath.indexOf(cwd.split("/").pop()!);
+				if (idx >= 0) filePath = filePath.slice(idx + cwd.split("/").pop()!.length + 1);
+			}
 			issues.push({
 				severity,
 				message: parts[7],
-				file: parts[3],
+				file: filePath,
 				line: parseInt(parts[4], 10) || undefined,
 				rule: parts[2],
 			});
