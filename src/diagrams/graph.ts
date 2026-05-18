@@ -154,17 +154,17 @@ export function generateArchSVG(details: Record<string, unknown>): string {
 	// Interactive script — click node to highlight its imports/importers
 	const script = `<script type="text/javascript"><![CDATA[
 (function(){
-var svg=document.currentScript.parentElement;
+let svg=document.currentScript.parentElement;
 svg.querySelectorAll('.node').forEach(function(n){
 n.style.cursor='pointer';
 n.addEventListener('click',function(){
-var p=n.dataset.path;
-var info=document.getElementById('arch-info');
+let p=n.dataset.path;
+let info=document.getElementById('arch-info');
 if(info)info.textContent=p+' ('+n.dataset.fanIn+'\\u2190 '+n.dataset.fanOut+'\\u2192)';
-var cx=n.getAttribute('cx'),cy=n.getAttribute('cy');
-var coord=cx+','+cy;
+let cx=n.getAttribute('cx'),cy=n.getAttribute('cy');
+let coord=cx+','+cy;
 svg.querySelectorAll('path[d]').forEach(function(e){
-var d=e.getAttribute('d');
+let d=e.getAttribute('d');
 if(d.indexOf('M'+coord)===0||d.lastIndexOf(coord)===d.length-coord.length)e.style.opacity='1';
 else e.style.opacity='0.1';
 });
@@ -260,11 +260,11 @@ export function generateDSM(details: Record<string, unknown>): string {
 	// Interactive: hover to highlight row/col
 	const script = `<script type="text/javascript"><![CDATA[
 (function(){
-var svg=document.currentScript.parentElement;
+let svg=document.currentScript.parentElement;
 svg.querySelectorAll('.dsm-cell').forEach(function(c){
 c.style.cursor='pointer';
 c.addEventListener('mouseenter',function(){
-var r=c.dataset.row,col=c.dataset.col;
+let r=c.dataset.row,col=c.dataset.col;
 svg.querySelectorAll('.dsm-cell').forEach(function(x){
 if(x.dataset.row===r||x.dataset.col===col)x.setAttribute('opacity','1');
 else x.setAttribute('opacity','0.3');

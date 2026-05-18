@@ -119,10 +119,23 @@ export function runAccessibility(cwd: string): CheckResult {
 					rule: "tabindex",
 				});
 			}
+			// 6. Vue: v-for without :key
+			if (/v-for=/.test(trimmed)) {
+				const block = lines.slice(i, Math.min(i + 3, lines.length)).join(" ");
+				if (!/:key=/.test(block) && !/v-bind:key=/.test(block)) {
+					issues.push({
+						severity: "error",
+						message: "v-for without :key — causes rendering bugs when list changes",
+						file: f.path,
+						line: i + 1,
+						rule: "vue-v-for-key",
+					});
+				}
+			}
 		}
 	}
 
-	// 6. Check for html lang attribute in index.html
+	// 7. Check for html lang attribute in index.html
 	const htmlPaths = ["index.html", "web/index.html", "public/index.html"];
 	for (const h of htmlPaths) {
 		const full = join(cwd, h);

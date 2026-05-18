@@ -1,54 +1,54 @@
 {
-  "name": "@vibecodeqa/cli",
-  "version": "0.28.2",
-  "description": "Code health scanner for the AI coding era. 22 checks, zero config, full report.",
-  "type": "module",
-  "bin": {
-    "vcqa": "./dist/cli.js",
-    "vibe-check": "./dist/cli.js"
-  },
-  "files": [
-    "dist",
-    "LICENSE",
-    "README.md"
-  ],
-  "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "test": "vitest run",
-    "lint": "biome check src/",
-    "prepublishOnly": "tsc && chmod +x dist/cli.js"
-  },
-  "keywords": [
-    "code-quality",
-    "code-health",
-    "lint",
-    "coverage",
-    "complexity",
-    "duplication",
-    "security",
-    "architecture",
-    "llm",
-    "ai",
-    "vibe-coding",
-    "typescript",
-    "react",
-    "vite"
-  ],
-  "author": "VibeCode QA <hello@vibecodeqa.online>",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/vibecodeqa/cli"
-  },
-  "homepage": "https://vibecodeqa.online",
-  "engines": {
-    "node": ">=20"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.4.15",
-    "@types/node": "^25.8.0",
-    "typescript": "^5.8.3",
-    "vitest": "^4.1.6"
-  }
+	"name": "@vibecodeqa/cli",
+	"version": "0.29.0",
+	"description": "Code health scanner for the AI coding era. 22 checks, zero config, full report.",
+	"type": "module",
+	"bin": {
+		"vcqa": "./dist/cli.js",
+		"vibe-check": "./dist/cli.js"
+	},
+	"files": [
+		"dist",
+		"LICENSE",
+		"README.md"
+	],
+	"scripts": {
+		"build": "tsc",
+		"dev": "tsc --watch",
+		"test": "vitest run",
+		"lint": "biome check src/",
+		"prepublishOnly": "tsc && chmod +x dist/cli.js"
+	},
+	"keywords": [
+		"code-quality",
+		"code-health",
+		"lint",
+		"coverage",
+		"complexity",
+		"duplication",
+		"security",
+		"architecture",
+		"llm",
+		"ai",
+		"vibe-coding",
+		"typescript",
+		"react",
+		"vite"
+	],
+	"author": "VibeCode QA <hello@vibecodeqa.online>",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/vibecodeqa/cli"
+	},
+	"homepage": "https://vibecodeqa.online",
+	"engines": {
+		"node": ">=20"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.15",
+		"@types/node": "^25.8.0",
+		"typescript": "^5.8.3",
+		"vitest": "^4.1.6"
+	}
 }

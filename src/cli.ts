@@ -334,16 +334,8 @@ async function startWatch(cwd: string): Promise<void> {
 	await new Promise(() => {});
 }
 
-async function main() {
-	const args = process.argv.slice(2);
-
-	if (args.includes("--version") || args.includes("-v")) {
-		console.log(VERSION);
-		return;
-	}
-
-	if (args.includes("--help") || args.includes("-h")) {
-		console.log(`
+function printHelp(): void {
+	console.log(`
   \x1b[1m\x1b[38;5;141mvcqa\x1b[0m v${VERSION} — code health scanner
 
   \x1b[1mUsage:\x1b[0m  npx @vibecodeqa/cli [path] [flags]
@@ -367,14 +359,9 @@ async function main() {
     npx @vibecodeqa/cli --skip-tests --top  # fast scan with top issues
     npx @vibecodeqa/cli --ci --sarif        # CI with GitHub integration
 `);
-		return;
-	}
+}
 
-	const flags = parseFlags();
-	const { cwd, outputDir, jsonOnly, ciMode, skipTests, watchMode } = flags;
-	const start = Date.now();
-
-	// Validate cwd
+function validateCwd(cwd: string): void {
 	if (!existsSync(cwd)) {
 		console.error(`  \x1b[31mError: path does not exist: ${cwd}\x1b[0m`);
 		process.exit(1);
@@ -388,32 +375,43 @@ async function main() {
 		console.error(`  \x1b[31mError: cannot access: ${cwd}\x1b[0m`);
 		process.exit(1);
 	}
+}
 
-	if (!jsonOnly) {
-		console.log("");
-		console.log(`  \x1b[1m\x1b[38;5;141mvcqa\x1b[0m v${VERSION}`);
-		console.log(`  \x1b[2m${cwd}\x1b[0m`);
-		console.log("");
+function printHeader(cwd: string, stack: ReturnType<typeof detectStack>, workspace: WorkspaceInfo): void {
+	console.log("");
+	console.log(`  \x1b[1m\x1b[38;5;141mvcqa\x1b[0m v${VERSION}`);
+	console.log(`  \x1b[2m${cwd}\x1b[0m`);
+	console.log("");
+	const parts = [stack.language, stack.framework, stack.bundler, stack.testRunner, stack.linter, stack.packageManager].filter(
+		(v) => v !== "none" && v !== "unknown",
+	);
+	console.log(`  stack: ${parts.join(" + ")}`);
+	if (workspace.isMonorepo) {
+		console.log(`  workspace: ${workspace.tool} monorepo — ${workspace.packages.length} packages`);
+		for (const pkg of workspace.packages.slice(0, 8)) {
+			const f = [pkg.hasSrc && "src", pkg.hasTests && "tests", pkg.hasLinter && "linter"].filter(Boolean).join(", ");
+			console.log(`    \x1b[2m${pkg.path}\x1b[0m (${f || "empty"})`);
+		}
+		if (workspace.packages.length > 8) console.log(`    \x1b[2m...and ${workspace.packages.length - 8} more\x1b[0m`);
 	}
+	console.log("");
+}
+
+async function main() {
+	const args = process.argv.slice(2);
+	if (args.includes("--version") || args.includes("-v")) { console.log(VERSION); return; }
+	if (args.includes("--help") || args.includes("-h")) { printHelp(); return; }
+
+	const flags = parseFlags();
+	const { cwd, outputDir, jsonOnly, ciMode, skipTests, watchMode } = flags;
+	const start = Date.now();
+
+	validateCwd(cwd);
 
 	const stack = detectStack(cwd);
 	const workspace = detectWorkspace(cwd);
 	setGlobalSrcRoots(workspace.isMonorepo ? workspace.srcRoots : undefined);
-	if (!jsonOnly) {
-		const parts = [stack.language, stack.framework, stack.bundler, stack.testRunner, stack.linter, stack.packageManager].filter(
-			(v) => v !== "none" && v !== "unknown",
-		);
-		console.log(`  stack: ${parts.join(" + ")}`);
-		if (workspace.isMonorepo) {
-			console.log(`  workspace: ${workspace.tool} monorepo — ${workspace.packages.length} packages`);
-			for (const pkg of workspace.packages.slice(0, 8)) {
-				const flags = [pkg.hasSrc && "src", pkg.hasTests && "tests", pkg.hasLinter && "linter"].filter(Boolean).join(", ");
-				console.log(`    \x1b[2m${pkg.path}\x1b[0m (${flags || "empty"})`);
-			}
-			if (workspace.packages.length > 8) console.log(`    \x1b[2m...and ${workspace.packages.length - 8} more\x1b[0m`);
-		}
-		console.log("");
-	}
+	if (!jsonOnly) printHeader(cwd, stack, workspace);
 
 	const isDart = stack.language === "dart";
 	const checks = runChecks(cwd, stack, workspace, skipTests, isDart, jsonOnly);
