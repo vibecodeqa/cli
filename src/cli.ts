@@ -379,6 +379,7 @@ async function runInit(cwd: string): Promise<void> {
 	const workflowDir = join(cwd, ".github", "workflows");
 	const workflowPath = join(workflowDir, "vibecodeqa.yml");
 	if (!existsSync(workflowPath)) {
+		try {
 		mkdirSync(workflowDir, { recursive: true });
 		writeFileSync(
 			workflowPath,
@@ -399,6 +400,9 @@ jobs:
 		);
 		console.log(`  \x1b[32m+\x1b[0m .github/workflows/vibecodeqa.yml`);
 		created++;
+		} catch {
+			console.log(`  \x1b[31m!\x1b[0m .github/workflows/vibecodeqa.yml (write failed — check permissions)`);
+		}
 	} else {
 		console.log(`  \x1b[2m=\x1b[0m .github/workflows/vibecodeqa.yml (exists)`);
 	}
@@ -602,11 +606,13 @@ async function main() {
 		return;
 	}
 	if (args[0] === "init") {
-		await runInit(resolve(args[1] || "."));
+		const path = args.slice(1).find((a) => !a.startsWith("-")) || ".";
+		await runInit(resolve(path));
 		return;
 	}
 	if (args[0] === "fix") {
-		await runFix(resolve(args[1] || "."));
+		const path = args.slice(1).find((a) => !a.startsWith("-")) || ".";
+		await runFix(resolve(path));
 		return;
 	}
 
