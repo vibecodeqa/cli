@@ -101,10 +101,16 @@ export function runSecrets(cwd: string): CheckResult {
 
 	for (const envFile of envFiles) {
 		if (!existsSync(join(cwd, envFile))) continue;
-		// Check if .env is in .gitignore
+		// Check if .env is in .gitignore (handles glob patterns like .env* or .env.*)
 		const isIgnored = gitignore.split("\n").some((line) => {
 			const trimmed = line.trim();
-			return trimmed === envFile || trimmed === ".env" || trimmed === ".env*";
+			if (trimmed === envFile || trimmed === ".env") return true;
+			// Simple glob: .env* matches .env.local, .env.production etc
+			if (trimmed.includes("*")) {
+				const pattern = trimmed.replace(/\./g, "\\.").replace(/\*/g, ".*");
+				try { return new RegExp(`^${pattern}$`).test(envFile); } catch { return false; }
+			}
+			return false;
 		});
 		if (!isIgnored) {
 			issues.push({
@@ -121,10 +127,14 @@ export function runSecrets(cwd: string): CheckResult {
 			if (line.startsWith("#") || !line.includes("=")) continue;
 			const [key, ...valueParts] = line.split("=");
 			const value = valueParts.join("=").trim().replace(/^["']|["']$/g, "");
-			if (value.length > 20 && /(?:KEY|SECRET|TOKEN|PASSWORD|PRIVATE)/i.test(key || "")) {
+			const keyName = key?.trim() || "";
+			// Flag if key name suggests a secret OR value contains a password/credential pattern
+			const keyIsSensitive = /(?:KEY|SECRET|TOKEN|PASSWORD|PRIVATE|CREDENTIAL|AUTH)/i.test(keyName);
+			const valueHasCredential = /[:@].*[:@]/.test(value) || /^(?:sk-|ghp_|gho_|xox[bpors]-|AKIA)/.test(value);
+			if (value.length > 15 && (keyIsSensitive || valueHasCredential)) {
 				issues.push({
 					severity: "warning",
-					message: `${envFile} contains ${key?.trim()} with a long value — ensure this is not committed`,
+					message: `${envFile} contains ${keyName} with a credential value — ensure this is not committed`,
 					file: envFile,
 					rule: "env-secret-value",
 				});
