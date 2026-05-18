@@ -175,6 +175,8 @@ function resolveImport(fromPath: string, importPath: string): string | null {
 		}
 		resolved = parts.length > 0 ? `${parts.join("/")}/${imp}` : imp;
 	}
+	// If import already has a known SFC extension, keep it
+	if (/\.(vue|svelte)$/.test(resolved)) return resolved;
 	resolved = resolved.replace(/\.(js|ts|tsx|jsx)$/, "");
 	return `${resolved}.ts`;
 }

@@ -215,14 +215,14 @@ function resolveImport(fromPath: string, importPath: string, knownFiles: Set<str
 		resolved = [...parts, imp].filter(Boolean).join("/");
 	}
 
-	// Strip .js/.ts extension
-	resolved = resolved.replace(/\.(js|ts|tsx|jsx)$/, "");
+	// Strip known extensions
+	resolved = resolved.replace(/\.(js|ts|tsx|jsx|vue|svelte)$/, "");
 
-	// Try known extensions
-	for (const ext of [".ts", ".tsx", ".js", ".jsx"]) {
+	// Try known extensions (including SFC)
+	for (const ext of [".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte"]) {
 		if (knownFiles.has(resolved + ext)) return resolved + ext;
 	}
-	// Try index
+	// Try index files
 	for (const ext of [".ts", ".tsx"]) {
 		if (knownFiles.has(`${resolved}/index${ext}`)) return `${resolved}/index${ext}`;
 	}

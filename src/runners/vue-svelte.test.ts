@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { collectSourceFiles, setGlobalSrcRoots } from "../fs-utils.js";
 import { runAccessibility } from "./accessibility.js";
+import { runArchitecture } from "./architecture.js";
 import { runSecurity } from "./security.js";
 
 const TMP = join(import.meta.dirname!, "__test_vue_svelte__");
@@ -88,5 +89,20 @@ describe("Svelte support", () => {
 		const result = runSecurity(TMP);
 		const htmlIssues = result.issues.filter((i) => i.message.includes("{@html}"));
 		expect(htmlIssues.length).toBeGreaterThan(0);
+	});
+});
+
+describe("Vue/Svelte import resolution in architecture", () => {
+	it("resolves .vue imports in architecture graph", () => {
+		writeFileSync(
+			join(TMP, "src", "App.vue"),
+			`<template><Child /></template>\n<script setup>\nimport Child from './Child.vue'\n</script>`,
+		);
+		writeFileSync(join(TMP, "src", "Child.vue"), `<template><div>hi</div></template>\n<script setup>\nconst x = 1\n</script>`);
+		const result = runArchitecture(TMP);
+		const graph = result.details.graph as Record<string, { imports: string[] }>;
+		expect(graph).toBeDefined();
+		const appImports = graph["src/App.vue"]?.imports || [];
+		expect(appImports).toContain("src/Child.vue");
 	});
 });

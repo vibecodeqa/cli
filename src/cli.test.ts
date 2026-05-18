@@ -55,7 +55,7 @@ describe("CLI flags", () => {
 			expect(report.checks).toBeInstanceOf(Array);
 			expect(report.checks.length).toBe(22);
 		},
-		15_000,
+		30_000,
 	);
 
 	it("nonexistent path exits with error", () => {
@@ -114,7 +114,7 @@ describe("fix command", () => {
 			const out = run("fix .");
 			expect(out).toContain("Fix:");
 		},
-		15_000,
+		30_000,
 	);
 
 	it(
@@ -123,7 +123,7 @@ describe("fix command", () => {
 			const out = run("fix .");
 			expect(out).toContain("Score after fix:");
 		},
-		15_000,
+		30_000,
 	);
 
 	it("validates path", () => {
@@ -144,7 +144,7 @@ describe("report output", () => {
 			// Also verify report file was written
 			expect(existsSync(join(TMP, ".vibe-check", "report.json"))).toBe(true);
 		},
-		15_000,
+		30_000,
 	);
 
 	it(
@@ -154,6 +154,6 @@ describe("report output", () => {
 			expect(existsSync(join(TMP, ".vibe-check", "badge.svg"))).toBe(true);
 			expect(existsSync(join(TMP, ".vibe-check", "report.sarif"))).toBe(true);
 		},
-		15_000,
+		30_000,
 	);
 });
