@@ -49,9 +49,7 @@ export function runStructure(cwd: string, stack: StackInfo, workspace?: Workspac
 				continue;
 			}
 			// Check if packages have their own tsconfigs
-			const pkgHasTsconfig = workspace.packages.some(
-				(p) => existsSync(join(cwd, p.path, "tsconfig.json")),
-			);
+			const pkgHasTsconfig = workspace.packages.some((p) => existsSync(join(cwd, p.path, "tsconfig.json")));
 			if (pkgHasTsconfig) {
 				found.push("tsconfig (per-package)");
 				continue;

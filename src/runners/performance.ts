@@ -10,9 +10,9 @@
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { getProductionFiles, readDeps } from "../fs-utils.js";
-import { run } from "./exec.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
+import { run } from "./exec.js";
 
 // Packages known to be heavy (bundled KB, approx)
 const HEAVY_DEPS: Record<string, { kb: number; alt: string }> = {
@@ -233,9 +233,13 @@ function dirSizeKB(dir: string, depth = 0): number {
 				} else {
 					total += lst.size;
 				}
-			} catch { /* skip inaccessible files */ }
+			} catch {
+				/* skip inaccessible files */
+			}
 		}
-	} catch { /* skip inaccessible dirs */ }
+	} catch {
+		/* skip inaccessible dirs */
+	}
 	return total / 1024;
 }
 

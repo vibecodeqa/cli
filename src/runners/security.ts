@@ -160,7 +160,8 @@ const PATTERNS: SecurityPattern[] = [
 	},
 	{
 		name: "JSON with token in localStorage",
-		pattern: /localStorage\.setItem\s*\([^,]+,\s*JSON\.stringify\s*\(\s*(?:\{[^}]*(?:token|secret|password|auth)[^}]*\}|[a-zA-Z]*(?:[Uu]ser|[Aa]uth|[Ss]ession))/,
+		pattern:
+			/localStorage\.setItem\s*\([^,]+,\s*JSON\.stringify\s*\(\s*(?:\{[^}]*(?:token|secret|password|auth)[^}]*\}|[a-zA-Z]*(?:[Uu]ser|[Aa]uth|[Ss]ession))/,
 		severity: "warning",
 		message: "Storing object with auth data in localStorage — token accessible to XSS",
 		cwe: "CWE-922",
@@ -256,19 +257,16 @@ export function runSecurity(cwd: string): CheckResult {
 		const hasLocalStorage = sf.content.includes("localStorage.setItem");
 		if (!hasLocalStorage) continue;
 
-		const hasAuthContext =
-			/\b(?:token|oauth|access_token|Bearer|authorization|authenticate|login|signIn)\b/i.test(sf.content);
+		const hasAuthContext = /\b(?:token|oauth|access_token|Bearer|authorization|authenticate|login|signIn)\b/i.test(sf.content);
 		if (!hasAuthContext) continue;
 
 		const lines = sf.content.split("\n");
 		for (let i = 0; i < lines.length; i++) {
 			const trimmed = lines[i].trim();
 			if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
-			if (/\b(?:pattern|message|name)\s*[:=]\s*["'`\/]/.test(trimmed)) continue;
+			if (/\b(?:pattern|message|name)\s*[:=]\s*["'`/]/.test(trimmed)) continue;
 			if (!trimmed.includes("localStorage.setItem")) continue;
-			const alreadyCaught = issues.some(
-				(iss) => iss.file === sf.path && iss.line === i + 1 && iss.rule === "CWE-922",
-			);
+			const alreadyCaught = issues.some((iss) => iss.file === sf.path && iss.line === i + 1 && iss.rule === "CWE-922");
 			if (!alreadyCaught) {
 				issues.push({
 					severity: "info",

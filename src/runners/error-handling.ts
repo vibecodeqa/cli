@@ -99,8 +99,8 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 			if (/\bJSON\.parse\s*\(/.test(line)) {
 				// Only flag if parsing user/network input (not internal known-safe files)
 				const isKnownSafe = /package\.json|tsconfig|\.json"/.test(line);
-				const isExternal = /\b(?:body|response|res|request|req|text|data|payload|input|event|stdout)\b/.test(line) ||
-					/\.text\(\)|\.json\(\)/.test(line);
+				const isExternal =
+					/\b(?:body|response|res|request|req|text|data|payload|input|event|stdout)\b/.test(line) || /\.text\(\)|\.json\(\)/.test(line);
 				// Check if we're inside a try block
 				const context = lines.slice(Math.max(0, i - 8), i).join("\n");
 				const inTry = context.includes("try");
@@ -146,13 +146,12 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 	}
 
 	// ── Server entry point checks ──
-	const isServer = files.some((f) =>
-		f.content.includes("createServer") || f.content.includes("app.listen") || f.content.includes("Hono") || f.content.includes("express"),
+	const isServer = files.some(
+		(f) =>
+			f.content.includes("createServer") || f.content.includes("app.listen") || f.content.includes("Hono") || f.content.includes("express"),
 	);
 	if (isServer) {
-		const hasRejectionHandler = files.some((f) =>
-			f.content.includes("unhandledRejection") || f.content.includes("uncaughtException"),
-		);
+		const hasRejectionHandler = files.some((f) => f.content.includes("unhandledRejection") || f.content.includes("uncaughtException"));
 		if (!hasRejectionHandler) {
 			issues.push({
 				severity: "info",
@@ -181,7 +180,10 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 	const promisePenalty = Math.min(15, ((floatingPromises + catchIgnored) / totalFiles) * 100);
 	const runtimePenalty = Math.min(15, ((jsonParseUnsafe + infiniteLoops + processExit) / totalFiles) * 100);
 	const boundaryPenalty = stack.framework === "react" && !hasErrorBoundary ? 5 : 0;
-	const score = Math.max(0, Math.min(100, Math.round(100 - emptyPenalty - throwPenalty - promisePenalty - runtimePenalty - boundaryPenalty)));
+	const score = Math.max(
+		0,
+		Math.min(100, Math.round(100 - emptyPenalty - throwPenalty - promisePenalty - runtimePenalty - boundaryPenalty)),
+	);
 
 	return {
 		name: "error-handling",

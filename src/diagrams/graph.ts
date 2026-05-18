@@ -205,7 +205,8 @@ export function generateDSM(details: Record<string, unknown>): string {
 	}
 
 	let svg = "";
-	const ox = labelW, oy = labelW;
+	const ox = labelW,
+		oy = labelW;
 
 	// Grid
 	for (let i = 0; i <= n; i++) {

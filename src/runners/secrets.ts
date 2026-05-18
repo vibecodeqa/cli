@@ -95,9 +95,7 @@ export function runSecrets(cwd: string): CheckResult {
 
 	// ── .env file audit ──
 	const envFiles = [".env", ".env.local", ".env.production", ".env.development"];
-	const gitignore = existsSync(join(cwd, ".gitignore"))
-		? readFileSync(join(cwd, ".gitignore"), "utf-8")
-		: "";
+	const gitignore = existsSync(join(cwd, ".gitignore")) ? readFileSync(join(cwd, ".gitignore"), "utf-8") : "";
 
 	for (const envFile of envFiles) {
 		if (!existsSync(join(cwd, envFile))) continue;
@@ -108,7 +106,11 @@ export function runSecrets(cwd: string): CheckResult {
 			// Simple glob: .env* matches .env.local, .env.production etc
 			if (trimmed.includes("*")) {
 				const pattern = trimmed.replace(/\./g, "\\.").replace(/\*/g, ".*");
-				try { return new RegExp(`^${pattern}$`).test(envFile); } catch { return false; }
+				try {
+					return new RegExp(`^${pattern}$`).test(envFile);
+				} catch {
+					return false;
+				}
 			}
 			return false;
 		});
@@ -126,7 +128,10 @@ export function runSecrets(cwd: string): CheckResult {
 		for (const line of content.split("\n")) {
 			if (line.startsWith("#") || !line.includes("=")) continue;
 			const [key, ...valueParts] = line.split("=");
-			const value = valueParts.join("=").trim().replace(/^["']|["']$/g, "");
+			const value = valueParts
+				.join("=")
+				.trim()
+				.replace(/^["']|["']$/g, "");
 			const keyName = key?.trim() || "";
 			// Flag if key name suggests a secret OR value contains a password/credential pattern
 			const keyIsSensitive = /(?:KEY|SECRET|TOKEN|PASSWORD|PRIVATE|CREDENTIAL|AUTH)/i.test(keyName);

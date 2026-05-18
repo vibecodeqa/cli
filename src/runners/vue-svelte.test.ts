@@ -37,10 +37,7 @@ const msg = ref('hello')
 	});
 
 	it("preserves rawContent for template checks", () => {
-		writeFileSync(
-			join(TMP, "src", "App.vue"),
-			`<template><img src="x"></template>\n<script setup>\nconst x = 1\n</script>`,
-		);
+		writeFileSync(join(TMP, "src", "App.vue"), `<template><img src="x"></template>\n<script setup>\nconst x = 1\n</script>`);
 		const files = collectSourceFiles(TMP);
 		expect(files[0].rawContent).toContain("<template>");
 		expect(files[0].rawContent).toContain("<img");
@@ -58,10 +55,7 @@ const msg = ref('hello')
 	});
 
 	it("detects missing img alt in Vue template", () => {
-		writeFileSync(
-			join(TMP, "src", "Bad.vue"),
-			`<template><img src="photo.jpg"></template>\n<script setup>\n</script>`,
-		);
+		writeFileSync(join(TMP, "src", "Bad.vue"), `<template><img src="photo.jpg"></template>\n<script setup>\n</script>`);
 		const result = runAccessibility(TMP);
 		expect(result.issues.some((i) => i.rule === "img-alt")).toBe(true);
 	});
@@ -90,10 +84,7 @@ describe("Svelte support", () => {
 	});
 
 	it("detects {@html} as XSS in security runner", () => {
-		writeFileSync(
-			join(TMP, "src", "Raw.svelte"),
-			`<script>\nlet html = '<b>danger</b>'\n</script>\n{@html html}`,
-		);
+		writeFileSync(join(TMP, "src", "Raw.svelte"), `<script>\nlet html = '<b>danger</b>'\n</script>\n{@html html}`);
 		const result = runSecurity(TMP);
 		const htmlIssues = result.issues.filter((i) => i.message.includes("{@html}"));
 		expect(htmlIssues.length).toBeGreaterThan(0);

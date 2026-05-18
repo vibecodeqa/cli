@@ -126,7 +126,13 @@ export function runDuplication(cwd: string): CheckResult {
 		name: "duplication",
 		score,
 		grade: gradeFromScore(score),
-		details: { filesScanned: sourceFiles.length, totalSourceLines, duplicateBlocks: duplicates.length, duplicationPct: `${dupPct}%`, tool: "built-in" },
+		details: {
+			filesScanned: sourceFiles.length,
+			totalSourceLines,
+			duplicateBlocks: duplicates.length,
+			duplicationPct: `${dupPct}%`,
+			tool: "built-in",
+		},
 		issues,
 		duration: Date.now() - start,
 	};
@@ -136,12 +142,25 @@ function tryJscpd(cwd: string): CheckResult | null {
 	// jscpd writes JSON to a file, not stdout. Use a temp output dir.
 	const tmpDir = join(cwd, ".vibe-check", "jscpd-tmp");
 	const ignores = "node_modules/**,dist/**,build/**,.vibe-check/**,coverage/**,.next/**,.nuxt/**,**/*.json,**/*.lock,**/*.yaml,**/*.md";
-	run(`npx jscpd . --min-lines 6 --min-tokens 50 --reporters json --output "${tmpDir}" --ignore "${ignores}" --silent 2>/dev/null || true`, cwd, 30_000);
+	run(
+		`npx jscpd . --min-lines 6 --min-tokens 50 --reporters json --output "${tmpDir}" --ignore "${ignores}" --silent 2>/dev/null || true`,
+		cwd,
+		30_000,
+	);
 	const reportPath = join(tmpDir, "jscpd-report.json");
 	let rawData: string;
-	try { rawData = readFileSync(reportPath, "utf-8"); } catch { return null; }
+	try {
+		rawData = readFileSync(reportPath, "utf-8");
+	} catch {
+		return null;
+	}
 	// Clean up temp
-	try { unlinkSync(reportPath); rmdirSync(tmpDir); } catch { /* ignore */ }
+	try {
+		unlinkSync(reportPath);
+		rmdirSync(tmpDir);
+	} catch {
+		/* ignore */
+	}
 
 	try {
 		const data = JSON.parse(rawData);
@@ -164,13 +183,20 @@ function tryJscpd(cwd: string): CheckResult | null {
 		const dupPct = Math.round((data.statistics.total?.percentage || 0) * 100) / 100;
 		// jscpd token-level detection is more aggressive than line-hash
 		// Industry benchmarks: <10% good, 10-20% acceptable, 20-40% needs work, >40% poor
-		const score = dupPct <= 5 ? 100
-			: dupPct <= 10 ? 90
-			: dupPct <= 20 ? 75
-			: dupPct <= 30 ? 60
-			: dupPct <= 40 ? 45
-			: dupPct <= 50 ? 30
-			: Math.max(10, Math.round(30 - (dupPct - 50)));
+		const score =
+			dupPct <= 5
+				? 100
+				: dupPct <= 10
+					? 90
+					: dupPct <= 20
+						? 75
+						: dupPct <= 30
+							? 60
+							: dupPct <= 40
+								? 45
+								: dupPct <= 50
+									? 30
+									: Math.max(10, Math.round(30 - (dupPct - 50)));
 
 		return {
 			name: "duplication",

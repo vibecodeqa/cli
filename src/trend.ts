@@ -72,10 +72,12 @@ function terminalSparkline(values: number[]): string {
 	const min = Math.min(...slice);
 	const max = Math.max(...slice);
 	const range = max - min || 1;
-	return slice.map((v) => {
-		const idx = Math.min(7, Math.floor(((v - min) / range) * 7));
-		return blocks[idx];
-	}).join("");
+	return slice
+		.map((v) => {
+			const idx = Math.min(7, Math.floor(((v - min) / range) * 7));
+			return blocks[idx];
+		})
+		.join("");
 }
 
 /** Render trend HTML for the report. */

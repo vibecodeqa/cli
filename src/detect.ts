@@ -1,7 +1,7 @@
 /** Auto-detect project stack, workspace layout, and git repo from files in the working directory. */
 
 import { execSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { StackInfo, WorkspaceInfo, WorkspacePackage } from "./types.js";
 
@@ -56,7 +56,8 @@ export function detectStack(cwd: string): StackInfo {
 
 	// Bundler — meta-frameworks use their own bundler
 	let bundler: StackInfo["bundler"] = "none";
-	if (allDeps.next || allDeps.nuxt) bundler = "vite"; // Next/Nuxt handle bundling
+	if (allDeps.next || allDeps.nuxt)
+		bundler = "vite"; // Next/Nuxt handle bundling
 	else if (allDeps.vite || allDeps["@sveltejs/kit"]) bundler = "vite";
 	else if (allDeps.webpack) bundler = "webpack";
 	else if (allDeps.esbuild) bundler = "esbuild";
@@ -65,7 +66,13 @@ export function detectStack(cwd: string): StackInfo {
 
 	const linter: StackInfo["linter"] = allDeps["@biomejs/biome"] ? "biome" : allDeps.eslint ? "eslint" : "none";
 
-	const packageManager: StackInfo["packageManager"] = has("pnpm-lock.yaml") ? "pnpm" : has("bun.lockb") ? "bun" : has("yarn.lock") ? "yarn" : "npm";
+	const packageManager: StackInfo["packageManager"] = has("pnpm-lock.yaml")
+		? "pnpm"
+		: has("bun.lockb")
+			? "bun"
+			: has("yarn.lock")
+				? "yarn"
+				: "npm";
 
 	return { language, framework, bundler, testRunner, linter, packageManager };
 }
@@ -74,7 +81,11 @@ export function detectStack(cwd: string): StackInfo {
 export function detectWorkspace(cwd: string): WorkspaceInfo {
 	const has = (f: string) => existsSync(join(cwd, f));
 	const read = (f: string) => {
-		try { return readFileSync(join(cwd, f), "utf-8"); } catch { return ""; }
+		try {
+			return readFileSync(join(cwd, f), "utf-8");
+		} catch {
+			return "";
+		}
 	};
 
 	// Detect workspace tool
@@ -89,7 +100,12 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 		const packagesMatch = content.match(/^packages:\s*\n((?:\s+-[^\n]*\n?)*)/m);
 		if (packagesMatch) {
 			const items = packagesMatch[1].match(/^\s+-\s+['"]?([^\s'"#]+)['"]?\s*$/gm) || [];
-			globs = items.map((m) => m.replace(/^\s+-\s+/, "").replace(/['"]/g, "").trim());
+			globs = items.map((m) =>
+				m
+					.replace(/^\s+-\s+/, "")
+					.replace(/['"]/g, "")
+					.trim(),
+			);
 		}
 		if (globs.length === 0) globs = ["packages/*"];
 	}
@@ -102,7 +118,12 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 		const packagesMatch = content.match(/^packages:\s*\n((?:\s+-[^\n]*\n?)*)/m);
 		if (packagesMatch) {
 			const items = packagesMatch[1].match(/^\s+-\s+['"]?([^\s'"#]+)['"]?\s*$/gm) || [];
-			globs = items.map((m) => m.replace(/^\s+-\s+/, "").replace(/['"]/g, "").trim());
+			globs = items.map((m) =>
+				m
+					.replace(/^\s+-\s+/, "")
+					.replace(/['"]/g, "")
+					.trim(),
+			);
 		}
 	}
 
@@ -118,7 +139,9 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 						globs = ws;
 					}
 				}
-			} catch { /* invalid json */ }
+			} catch {
+				/* invalid json */
+			}
 		}
 	}
 
@@ -128,7 +151,9 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 		try {
 			const parsed = JSON.parse(lerna);
 			globs = parsed.packages || ["packages/*"];
-		} catch { globs = ["packages/*"]; }
+		} catch {
+			globs = ["packages/*"];
+		}
 	}
 
 	// Detect orchestration tools (overlay on top of workspace tool)
@@ -180,11 +205,19 @@ function resolveGlob(cwd: string, pattern: string, packages: WorkspacePackage[])
 /** Walk recursively for packages (for ** globs). */
 function walkForPackages(cwd: string, dir: string, relBase: string, packages: WorkspacePackage[]): void {
 	let entries: string[];
-	try { entries = readdirSync(dir); } catch { return; }
+	try {
+		entries = readdirSync(dir);
+	} catch {
+		return;
+	}
 	for (const entry of entries) {
 		if (entry === "node_modules" || entry === ".git" || entry === "dist" || entry === "build") continue;
 		const full = join(dir, entry);
-		try { if (lstatSync(full).isSymbolicLink() || !statSync(full).isDirectory()) continue; } catch { continue; }
+		try {
+			if (lstatSync(full).isSymbolicLink() || !statSync(full).isDirectory()) continue;
+		} catch {
+			continue;
+		}
 		const relPath = relBase ? `${relBase}/${entry}` : entry;
 
 		// If this dir has a package.json or pubspec.yaml, it's a package
@@ -206,19 +239,19 @@ function addPackage(relPath: string, pkgDir: string, packages: WorkspacePackage[
 		try {
 			const parsed = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
 			name = parsed.name || name;
-		} catch { /* use dir name */ }
+		} catch {
+			/* use dir name */
+		}
 	}
 
 	const hasSrc = existsSync(join(pkgDir, "src")) || existsSync(join(pkgDir, "app")) || existsSync(join(pkgDir, "lib"));
 	// Some packages have code at root (no src/ dir) — check for .ts/.dart files
-	const hasRootCode = !hasSrc && readdirSync(pkgDir).some(
-		(f) => f.endsWith(".ts") || f.endsWith(".tsx") || f.endsWith(".js") || f.endsWith(".jsx") || f.endsWith(".dart"),
-	);
-	const hasTests =
-		existsSync(join(pkgDir, "test")) ||
-		existsSync(join(pkgDir, "tests")) ||
-		existsSync(join(pkgDir, "__tests__")) ||
-		hasSrc; // tests often live alongside src in monorepos
+	const hasRootCode =
+		!hasSrc &&
+		readdirSync(pkgDir).some(
+			(f) => f.endsWith(".ts") || f.endsWith(".tsx") || f.endsWith(".js") || f.endsWith(".jsx") || f.endsWith(".dart"),
+		);
+	const hasTests = existsSync(join(pkgDir, "test")) || existsSync(join(pkgDir, "tests")) || existsSync(join(pkgDir, "__tests__")) || hasSrc; // tests often live alongside src in monorepos
 	const hasLinter =
 		existsSync(join(pkgDir, "biome.json")) ||
 		existsSync(join(pkgDir, "biome.jsonc")) ||
@@ -273,11 +306,11 @@ function detectConventionalLayout(cwd: string): WorkspaceInfo {
 
 	// Check for common multi-app layouts
 	const conventions = [
-		["apps", "packages"],     // Turborepo/Nx convention
-		["apps", "libs"],         // Nx convention
+		["apps", "packages"], // Turborepo/Nx convention
+		["apps", "libs"], // Nx convention
 		["services", "packages"], // Microservices
-		["server", "client"],     // Fullstack split
-		["backend", "frontend"],  // Fullstack split
+		["server", "client"], // Fullstack split
+		["backend", "frontend"], // Fullstack split
 	];
 
 	for (const dirs of conventions) {
@@ -289,7 +322,11 @@ function detectConventionalLayout(cwd: string): WorkspaceInfo {
 		for (const dir of existing) {
 			const entries = readdirSync(join(cwd, dir));
 			const subDirs = entries.filter((e) => {
-				try { return statSync(join(cwd, dir, e)).isDirectory(); } catch { return false; }
+				try {
+					return statSync(join(cwd, dir, e)).isDirectory();
+				} catch {
+					return false;
+				}
 			});
 			const hasPkgJson = subDirs.some((e) => existsSync(join(cwd, dir, e, "package.json")));
 

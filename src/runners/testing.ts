@@ -85,9 +85,7 @@ function countPatterns(content: string) {
 
 function findTestFiles(cwd: string, srcRoots?: string[]): TestFile[] {
 	const files: TestFile[] = [];
-	const dirs = srcRoots
-		? [...srcRoots, "e2e", "playwright"]
-		: ["src", "web/src", "test", "tests", "__tests__", "e2e", "playwright"];
+	const dirs = srcRoots ? [...srcRoots, "e2e", "playwright"] : ["src", "web/src", "test", "tests", "__tests__", "e2e", "playwright"];
 	const seen = new Set<string>();
 	for (const dir of dirs) {
 		const full = join(cwd, dir);
@@ -100,7 +98,11 @@ function findTestFiles(cwd: string, srcRoots?: string[]): TestFile[] {
 
 function walkTests(dir: string, cwd: string, out: TestFile[]): void {
 	let entries: string[];
-	try { entries = readdirSync(dir); } catch { return; }
+	try {
+		entries = readdirSync(dir);
+	} catch {
+		return;
+	}
 	for (const entry of entries) {
 		if (entry === "node_modules" || entry === "dist" || entry === ".git") continue;
 		const full = join(dir, entry);
@@ -109,7 +111,9 @@ function walkTests(dir: string, cwd: string, out: TestFile[]): void {
 				walkTests(full, cwd, out);
 				continue;
 			}
-		} catch { continue; }
+		} catch {
+			continue;
+		}
 		const ext = extname(entry);
 		if (![".ts", ".tsx", ".js", ".jsx"].includes(ext)) continue;
 		if (
@@ -124,7 +128,11 @@ function walkTests(dir: string, cwd: string, out: TestFile[]): void {
 			continue;
 
 		let content: string;
-		try { content = readFileSync(full, "utf-8"); } catch { continue; }
+		try {
+			content = readFileSync(full, "utf-8");
+		} catch {
+			continue;
+		}
 		const relPath = full.replace(`${cwd}/`, "");
 		const layer = classifyTestFile(relPath, content);
 		const patterns = countPatterns(content);
@@ -185,7 +193,10 @@ function detectE2E(cwd: string): { tool: string; configured: boolean } {
 
 // ── Combined test + coverage execution (single run) ──
 
-function runTestsWithCoverage(cwd: string, stack: StackInfo): { execution: { passed: number; failed: number; total: number } | null; coverage: CoverageData | null } {
+function runTestsWithCoverage(
+	cwd: string,
+	stack: StackInfo,
+): { execution: { passed: number; failed: number; total: number } | null; coverage: CoverageData | null } {
 	if (stack.testRunner === "none") return { execution: null, coverage: null };
 
 	// Single command: run tests with JSON reporter AND coverage
@@ -207,7 +218,9 @@ function runTestsWithCoverage(cwd: string, stack: StackInfo): { execution: { pas
 				total: data.numTotalTests || 0,
 			};
 		}
-	} catch { /* parse failed */ }
+	} catch {
+		/* parse failed */
+	}
 
 	// Parse coverage from file
 	const coverage = readCoverageFile(cwd);
@@ -216,7 +229,6 @@ function runTestsWithCoverage(cwd: string, stack: StackInfo): { execution: { pas
 }
 
 function readCoverageFile(cwd: string): CoverageData | null {
-
 	const searchPaths = ["coverage/coverage-summary.json", "test-results/coverage/coverage-summary.json"];
 	for (const p of searchPaths) {
 		const full = join(cwd, p);

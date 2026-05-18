@@ -196,7 +196,9 @@ export function categoryPage(cs: CatScore, fl: FL): string {
 				issuesHtml += `<div class="fg"><div class="fn">${fl(file)} <span class="fc">${issues.length}</span></div>`;
 				for (const iss of issues) {
 					const prompt = `Fix this issue in ${file}${iss.line ? `:${iss.line}` : ""}\n${iss.severity}: ${iss.message}${iss.rule ? ` (${iss.rule})` : ""}\nCheck: ${c.name}`;
-					const snippetBtn = iss.snippet ? `<button class="cp-btn" data-prompt="${e(iss.snippet)}" title="Copy snippet to search">\ud83d\udd0d</button>` : "";
+					const snippetBtn = iss.snippet
+						? `<button class="cp-btn" data-prompt="${e(iss.snippet)}" title="Copy snippet to search">\ud83d\udd0d</button>`
+						: "";
 					issuesHtml += `<div class="ir ${iss.severity}"><span class="is">${iss.severity[0]!.toUpperCase()}</span>${iss.line ? `<span class="il">${iss.line}</span>` : ""}<span class="im">${e(iss.message)}</span>${iss.rule ? `<span class="iru">${e(iss.rule)}</span>` : ""}${snippetBtn}<button class="cp-btn" data-prompt="${e(prompt)}" title="Copy fix prompt">\ud83d\udccb</button></div>`;
 				}
 				issuesHtml += `</div>`;

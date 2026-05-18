@@ -38,7 +38,8 @@ export function runCodeCoherence(cwd: string): CheckResult {
 				filesAnalyzed: files.length,
 				totalExports,
 				totalFunctions,
-				description: "Detects internal contradictions: inconsistent validation, conflicting defaults, naming drift, and behavioral mismatches.",
+				description:
+					"Detects internal contradictions: inconsistent validation, conflicting defaults, naming drift, and behavioral mismatches.",
 			},
 			issues: [],
 			duration: Date.now() - start,

@@ -4,7 +4,7 @@
  * If linter is "none" at root, checks if CI workflows run lint or if packages have configs.
  */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CheckResult, Issue, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -76,15 +76,11 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 	} else {
 		// No root linter detected — check if linting is happening elsewhere
 		const lintInCI = detectLintInCI(cwd);
-		const pkgLinters = workspace?.isMonorepo
-			? workspace.packages.filter((p) => p.hasLinter).length
-			: 0;
+		const pkgLinters = workspace?.isMonorepo ? workspace.packages.filter((p) => p.hasLinter).length : 0;
 
 		if (lintInCI || pkgLinters > 0) {
 			// Linting IS happening, just not via a root config we can invoke
-			const reason = lintInCI
-				? "Linting runs in CI workflows"
-				: `${pkgLinters} workspace packages have linter configs`;
+			const reason = lintInCI ? "Linting runs in CI workflows" : `${pkgLinters} workspace packages have linter configs`;
 			return {
 				name: "lint",
 				score: 70, // Partial credit — linting exists but we can't run it from root
@@ -132,6 +128,8 @@ function detectLintInCI(cwd: string): boolean {
 			const content = readFileSync(join(workflowDir, f), "utf-8");
 			if (/\b(biome|eslint|lint|check)\b/i.test(content)) return true;
 		}
-	} catch { /* can't read workflows */ }
+	} catch {
+		/* can't read workflows */
+	}
 	return false;
 }

@@ -10,9 +10,7 @@ import { gradeFromScore } from "../types.js";
 
 export function runAccessibility(cwd: string): CheckResult {
 	const start = Date.now();
-	const files = getProductionFiles(cwd).filter((f) =>
-		f.ext === ".tsx" || f.ext === ".jsx" || f.ext === ".vue" || f.ext === ".svelte",
-	);
+	const files = getProductionFiles(cwd).filter((f) => f.ext === ".tsx" || f.ext === ".jsx" || f.ext === ".vue" || f.ext === ".svelte");
 
 	if (files.length === 0) {
 		return {
@@ -28,7 +26,7 @@ export function runAccessibility(cwd: string): CheckResult {
 	const issues: Issue[] = [];
 	const deps = readDeps(cwd);
 	// If jsx-a11y plugin is installed, most a11y rules are handled by lint runner
-	const hasA11yPlugin = !!(deps["eslint-plugin-jsx-a11y"]);
+	const hasA11yPlugin = !!deps["eslint-plugin-jsx-a11y"];
 	if (hasA11yPlugin) {
 		return {
 			name: "accessibility",

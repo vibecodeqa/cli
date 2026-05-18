@@ -109,7 +109,10 @@ export function generateSequenceDiagram(details: Record<string, unknown>): strin
 			return impInfo && (impInfo.dir || ".") === role.dir;
 		});
 		if (importsFromRole.length > 0) {
-			const funcNames = importsFromRole.map((p) => basename(p, extname(p))).slice(0, 2).join(", ");
+			const funcNames = importsFromRole
+				.map((p) => basename(p, extname(p)))
+				.slice(0, 2)
+				.join(", ");
 			messages.push({ from: 0, to: i, label: funcNames });
 		}
 	}
@@ -188,7 +191,15 @@ export function generateLayerDiagram(details: Record<string, unknown>): string {
 		if (fanIn === 0 && fanOut > 5) layer = "entry";
 		else if (fanIn > 10 && fanOut === 0) layer = "model";
 		else if (fanIn > 5 && fanOut <= 1) layer = "model";
-		else if (path.includes("report") || path.includes("html") || path.includes("svg") || path.includes("page") || path.includes("style") || path.includes("component")) layer = "view";
+		else if (
+			path.includes("report") ||
+			path.includes("html") ||
+			path.includes("svg") ||
+			path.includes("page") ||
+			path.includes("style") ||
+			path.includes("component")
+		)
+			layer = "view";
 		else if (name === "types" || name === "check-meta" || path.includes("types")) layer = "model";
 		else if (name === "exec" || name === "detect" || name.includes("fs-") || path.includes("history")) layer = "data";
 		else if (path.includes("runner") || path.includes("check")) layer = "service";
@@ -294,7 +305,9 @@ export function generateContainerDiagram(cwd: string): string {
 						containers.push({ name: entry, type: "webapp", tech: "React" });
 					}
 				}
-			} catch { /* skip */ }
+			} catch {
+				/* skip */
+			}
 		}
 	}
 
@@ -307,7 +320,15 @@ export function generateContainerDiagram(cwd: string): string {
 	const W = containers.length * (boxW + gap) + gap;
 	const H = 120;
 
-	const typeColors: Record<string, string> = { webapp: "#6d78d0", worker: "#d97706", api: "#22c55e", db: "#8b5cf6", baas: "#ec4899", mobile: "#06b6d4", app: "#6d78d0" };
+	const typeColors: Record<string, string> = {
+		webapp: "#6d78d0",
+		worker: "#d97706",
+		api: "#22c55e",
+		db: "#8b5cf6",
+		baas: "#ec4899",
+		mobile: "#06b6d4",
+		app: "#6d78d0",
+	};
 
 	let svg = "";
 	for (let i = 0; i < containers.length; i++) {

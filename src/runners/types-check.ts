@@ -29,9 +29,7 @@ export function runTypeCheck(cwd: string, isDart = false, workspace?: WorkspaceI
 		}
 	} else {
 		const hasTsconfig =
-			existsSync(join(cwd, "tsconfig.json")) ||
-			existsSync(join(cwd, "tsconfig.app.json")) ||
-			existsSync(join(cwd, "tsconfig.base.json"));
+			existsSync(join(cwd, "tsconfig.json")) || existsSync(join(cwd, "tsconfig.app.json")) || existsSync(join(cwd, "tsconfig.base.json"));
 
 		if (!hasTsconfig) {
 			return {

@@ -263,7 +263,16 @@ function checkCodeQualityTooling(cwd: string, has: HasFn, read: ReadFn, workspac
 
 	// Formatter configured
 	practices++;
-	if (has("biome.json") || has("biome.jsonc") || has(".prettierrc") || has(".prettierrc.json") || has("prettier.config.js") || has(".editorconfig") || deps["@biomejs/biome"] || deps.prettier) {
+	if (
+		has("biome.json") ||
+		has("biome.jsonc") ||
+		has(".prettierrc") ||
+		has(".prettierrc.json") ||
+		has("prettier.config.js") ||
+		has(".editorconfig") ||
+		deps["@biomejs/biome"] ||
+		deps.prettier
+	) {
 		followed++;
 	} else {
 		issues.push({

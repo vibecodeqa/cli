@@ -252,9 +252,7 @@ async function printResults(
 
 		// Top actionable issues
 		if (flags.topN > 0) {
-			const allIssues = checks.flatMap((c) =>
-				c.issues.map((iss) => ({ check: c.name, weight: getCheckMeta(c.name).weight, ...iss })),
-			);
+			const allIssues = checks.flatMap((c) => c.issues.map((iss) => ({ check: c.name, weight: getCheckMeta(c.name).weight, ...iss })));
 			// Sort by: errors first, then by check weight (highest-impact first)
 			allIssues.sort((a, b) => {
 				const sevOrder = { error: 0, warning: 1, info: 2 };
@@ -268,9 +266,7 @@ async function printResults(
 				for (const iss of top) {
 					const sevColor = iss.severity === "error" ? "\x1b[31m" : iss.severity === "warning" ? "\x1b[33m" : "\x1b[2m";
 					const sevChar = iss.severity[0]!.toUpperCase();
-					const loc = iss.file && typeof iss.file === "string"
-						? `\x1b[2m${iss.file}${iss.line ? `:${iss.line}` : ""}\x1b[0m `
-						: "";
+					const loc = iss.file && typeof iss.file === "string" ? `\x1b[2m${iss.file}${iss.line ? `:${iss.line}` : ""}\x1b[0m ` : "";
 					console.log(`  ${sevColor}${sevChar}\x1b[0m ${loc}${iss.message}`);
 				}
 				console.log("");
@@ -338,7 +334,11 @@ function printHelp(): void {
 	console.log(`
   \x1b[1m\x1b[38;5;141mvcqa\x1b[0m v${VERSION} — code health scanner
 
-  \x1b[1mUsage:\x1b[0m  npx @vibecodeqa/cli [path] [flags]
+  \x1b[1mUsage:\x1b[0m  npx @vibecodeqa/cli [command] [path] [flags]
+
+  \x1b[1mCommands:\x1b[0m
+    init [path]       Set up CI workflow + recommended configs
+    fix [path]        Auto-fix top issues (runs biome, shows patches)
 
   \x1b[1mFlags:\x1b[0m
     --skip-tests      Skip test execution (faster scan)
@@ -355,10 +355,200 @@ function printHelp(): void {
 
   \x1b[1mExamples:\x1b[0m
     npx @vibecodeqa/cli                     # scan current directory
-    npx @vibecodeqa/cli ./my-project        # scan specific path
+    npx @vibecodeqa/cli init                # set up CI + configs
+    npx @vibecodeqa/cli fix                 # auto-fix what's fixable
     npx @vibecodeqa/cli --skip-tests --top  # fast scan with top issues
-    npx @vibecodeqa/cli --ci --sarif        # CI with GitHub integration
+    npx @vibecodeqa/cli --ci --fail-under 80  # CI with quality gate
 `);
+}
+
+// ── init command ──
+
+async function runInit(cwd: string): Promise<void> {
+	console.log("");
+	console.log(`  \x1b[1m\x1b[38;5;141mvcqa init\x1b[0m`);
+	console.log(`  \x1b[2m${cwd}\x1b[0m`);
+	console.log("");
+
+	const stack = detectStack(cwd);
+	let created = 0;
+
+	// 1. GitHub Actions workflow
+	const workflowDir = join(cwd, ".github", "workflows");
+	const workflowPath = join(workflowDir, "vibecodeqa.yml");
+	if (!existsSync(workflowPath)) {
+		mkdirSync(workflowDir, { recursive: true });
+		writeFileSync(
+			workflowPath,
+			`name: VibeCode QA
+on: [pull_request]
+permissions: { contents: read }
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npx @vibecodeqa/cli --ci --fail-under 70 --sarif --badge
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: .vibe-check/report.sarif
+`,
+		);
+		console.log(`  \x1b[32m+\x1b[0m .github/workflows/vibecodeqa.yml`);
+		created++;
+	} else {
+		console.log(`  \x1b[2m=\x1b[0m .github/workflows/vibecodeqa.yml (exists)`);
+	}
+
+	// 2. Biome config (if biome is a dep but no config exists)
+	if (
+		(stack.linter === "biome" || existsSync(join(cwd, "node_modules", "@biomejs", "biome"))) &&
+		!existsSync(join(cwd, "biome.json")) &&
+		!existsSync(join(cwd, "biome.jsonc"))
+	) {
+		writeFileSync(
+			join(cwd, "biome.json"),
+			JSON.stringify(
+				{
+					$schema: "https://biomejs.dev/schemas/2.0.0/schema.json",
+					formatter: { indentStyle: "tab", lineWidth: 120 },
+					linter: { enabled: true, rules: { recommended: true } },
+					organizeImports: { enabled: true },
+				},
+				null,
+				"\t",
+			) + "\n",
+		);
+		console.log(`  \x1b[32m+\x1b[0m biome.json`);
+		created++;
+	}
+
+	// 3. Add .vibe-check to .gitignore
+	const gitignorePath = join(cwd, ".gitignore");
+	if (existsSync(gitignorePath)) {
+		const content = readFileSync(gitignorePath, "utf-8");
+		if (!content.includes(".vibe-check")) {
+			writeFileSync(gitignorePath, content.trimEnd() + "\n.vibe-check/\n");
+			console.log(`  \x1b[32m+\x1b[0m .gitignore (added .vibe-check/)`);
+			created++;
+		}
+	}
+
+	console.log("");
+	if (created > 0) {
+		console.log(`  \x1b[32mCreated ${created} file(s).\x1b[0m Run \x1b[1mnpx @vibecodeqa/cli\x1b[0m to scan.`);
+	} else {
+		console.log(`  \x1b[2mAlready set up. Run npx @vibecodeqa/cli to scan.\x1b[0m`);
+	}
+	console.log("");
+}
+
+// ── fix command ──
+
+async function runFix(cwd: string): Promise<void> {
+	console.log("");
+	console.log(`  \x1b[1m\x1b[38;5;141mvcqa fix\x1b[0m`);
+	console.log(`  \x1b[2m${cwd}\x1b[0m`);
+	console.log("");
+
+	const stack = detectStack(cwd);
+	let fixed = 0;
+
+	// 1. Run biome format (auto-fixable lint + format issues)
+	if (stack.linter === "biome") {
+		console.log("  \x1b[1mFormatting with Biome...\x1b[0m");
+		const { execSync } = await import("node:child_process");
+		try {
+			execSync("npx biome check --write .", { cwd, stdio: "inherit", timeout: 30_000 });
+			fixed++;
+		} catch {
+			console.log("  \x1b[33mBiome had issues (some may be unfixable)\x1b[0m");
+		}
+	} else if (stack.linter === "eslint") {
+		console.log("  \x1b[1mFixing with ESLint...\x1b[0m");
+		const { execSync } = await import("node:child_process");
+		try {
+			execSync("npx eslint --fix src/", { cwd, stdio: "inherit", timeout: 30_000 });
+			fixed++;
+		} catch {
+			console.log("  \x1b[33mESLint had issues (some may be unfixable)\x1b[0m");
+		}
+	}
+
+	// 2. Scan to find remaining issues and generate fix suggestions
+	console.log("");
+	console.log("  \x1b[1mScanning for remaining issues...\x1b[0m");
+	console.log("");
+
+	const workspace = detectWorkspace(cwd);
+	setGlobalSrcRoots(workspace.isMonorepo ? workspace.srcRoots : undefined);
+	const isDart = stack.language === "dart";
+	const checks = runChecks(cwd, stack, workspace, true, isDart, true);
+	const score = computeScore(checks);
+
+	// Collect actionable issues with fix suggestions
+	const fixable: { check: string; file: string; line: number; message: string; fix: string }[] = [];
+
+	for (const c of checks) {
+		for (const iss of c.issues) {
+			if (!iss.file || typeof iss.file !== "string" || !iss.line) continue;
+			const fix = suggestFix(c.name, iss.rule || "", iss.message);
+			if (fix) fixable.push({ check: c.name, file: iss.file, line: iss.line, message: iss.message, fix });
+		}
+	}
+
+	// Print top fixable issues
+	const top = fixable.slice(0, 10);
+	if (top.length > 0) {
+		console.log(`  \x1b[1m${top.length} issues with fix suggestions:\x1b[0m`);
+		console.log("");
+		for (const f of top) {
+			console.log(`  \x1b[2m${f.file}:${f.line}\x1b[0m`);
+			console.log(`  ${f.message}`);
+			console.log(`  \x1b[32mFix: ${f.fix}\x1b[0m`);
+			console.log("");
+		}
+	}
+
+	const grade = gradeFromScore(score);
+	console.log(`  Score after fix: \x1b[${score >= 75 ? "32" : score >= 60 ? "33" : "31"}m${grade} ${score}/100\x1b[0m`);
+	if (fixed > 0) console.log(`  \x1b[32m${fixed} auto-fix(es) applied.\x1b[0m Re-run \x1b[1mnpx @vibecodeqa/cli\x1b[0m for full report.`);
+	console.log("");
+}
+
+function suggestFix(check: string, rule: string, message: string): string | null {
+	// Map common issues to actionable fixes
+	if (rule === "empty-catch") return "Add error logging: catch(e) { console.error(e); }";
+	if (rule === "throw-string") return 'Replace throw "msg" with throw new Error("msg")';
+	if (rule === "swallowed-promise") return "Add logging: .catch((e) => { console.error(e); })";
+	if (rule === "floating-promise") return "Add await or .catch() to handle the promise";
+	if (rule === "unsafe-json-parse") return "Wrap in try-catch: try { JSON.parse(x) } catch { /* handle */ }";
+	if (rule === "no-error-boundary") return "Add <ErrorBoundary> wrapper in your React app root";
+	if (rule === "img-alt") return 'Add alt attribute: <img alt="description" ...>';
+	if (rule === "click-events") return 'Add role="button" and onKeyDown handler';
+	if (rule === "vue-v-for-key") return 'Add :key="item.id" to the v-for element';
+	if (rule === "missing-key") return "Add key={item.id} to the JSX element in .map()";
+	if (rule === "index-key") return "Use a stable unique ID instead of array index for key";
+	if (rule === "conditional-hook") return "Move the hook call before any conditional (if/switch)";
+	if (rule === "no-tests") return "Create a test file: src/__tests__/example.test.ts";
+	if (rule === "no-readme") return "Create README.md with: project description, install, usage";
+	if (rule === "no-changelog") return "Create CHANGELOG.md or use changesets: npx changeset init";
+	if (rule === "env-not-ignored") return "Add .env to .gitignore";
+	if (rule === "secret-detected") return "Move to environment variable, rotate the exposed secret";
+	if (rule === "no-ci") return "Run: npx @vibecodeqa/cli init";
+	if (rule === "missing-lockfile") return "Run: pnpm install (or npm install) to generate lockfile";
+	if (rule === "missing-file" && message.includes("LICENSE")) return "Add LICENSE file: https://choosealicense.com/";
+	if (rule === "long-function") return "Extract logic into smaller helper functions";
+	if (rule === "high-complexity") return "Reduce nesting: use early returns, extract conditions";
+	if (rule === "duplicate-code") return "Extract shared logic into a helper function";
+	if (rule === "circular-dep") return "Extract shared types to a separate file both modules import";
+	if (rule === "god-module") return "Split into focused interfaces — one responsibility per module";
+	if (rule === "process-exit") return "Replace process.exit() with throw new Error()";
+	if (check === "security" && message.includes("innerHTML")) return "Use textContent or DOM APIs instead";
+	if (check === "security" && message.includes("eval")) return "Remove eval() — use a safer alternative";
+	if (check === "security" && message.includes("v-html")) return 'Sanitize with DOMPurify: v-html="DOMPurify.sanitize(input)"';
+	return null;
 }
 
 function validateCwd(cwd: string): void {
@@ -399,8 +589,22 @@ function printHeader(cwd: string, stack: ReturnType<typeof detectStack>, workspa
 
 async function main() {
 	const args = process.argv.slice(2);
-	if (args.includes("--version") || args.includes("-v")) { console.log(VERSION); return; }
-	if (args.includes("--help") || args.includes("-h")) { printHelp(); return; }
+	if (args.includes("--version") || args.includes("-v")) {
+		console.log(VERSION);
+		return;
+	}
+	if (args.includes("--help") || args.includes("-h")) {
+		printHelp();
+		return;
+	}
+	if (args[0] === "init") {
+		await runInit(resolve(args[1] || "."));
+		return;
+	}
+	if (args[0] === "fix") {
+		await runFix(resolve(args[1] || "."));
+		return;
+	}
 
 	const flags = parseFlags();
 	const { cwd, outputDir, jsonOnly, ciMode, skipTests, watchMode } = flags;

@@ -42,7 +42,8 @@ export function runDocCoherence(cwd: string): CheckResult {
 				reason: "Set VCQA_PRO_KEY to enable LLM-powered analysis",
 				docFiles,
 				hasJSDoc,
-				description: "Detects contradictions between documentation and code. Finds stale README claims, incorrect JSDoc, and misleading comments.",
+				description:
+					"Detects contradictions between documentation and code. Finds stale README claims, incorrect JSDoc, and misleading comments.",
 			},
 			issues: [],
 			duration: Date.now() - start,
@@ -94,7 +95,8 @@ export function runDocCoherence(cwd: string): CheckResult {
 		for (const ref of codeRefs) {
 			const name = ref.replace(/`/g, "");
 			// Skip common non-code words
-			if (["true", "false", "null", "undefined", "string", "number", "boolean", "json", "html", "css"].includes(name.toLowerCase())) continue;
+			if (["true", "false", "null", "undefined", "string", "number", "boolean", "json", "html", "css"].includes(name.toLowerCase()))
+				continue;
 			if (/^[A-Z_]+$/.test(name)) continue; // constants like NODE_ENV
 			// Check if it looks like a function/class name and isn't in exports
 			if (/^[a-z]/.test(name) && name.length > 4 && !exportNames.has(name)) {
