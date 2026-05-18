@@ -7,108 +7,108 @@ Code health scanner for the AI coding era. Zero runtime deps, pure TypeScript.
 ```bash
 pnpm install        # install dev deps
 pnpm build          # tsc → dist/
-pnpm test           # vitest run (115 tests)
+pnpm test           # vitest run (139 tests across 17 files)
 pnpm lint           # biome check src/
 node dist/cli.js    # self-scan
-node dist/cli.js --skip-tests --badge  # fast scan + badge SVG
-node dist/cli.js --skip-tests --top    # fast scan + top 5 issues
-node dist/cli.js --help                # show all flags
+node dist/cli.js init               # set up CI workflow + configs
+node dist/cli.js fix                # auto-fix + suggestions
+node dist/cli.js --skip-tests --top # fast scan + top issues
+node dist/cli.js --help             # show all flags
 ```
 
 ## Architecture
 
 ```
 src/
-├── cli.ts              # Entry point — flag parsing, runner orchestration, output
-├── types.ts            # CheckResult, Issue, VibeReport, StackInfo, gradeFromScore
+├── cli.ts              # Entry: flags, init/fix commands, runner orchestration
+├── types.ts            # CheckResult, Issue, VibeReport, StackInfo, WorkspaceInfo
 ├── score.ts            # Weighted composite score from check-meta weights
-├── check-meta.ts       # Metadata for all 20 checks (name, label, category, weight, description, risk, recommendation)
-├── detect.ts           # Auto-detect stack (TS/React/Dart/Flutter/Vite/vitest/Biome/pnpm/pub) + git remote
-├── fs-utils.ts         # Shared file walker (symlink protection, 1MB limit, skip dirs)
-├── trend.ts            # Compare current report to previous, compute deltas
+├── check-meta.ts       # Metadata for all 22 checks (weight, description, deeperTools)
+├── detect.ts           # Auto-detect stack + workspace (monorepo, melos, turborepo, nx)
+├── fs-utils.ts         # File walker (symlink-safe, SFC extraction, global srcRoots)
+├── trend.ts            # Trend comparison + terminal sparkline
 ├── history.ts          # Read .vibe-check/history/ for timeline data
-├── runners/            # One file per check — each exports a run function returning CheckResult
-│   ├── structure.ts    # Project files, lockfile, test ratio
-│   ├── lint.ts         # Runs biome/eslint, parses output
-│   ├── types-check.ts  # Runs tsc --noEmit
-│   ├── type-safety.ts  # Counts as any, @ts-ignore, etc.
+├── runners/            # One file per check
+│   ├── structure.ts    # Project files, lockfile, test ratio, monorepo-aware
+│   ├── lint.ts         # Runs biome/eslint/dart analyze, monorepo-aware
+│   ├── types-check.ts  # Runs tsc --noEmit (per-package for monorepos)
+│   ├── type-safety.ts  # as any, @ts-ignore, dynamic (Dart)
 │   ├── standards.ts    # Code smells, naming, large files
-│   ├── error-handling.ts  # Empty catch, throw string, Error Boundary
-│   ├── react.ts        # Conditional hooks, missing keys, index keys
-│   ├── accessibility.ts   # img alt, click on div, form labels, html lang
+│   ├── error-handling.ts  # Empty catch, floating promises, JSON.parse, infinite loops
+│   ├── react.ts        # Hooks rules, missing keys (skips when eslint plugin installed)
+│   ├── accessibility.ts   # img alt, click handlers, v-for key (Vue/Svelte SFC aware)
 │   ├── complexity.ts   # Cognitive complexity per function
-│   ├── duplication.ts  # Copy-pasted 6+ line blocks
-│   ├── docs.ts         # README quality, JSDoc coverage
-│   ├── testing.ts      # Deep test assessment (pyramid, coverage, quality)
-│   ├── secrets.ts      # Hardcoded API keys, tokens (13 patterns)
-│   ├── security.ts     # 15 CWE-mapped vulnerability patterns
-│   ├── dependencies.ts # npm audit + outdated packages
-│   ├── architecture.ts # Import graph, cycles, god modules, SVG diagram
-│   ├── confusion.ts    # Naming ambiguity (Levenshtein, synonyms, collisions)
-│   ├── context.ts      # Token density, import depth, context sinks
-│   ├── performance.ts     # Barrel imports, heavy deps, dynamic import opportunities, CSS-in-JS
-│   ├── doc-coherence.ts   # PREMIUM placeholder — docs vs code contradictions
-│   ├── code-coherence.ts  # PREMIUM placeholder — internal codebase contradictions
+│   ├── duplication.ts  # Delegates to jscpd (opt-in), falls back to line-hash
+│   ├── docs.ts         # README quality, JSDoc coverage, CHANGELOG
+│   ├── best-practices.ts  # CI/CD, supply chain, repo hygiene
+│   ├── testing.ts      # Pyramid, execution, coverage (.ts/.dart aware)
+│   ├── secrets.ts      # Delegates to gitleaks, falls back to 13 regex + .env audit
+│   ├── security.ts     # 21 CWE patterns + localStorage audit + v-html/\{@html\}
+│   ├── dependencies.ts # npm audit / dart pub outdated
+│   ├── architecture.ts # Import graph, cycles, god modules (Vue/Svelte import resolution)
+│   ├── confusion.ts    # Naming ambiguity (Levenshtein, cross-package aware)
+│   ├── context.ts      # Token density, import depth, circular dep impact
+│   ├── performance.ts  # Barrel imports, heavy deps, dead code (Knip)
+│   ├── doc-coherence.ts   # Pro: JSDoc mismatch + README stale refs
+│   ├── code-coherence.ts  # Pro: mixed error patterns, duplicate exports
 │   └── exec.ts         # Shared execSync wrapper
-└── report/             # HTML report generation (self-contained single file)
-    ├── html.ts         # Main generator — assembles nav, sidebar, pages
+├── diagrams/           # Architecture SVG generators (interactive)
+│   ├── index.ts        # Barrel re-export
+│   ├── graph.ts        # Dependency graph (click-to-highlight) + DSM matrix
+│   └── layers.ts       # Package, sequence, layer, container diagrams
+└── report/             # Multi-page HTML report
+    ├── html.ts         # Assembles nav, sidebar, pages
     ├── pages.ts        # Page renderers (overview, categories, issues, files, trends)
     ├── svg.ts          # SVG builders (ring, radar, timeline, pyramid, badge, sparkline)
     ├── sarif.ts        # SARIF 2.1.0 output for GitHub Code Scanning
-    ├── styles.ts       # All CSS as a template string
-    └── components.ts   # Helpers (HTML escape, file links, grade/priority colors)
-├── diagrams/           # Architecture diagram generators (split from runners/diagrams.ts)
-│   ├── index.ts        # Barrel re-export
-│   ├── graph.ts        # Dependency graph SVG + DSM matrix (interactive)
-│   └── layers.ts       # Package, sequence, layer, container diagrams
+    ├── styles.ts       # All CSS
+    └── components.ts   # HTML escape, file links, grade/priority colors
 ```
 
 ## 22 Checks across 7 categories
 
-Weights sum to 100 (premium checks have weight 0).
+Weights sum to 100 (Pro checks have weight 0).
 
 | Category | Checks | Weights |
 |---|---|---|
 | **Foundations** | structure, lint, types, type-safety, standards | 6+5+6+3+3 = 23 |
-| **Quality** | complexity, duplication, error-handling, react, accessibility, docs | 3+5+5+3+4+3 = 23 |
+| **Quality** | complexity, duplication, error-handling, react, accessibility, docs, best-practices | 5+5+3+3+4+3+3 = 26 |
 | **Testing** | testing | 15 |
-| **Architecture** | architecture, performance | 6+4 = 10 |
+| **Architecture** | architecture, performance | 5+4 = 9 |
 | **Security** | secrets, security, dependencies | 6+5+5 = 16 |
-| **AI Readiness** | confusion, context | 7+6 = 13 |
+| **AI Readiness** | confusion, context | 6+5 = 11 |
 | **AI Analysis** | doc-coherence, code-coherence | 0+0 (PRO) |
 
-## Report structure
+## Supported stacks
 
-- **Primary nav (left):** Overview + 7 dimension tabs
-- **Secondary nav (right):** Issues + Files (data views)
-- **Overview:** score ring, radar chart, category cards, score timeline, bar chart, top issues preview, file hotspots
-- **Dimension pages:** sub-tabs per check, info panels (What/Risk/Fix), issues grouped by file
-- **AI Analysis:** premium cards with gradient styling, "coming soon" state
+- **TypeScript/JavaScript** — React, Vue (.vue SFC), Svelte (.svelte SFC), Next.js, Nuxt, SvelteKit
+- **Dart/Flutter** — dart analyze, flutter_test, melos workspaces, _test.dart convention
+- **Monorepos** — pnpm, npm, yarn workspaces, lerna, turborepo, nx, melos
 
-## Key patterns
+## Tool delegation
 
-- Every runner returns `CheckResult` — synchronous, no async
-- Runners that call external tools (lint, types, testing, dependencies) use `exec.ts`
-- `fs-utils.ts` is the canonical file walker — all runners use it (symlink protection + 1MB limit)
-- Premium checks return `{ details: { comingSoon: true, premium: true } }` — excluded from score
-- Skipped checks return `{ details: { skipped: true, reason: "..." } }` — excluded from score
-- Report is one self-contained HTML file — no external deps, no JS frameworks
+Tries dedicated tools first, falls back to built-in:
+- **Secrets**: gitleaks → 13 regex patterns
+- **Duplication**: jscpd (if in devDeps) → line-hash
+- **Dead code**: Knip (if available)
+- **React hooks**: eslint-plugin-react-hooks (if installed, skips built-in)
+- **Accessibility**: eslint-plugin-jsx-a11y (if installed, skips built-in)
 
-## Known issues
+## CLI commands
 
-- Architecture SVG: >50 modules shows message instead of diagram — need clustering/zoom
-- Security check: "password in URL" pattern too broad (matches key=, token= in JSX)
+- `vcqa [path]` — scan and generate report
+- `vcqa init [path]` — create CI workflow + biome.json + .gitignore
+- `vcqa fix [path]` — auto-fix (biome/eslint) + 30+ fix suggestions
 
-## npm publish
+## Flags
 
-Auto-publishes via `.github/workflows/publish.yml` on push to main when version changes.
-Requires `NPM_TOKEN` secret on the repo (needs to be set — not yet configured).
+`--skip-tests`, `--ci`, `--fail-under N`, `--json`, `--badge`, `--sarif`, `--upload`, `--top [N]`, `--watch`, `-v`, `-h`
 
 ## Testing
 
 ```bash
-pnpm test                    # 109 tests across 15 files
+pnpm test                    # 139 tests across 17 files
 pnpm test -- --reporter=verbose  # see all test names
 ```
 
-Test files mirror source files: `foo.ts` → `foo.test.ts`. Tests use temp directories (`mkdtempSync`) and clean up after themselves.
+Test files: `*.test.ts` in src/ and src/runners/. CLI integration tests in `cli.test.ts`.
