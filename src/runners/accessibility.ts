@@ -17,7 +17,7 @@ export function runAccessibility(cwd: string): CheckResult {
 			name: "accessibility",
 			score: 100,
 			grade: "A",
-			details: { skipped: true, reason: "no JSX/TSX files" },
+			details: { skipped: true, reason: "no JSX/TSX/Vue/Svelte files" },
 			issues: [],
 			duration: Date.now() - start,
 		};
@@ -117,10 +117,14 @@ export function runAccessibility(cwd: string): CheckResult {
 					rule: "tabindex",
 				});
 			}
-			// 6. Vue: v-for without :key
+			// 6. Vue: v-for without :key (check same element, not next lines)
 			if (/v-for=/.test(trimmed)) {
-				const block = lines.slice(i, Math.min(i + 3, lines.length)).join(" ");
-				if (!/:key=/.test(block) && !/v-bind:key=/.test(block)) {
+				// Collect the full opening tag (may span multiple lines until >)
+				let tag = trimmed;
+				for (let k = i + 1; k < Math.min(i + 5, lines.length) && !tag.includes(">"); k++) {
+					tag += " " + lines[k].trim();
+				}
+				if (!/:key=/.test(tag) && !/v-bind:key=/.test(tag)) {
 					issues.push({
 						severity: "error",
 						message: "v-for without :key — causes rendering bugs when list changes",

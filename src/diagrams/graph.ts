@@ -111,7 +111,7 @@ export function generateArchSVG(details: Record<string, unknown>): string {
 		const fanOut = info.imports.length;
 
 		const isGod = fanIn >= godThreshold;
-		const isOrphan = fanIn === 0 && !["index", "main", "cli", "App"].includes(name);
+		const isOrphan = fanIn === 0 && !["index", "main", "cli", "App", "app", "+page", "+layout", "+server", "page", "layout"].includes(name);
 		const isHighFanOut = fanOut > 10;
 		const isInCycle = [...cycleEdges].some((e) => e.startsWith(`${path}->`) || e.endsWith(`->${path}`));
 

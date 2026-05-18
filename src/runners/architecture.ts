@@ -76,7 +76,15 @@ export function runArchitecture(cwd: string, workspace?: WorkspaceInfo): CheckRe
 	// ── Orphan files (not imported by anyone) ──
 	// Skip in monorepos — cross-package imports use package names (not relative paths)
 	// so the graph is incomplete and would produce many false positives.
-	const entrypoints = new Set(["index.ts", "index.tsx", "main.ts", "main.tsx", "cli.ts", "App.tsx", "App.ts"]);
+	const entrypoints = new Set([
+		"index.ts", "index.tsx", "index.js", "index.jsx",
+		"main.ts", "main.tsx", "main.js",
+		"cli.ts", "cli.js",
+		"App.tsx", "App.ts", "App.vue", "App.svelte",
+		"app.ts", "app.tsx",
+		"+page.svelte", "+layout.svelte", "+server.ts",
+		"page.tsx", "layout.tsx",
+	]);
 	const orphans: string[] = [];
 	if (!workspace?.isMonorepo) {
 		for (const [path, node] of graph.nodes) {
