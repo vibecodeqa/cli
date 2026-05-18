@@ -365,6 +365,9 @@ export function detectRepoUrl(cwd: string): { repoUrl: string | null; branch: st
 		const url = remote
 			.replace(/^git@github\.com:/, "https://github.com/")
 			.replace(/^git@gitlab\.com:/, "https://gitlab.com/")
+			.replace(/^git@bitbucket\.org:/, "https://bitbucket.org/")
+			.replace(/^ssh:\/\/git@github\.com\//, "https://github.com/")
+			.replace(/^ssh:\/\/git@gitlab\.com\//, "https://gitlab.com/")
 			.replace(/\.git$/, "");
 		return { repoUrl: url, branch };
 	} catch {

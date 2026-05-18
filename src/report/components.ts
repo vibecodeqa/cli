@@ -19,7 +19,8 @@ export function fileLink(path: string, line: number | undefined, repoUrl: string
 	if (!repoUrl || !/^https?:\/\//.test(repoUrl)) return e(path);
 	// Encode path segments for URL safety (spaces, #, ?, etc.)
 	const encodedPath = clean.split("/").map(encodeURIComponent).join("/");
-	const href = `${repoUrl}/blob/${branch}/${encodedPath}${line ? `#L${line}` : ""}`;
+	const safeRepoUrl = repoUrl.replace(/ /g, "%20");
+	const href = `${safeRepoUrl}/blob/${encodeURIComponent(branch)}/${encodedPath}${line ? `#L${line}` : ""}`;
 	return `<a href="${e(href)}" target="_blank" rel="noopener" class="flink">${e(path)}</a>`;
 }
 
