@@ -1,13 +1,12 @@
 /** Doc Coherence — detects contradictions between documentation and code.
  *
- * Pro feature (LLM-powered via api.vibecodeqa.online).
- * Requires VCQA_PRO_KEY env var. Without it, returns placeholder.
+ * Pro feature. Requires VCQA_PRO_KEY env var. Without it, returns placeholder.
  *
- * Checks:
- *   - README claims vs actual exports/features
- *   - JSDoc @param/@returns vs function signatures
- *   - Comments that contradict adjacent code
- *   - CHANGELOG references to files that no longer exist
+ * Local checks (always run with Pro key):
+ *   - JSDoc @param names not matching function signature
+ *   - README mentions features not found in exports
+ *
+ * LLM-powered analysis is handled by the upload flow (--upload + VCQA_PRO_KEY).
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -15,8 +14,6 @@ import { join } from "node:path";
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
-
-const API = "https://api.vibecodeqa.online";
 
 export function runDocCoherence(cwd: string): CheckResult {
 	const start = Date.now();
@@ -89,25 +86,30 @@ export function runDocCoherence(cwd: string): CheckResult {
 		}
 	}
 
-	// Call Pro API for deeper LLM analysis
-	try {
-		const res = fetchSync(`${API}/api/pro/doc-coherence`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json", Authorization: `Bearer ${proKey}` },
-			body: JSON.stringify({ readme, exports: exports.slice(0, 30), docFiles }),
-		});
-		if (res) {
-			for (const finding of res.findings || []) {
-				issues.push({
-					severity: (finding.severity === "error" || finding.severity === "info" ? finding.severity : "warning") as "error" | "warning" | "info",
-					message: finding.message,
-					file: finding.file,
-					rule: "doc-drift",
-				});
+	// Check README references to code that doesn't exist
+	if (readme) {
+		const exportNames = new Set(exports.map((e) => e.export.split(/\s+/).pop() || ""));
+		// Find backtick-quoted function/class names in README that don't match any export
+		const codeRefs = readme.match(/`(\w{3,})`/g) || [];
+		for (const ref of codeRefs) {
+			const name = ref.replace(/`/g, "");
+			// Skip common non-code words
+			if (["true", "false", "null", "undefined", "string", "number", "boolean", "json", "html", "css"].includes(name.toLowerCase())) continue;
+			if (/^[A-Z_]+$/.test(name)) continue; // constants like NODE_ENV
+			// Check if it looks like a function/class name and isn't in exports
+			if (/^[a-z]/.test(name) && name.length > 4 && !exportNames.has(name)) {
+				// Could be a function name — check if it exists anywhere in source
+				const existsInCode = files.some((f) => f.content.includes(name));
+				if (!existsInCode) {
+					issues.push({
+						severity: "info",
+						message: `README references \`${name}\` but it wasn't found in source code`,
+						file: "README.md",
+						rule: "readme-stale-ref",
+					});
+				}
 			}
 		}
-	} catch {
-		// API unavailable — still return local findings
 	}
 
 	const score = issues.length === 0 ? 100 : Math.max(20, 100 - issues.length * 10);
@@ -116,22 +118,8 @@ export function runDocCoherence(cwd: string): CheckResult {
 		name: "doc-coherence",
 		score,
 		grade: gradeFromScore(score),
-		details: { premium: true, docFiles, hasJSDoc, issuesFound: issues.length, tool: "pro-llm" },
+		details: { premium: true, docFiles, hasJSDoc, issuesFound: issues.length, tool: "pro-local" },
 		issues,
 		duration: Date.now() - start,
 	};
-}
-
-/** Synchronous fetch wrapper for CLI context. Returns parsed JSON or null. */
-function fetchSync(url: string, opts: { method: string; headers: Record<string, string>; body: string }): { findings: { severity: string; message: string; file?: string }[] } | null {
-	try {
-		const { execSync } = require("node:child_process") as typeof import("node:child_process");
-		const result = execSync(
-			`curl -s -X ${opts.method} "${url}" -H "Content-Type: application/json" -H "Authorization: ${opts.headers.Authorization}" -d '${opts.body.replace(/'/g, "'\\''")}'`,
-			{ encoding: "utf-8", timeout: 15_000 },
-		);
-		return JSON.parse(result);
-	} catch {
-		return null;
-	}
 }
