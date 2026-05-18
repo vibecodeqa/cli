@@ -370,6 +370,8 @@ async function runInit(cwd: string): Promise<void> {
 	console.log(`  \x1b[2m${cwd}\x1b[0m`);
 	console.log("");
 
+	validateCwd(cwd);
+
 	const stack = detectStack(cwd);
 	let created = 0;
 
@@ -451,6 +453,8 @@ async function runFix(cwd: string): Promise<void> {
 	console.log(`  \x1b[1m\x1b[38;5;141mvcqa fix\x1b[0m`);
 	console.log(`  \x1b[2m${cwd}\x1b[0m`);
 	console.log("");
+
+	validateCwd(cwd);
 
 	const stack = detectStack(cwd);
 	let fixed = 0;
