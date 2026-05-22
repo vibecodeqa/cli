@@ -45,7 +45,7 @@ npx @vibecodeqa/cli /path/to/project
 ```
 
 Output goes to `.vibe-check/`:
-- `report.html` — navigable multi-page dashboard (open in browser)
+- `report/index.html` — navigable multi-page dashboard (open in browser)
 - `report.json` — machine-readable results
 - `badge.svg` — shields.io-style badge (with `--badge`)
 - `report.sarif` — SARIF 2.1.0 for GitHub Code Scanning (with `--sarif`)
@@ -63,16 +63,17 @@ Output goes to `.vibe-check/`:
 | **Type Safety** | 3% | `as any`, `: any`, `@ts-ignore`, `@ts-nocheck` counts |
 | **Standards** | 3% | File naming, large files (>300 lines), code smells (console.log, var, ==, eval), config hygiene |
 
-### Quality (23%)
+### Quality (26%)
 
 | Check | Weight | What it measures |
 |-------|--------|-----------------|
-| **Complexity** | 3% | Cognitive complexity per function, functions >60 lines |
+| **Complexity** | 5% | Cognitive complexity per function, functions >60 lines |
 | **Duplication** | 5% | Copy-pasted 6+ line blocks |
-| **Error Handling** | 5% | Empty catch blocks, throw string, missing Error Boundaries |
+| **Error Handling** | 3% | Empty catch blocks, throw string, missing Error Boundaries |
 | **React Patterns** | 3% | Conditional hooks, missing keys, index keys, prop spreading |
 | **Accessibility** | 4% | img alt, click on non-interactive elements, form labels, html lang |
 | **Docs** | 3% | README quality, JSDoc coverage of exports |
+| **Best Practices** | 3% | CI/CD, lockfile, linter config, test scripts, supply chain hygiene |
 
 ### Testing (15%)
 
@@ -85,36 +86,36 @@ One deep check with 6 sub-dimensions:
 - **Quality** — assertion density, mock ratio, snapshot ratio
 - **E2E detection** — Playwright/Cypress configured?
 
-### Architecture (10%)
+### Architecture (9%)
 
 | Check | Weight | What it measures |
 |-------|--------|-----------------|
-| **Architecture** | 6% | Import graph, circular deps, god modules, orphan files, fan-out, SVG diagram with legend |
+| **Architecture** | 5% | Import graph, circular deps, god modules, orphan files, fan-out, SVG diagram with legend |
 | **Performance** | 4% | Barrel imports, heavy dependencies, dynamic import opportunities, CSS-in-JS overhead |
 
 ### Security (16%)
 
 | Check | Weight | What it measures |
 |-------|--------|-----------------|
-| **Secrets** | 6% | 13 patterns (AWS, GitHub, Stripe, OpenAI, private keys) |
-| **Security** | 5% | 15 CWE-mapped patterns (XSS, injection, crypto, SSRF) |
+| **Secrets** | 6% | 13 patterns (AWS, GitHub, Stripe, OpenAI, Anthropic, private keys) |
+| **Security** | 5% | 25 CWE-mapped patterns (XSS, injection, SSRF, crypto, prototype pollution) |
 | **Dependencies** | 5% | npm audit / dart pub outdated vulnerabilities + outdated packages |
 
-### AI Readiness (13%)
+### AI Readiness (11%)
 
 Novel checks that no other tool offers:
 
 | Check | Weight | What it measures |
 |-------|--------|-----------------|
-| **Confusion Index** | 7% | File name similarity, generic names, export collisions, ambiguous abbreviations |
-| **Context Locality** | 6% | Token density, import depth, circular deps, context sinks |
+| **Confusion Index** | 6% | File name similarity, generic names, export collisions, ambiguous abbreviations |
+| **Context Locality** | 5% | Token density, import depth, circular deps, context sinks |
 
-### AI Analysis (PRO — coming soon)
+### AI Analysis (PRO)
 
-| Check | What it will do |
-|-------|----------------|
-| **Doc Coherence** | LLM-powered detection of contradictions between docs and code |
-| **Code Coherence** | LLM-powered detection of internal inconsistencies across modules |
+| Check | What it measures |
+|-------|-----------------|
+| **Doc Coherence** | LLM-powered detection of contradictions between docs and code (JSDoc mismatch, stale README refs) |
+| **Code Coherence** | LLM-powered detection of internal inconsistencies (mixed error patterns, duplicate exports) |
 
 ## Scoring
 
@@ -148,11 +149,14 @@ Each check produces a score from 0-100. The composite score is a weighted averag
 | Flag | Description |
 |------|-------------|
 | `--skip-tests` | Skip test execution and coverage (fast mode) |
-| `--watch` | Re-scan automatically on file changes |
 | `--ci` | Exit code 1 if composite score < 60 |
+| `--fail-under N` | Exit code 1 if composite score < N |
 | `--json` | Output JSON to stdout (no HTML, no browser) |
 | `--badge` | Generate badge.svg in output directory |
 | `--sarif` | Generate SARIF 2.1.0 for GitHub Code Scanning |
+| `--upload` | Upload report to app.vibecodeqa.online |
+| `--top [N]` | Show top N issues to fix (default: 5) |
+| `--watch` | Re-scan automatically on file changes |
 
 ## Stack detection
 
@@ -163,6 +167,20 @@ Auto-detects from `package.json`, `pubspec.yaml`, and config files:
 - **Test runner:** vitest, jest, flutter_test, dart_test
 - **Linter:** Biome, ESLint, dart analyze
 - **Package manager:** pnpm, npm, yarn, bun, pub
+
+## Monorepo support
+
+Automatically detects and scans all packages in:
+- **pnpm** — `pnpm-workspace.yaml` (with comments, flow-style YAML, negation patterns)
+- **npm/yarn** — `workspaces` in `package.json`
+- **bun** — `workspaces` in `package.json` + `bun.lockb`
+- **lerna** — `lerna.json`
+- **turborepo** — `turbo.json` (overlay on pnpm/npm/yarn)
+- **nx** — `nx.json` (overlay on pnpm/npm/yarn)
+- **melos** — `melos.yaml` (Dart/Flutter monorepos)
+- **Conventional layouts** — `server/` + `client/`, `apps/` + `packages/`, etc.
+
+Framework detection aggregates deps from all workspace packages — React in `packages/web/package.json` is detected even if root has no React dependency.
 
 ## GitHub Actions
 
