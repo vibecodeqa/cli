@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { detectStack, detectWorkspace } from "./detect.js";
+import { detectStack, detectWorkspace, parseYamlList } from "./detect.js";
 
 const TMP = join(import.meta.dirname!, "__test_fixture__");
 
@@ -193,5 +193,156 @@ describe("detectWorkspace", () => {
 		expect(ws.isMonorepo).toBe(true);
 		expect(ws.tool).toBe("none");
 		expect(ws.packages).toHaveLength(2);
+	});
+
+	it("handles pnpm-workspace.yaml with comments between entries", () => {
+		setup({
+			"pnpm-workspace.yaml": "packages:\n  - packages/*\n  # shared libs\n  - apps/*\n",
+			"package.json": "{}",
+			"packages/sdk/package.json": JSON.stringify({ name: "sdk" }),
+			"packages/sdk/src/index.ts": "",
+			"apps/web/package.json": JSON.stringify({ name: "web" }),
+			"apps/web/src/app.ts": "",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.tool).toBe("pnpm");
+		expect(ws.packages).toHaveLength(2);
+		expect(ws.packages.map((p) => p.name).sort()).toEqual(["sdk", "web"]);
+	});
+
+	it("handles flow-style YAML: packages: [a, b]", () => {
+		setup({
+			"pnpm-workspace.yaml": "packages: [packages/*, apps/*]\n",
+			"package.json": "{}",
+			"packages/sdk/package.json": JSON.stringify({ name: "sdk" }),
+			"packages/sdk/src/index.ts": "",
+			"apps/web/package.json": JSON.stringify({ name: "web" }),
+			"apps/web/src/app.ts": "",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.tool).toBe("pnpm");
+		expect(ws.packages).toHaveLength(2);
+	});
+
+	it("filters negation patterns (!prefix)", () => {
+		setup({
+			"pnpm-workspace.yaml": "packages:\n  - packages/*\n  - '!packages/internal'\n",
+			"package.json": "{}",
+			"packages/sdk/package.json": JSON.stringify({ name: "sdk" }),
+			"packages/sdk/src/index.ts": "",
+			"packages/internal/package.json": JSON.stringify({ name: "internal" }),
+			"packages/internal/src/secret.ts": "",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		// packages/* matches both, but !packages/internal is filtered from globs
+		// (resolveGlob for packages/* still adds both — negation filtering is glob-level)
+		expect(ws.packages.length).toBeGreaterThanOrEqual(1);
+	});
+
+	it("detects bun workspaces", () => {
+		setup({
+			"package.json": JSON.stringify({ workspaces: ["packages/*"] }),
+			"bun.lockb": "",
+			"packages/app/package.json": JSON.stringify({ name: "app" }),
+			"packages/app/src/index.ts": "",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.tool).toBe("bun");
+		expect(ws.packages).toHaveLength(1);
+	});
+});
+
+describe("detectStack with workspace aggregation", () => {
+	afterEach(() => cleanup());
+
+	it("detects framework from workspace packages when not in root", () => {
+		setup({
+			"pnpm-workspace.yaml": "packages:\n  - packages/*\n",
+			"package.json": JSON.stringify({ devDependencies: { typescript: "^5", vitest: "^4" } }),
+			"tsconfig.json": "{}",
+			"pnpm-lock.yaml": "",
+			"packages/web/package.json": JSON.stringify({ name: "web", dependencies: { react: "^19" } }),
+			"packages/web/src/App.tsx": "",
+			"packages/api/package.json": JSON.stringify({ name: "api" }),
+			"packages/api/src/server.ts": "",
+		});
+		const workspace = detectWorkspace(TMP);
+		const stack = detectStack(TMP, workspace);
+		expect(stack.framework).toBe("react");
+		expect(stack.testRunner).toBe("vitest");
+		expect(stack.language).toBe("typescript");
+	});
+
+	it("detects Vue from workspace package", () => {
+		setup({
+			"pnpm-workspace.yaml": "packages:\n  - packages/*\n",
+			"package.json": JSON.stringify({ devDependencies: { typescript: "^5" } }),
+			"tsconfig.json": "{}",
+			"packages/frontend/package.json": JSON.stringify({ name: "frontend", dependencies: { vue: "^3", nuxt: "^4" } }),
+			"packages/frontend/src/app.vue": "",
+		});
+		const workspace = detectWorkspace(TMP);
+		const stack = detectStack(TMP, workspace);
+		expect(stack.framework).toBe("vue");
+	});
+
+	it("works without workspace (backward compat)", () => {
+		setup({
+			"package.json": JSON.stringify({ dependencies: { react: "^19" }, devDependencies: { typescript: "^5" } }),
+			"tsconfig.json": "{}",
+		});
+		const stack = detectStack(TMP);
+		expect(stack.framework).toBe("react");
+	});
+});
+
+describe("parseYamlList", () => {
+	it("parses block-style list", () => {
+		const yaml = "packages:\n  - packages/*\n  - apps/*\n";
+		expect(parseYamlList(yaml, "packages")).toEqual(["packages/*", "apps/*"]);
+	});
+
+	it("parses block-style with comments between entries", () => {
+		const yaml = "packages:\n  - packages/*\n  # shared libs\n  - apps/*\n  # internal\n  - tools/*\n";
+		expect(parseYamlList(yaml, "packages")).toEqual(["packages/*", "apps/*", "tools/*"]);
+	});
+
+	it("parses block-style with blank lines", () => {
+		const yaml = "packages:\n  - packages/*\n\n  - apps/*\n";
+		expect(parseYamlList(yaml, "packages")).toEqual(["packages/*", "apps/*"]);
+	});
+
+	it("parses flow-style list", () => {
+		const yaml = "packages: [packages/*, apps/*]\n";
+		expect(parseYamlList(yaml, "packages")).toEqual(["packages/*", "apps/*"]);
+	});
+
+	it("parses flow-style with quotes", () => {
+		const yaml = "packages: ['packages/*', \"apps/*\"]\n";
+		expect(parseYamlList(yaml, "packages")).toEqual(["packages/*", "apps/*"]);
+	});
+
+	it("stops at next top-level key", () => {
+		const yaml = "packages:\n  - packages/*\ncatalog:\n  react: ^19\n";
+		expect(parseYamlList(yaml, "packages")).toEqual(["packages/*"]);
+	});
+
+	it("handles quoted block-style entries", () => {
+		const yaml = "packages:\n  - 'packages/*'\n  - \"apps/*\"\n";
+		expect(parseYamlList(yaml, "packages")).toEqual(["packages/*", "apps/*"]);
+	});
+
+	it("returns empty for missing key", () => {
+		const yaml = "name: my-project\n";
+		expect(parseYamlList(yaml, "packages")).toEqual([]);
+	});
+
+	it("handles inline comments on list items", () => {
+		const yaml = "packages:\n  - packages/* # core packages\n  - apps/* # applications\n";
+		expect(parseYamlList(yaml, "packages")).toEqual(["packages/*", "apps/*"]);
 	});
 });

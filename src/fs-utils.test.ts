@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { collectSourceFiles, getProductionFiles, getTestFiles, readDeps, readSafe } from "./fs-utils.js";
+import { collectSourceFiles, getProductionFiles, getTestFiles, readDeps, readSafe, setGlobalSrcRoots } from "./fs-utils.js";
 
 function makeProject(files: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-fs-"));
@@ -97,6 +97,48 @@ describe("readSafe", () => {
 
 	it("returns empty string for missing file", () => {
 		expect(readSafe("/tmp/nonexistent", "nope.ts")).toBe("");
+	});
+});
+
+describe("collectSourceFiles with monorepo srcRoots", () => {
+	it("finds files across workspace packages via srcRoots", () => {
+		const dir = makeProject({
+			"packages/sdk/src/index.ts": "export const x = 1;",
+			"packages/sdk/src/utils.ts": "export const y = 2;",
+			"packages/cli/src/main.ts": "console.log('hi');",
+		});
+		const files = collectSourceFiles(dir, { srcRoots: ["packages/sdk/src", "packages/cli/src"] });
+		expect(files).toHaveLength(3);
+		expect(files.map((f) => f.path).sort()).toEqual([
+			"packages/cli/src/main.ts",
+			"packages/sdk/src/index.ts",
+			"packages/sdk/src/utils.ts",
+		]);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("finds files via setGlobalSrcRoots", () => {
+		const dir = makeProject({
+			"packages/sdk/src/index.ts": "export const x = 1;",
+			"packages/cli/src/main.ts": "console.log('hi');",
+		});
+		setGlobalSrcRoots(["packages/sdk/src", "packages/cli/src"]);
+		const files = collectSourceFiles(dir);
+		expect(files).toHaveLength(2);
+		setGlobalSrcRoots(undefined); // reset
+		rmSync(dir, { recursive: true });
+	});
+
+	it("falls back to DEFAULT_SRC_DIRS when no srcRoots set", () => {
+		const dir = makeProject({
+			"src/app.ts": "export const x = 1;",
+			"packages/sdk/src/index.ts": "export const y = 2;",
+		});
+		setGlobalSrcRoots(undefined);
+		const files = collectSourceFiles(dir);
+		expect(files).toHaveLength(1);
+		expect(files[0]!.path).toBe("src/app.ts");
+		rmSync(dir, { recursive: true });
 	});
 });
 

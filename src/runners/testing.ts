@@ -116,15 +116,16 @@ function walkTests(dir: string, cwd: string, out: TestFile[]): void {
 		}
 		const ext = extname(entry);
 		if (![".ts", ".tsx", ".js", ".jsx", ".dart"].includes(ext)) continue;
+		// Check if file is in a test directory by matching path segments (not substrings)
+		const relDir = dir.startsWith(cwd) ? dir.slice(cwd.length) : dir;
+		const inTestDir = /(?:^|\/)(?:test|tests|__tests__|e2e)(?:\/|$)/.test(relDir);
 		if (
 			!entry.includes(".test.") &&
 			!entry.includes(".spec.") &&
 			!entry.includes(".e2e.") &&
 			!entry.includes(".int.") &&
 			!entry.endsWith("_test.dart") &&
-			!dir.includes("__tests__") &&
-			!dir.includes("/e2e") &&
-			!dir.includes("/test")
+			!inTestDir
 		)
 			continue;
 

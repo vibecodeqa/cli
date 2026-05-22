@@ -5,7 +5,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node
 import { join } from "node:path";
 import type { StackInfo, WorkspaceInfo, WorkspacePackage } from "./types.js";
 
-export function detectStack(cwd: string): StackInfo {
+export function detectStack(cwd: string, workspace?: WorkspaceInfo): StackInfo {
 	const has = (f: string) => existsSync(join(cwd, f));
 	const read = (f: string) => {
 		try {
@@ -39,6 +39,20 @@ export function detectStack(cwd: string): StackInfo {
 		allDeps = { ...deps.dependencies, ...deps.devDependencies };
 	} catch {
 		// invalid package.json
+	}
+
+	// Aggregate deps from workspace packages (monorepo: framework may live in packages, not root)
+	if (workspace?.isMonorepo) {
+		for (const wp of workspace.packages) {
+			const pkgContent = read(join(wp.path, "package.json"));
+			if (!pkgContent) continue;
+			try {
+				const parsed = JSON.parse(pkgContent);
+				allDeps = { ...allDeps, ...parsed.dependencies, ...parsed.devDependencies };
+			} catch {
+				/* invalid json */
+			}
+		}
 	}
 
 	const language =
@@ -77,6 +91,42 @@ export function detectStack(cwd: string): StackInfo {
 	return { language, framework, bundler, testRunner, linter, packageManager };
 }
 
+/**
+ * Parse a YAML list under a given key. Handles:
+ * - Block-style with comments/blank lines between entries
+ * - Flow-style: `key: [item1, item2]`
+ * - Quoted and unquoted items
+ * Zero-dep — no YAML parser needed.
+ */
+export function parseYamlList(content: string, key: string): string[] {
+	// Flow-style: `key: [item1, item2]`
+	const flowMatch = content.match(new RegExp(`^${key}:\\s*\\[([^\\]]*)]`, "m"));
+	if (flowMatch) {
+		return flowMatch[1]
+			.split(",")
+			.map((s) => s.trim().replace(/['"]/g, ""))
+			.filter(Boolean);
+	}
+
+	// Block-style: find the key, then collect indented lines until next top-level key
+	const lines = content.split("\n");
+	let inSection = false;
+	const items: string[] = [];
+	for (const line of lines) {
+		if (inSection) {
+			// Stop at next top-level key (non-indented, non-comment, non-blank)
+			if (/^\S/.test(line) && !line.startsWith("#")) break;
+			// Extract list items: `  - value` or `  - 'value'` or `  - "value"`
+			const itemMatch = line.match(/^\s+-\s+['"]?([^\s'"#]+)['"]?\s*(?:#.*)?$/);
+			if (itemMatch) items.push(itemMatch[1]);
+			// Skip comments and blank lines within the section
+		} else if (new RegExp(`^${key}:\\s*$`).test(line)) {
+			inSection = true;
+		}
+	}
+	return items;
+}
+
 /** Detect monorepo / workspace layout. */
 export function detectWorkspace(cwd: string): WorkspaceInfo {
 	const has = (f: string) => existsSync(join(cwd, f));
@@ -95,36 +145,14 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 	// ── Dart/Flutter monorepo (melos) ──
 	if (has("melos.yaml")) {
 		tool = "melos";
-		const content = read("melos.yaml");
-		// Extract only the `packages:` section
-		const packagesMatch = content.match(/^packages:\s*\n((?:\s+-[^\n]*\n?)*)/m);
-		if (packagesMatch) {
-			const items = packagesMatch[1].match(/^\s+-\s+['"]?([^\s'"#]+)['"]?\s*$/gm) || [];
-			globs = items.map((m) =>
-				m
-					.replace(/^\s+-\s+/, "")
-					.replace(/['"]/g, "")
-					.trim(),
-			);
-		}
+		globs = parseYamlList(read("melos.yaml"), "packages");
 		if (globs.length === 0) globs = ["packages/*"];
 	}
 
 	// ── Node.js workspace configs ──
 	if (tool === "none" && has("pnpm-workspace.yaml")) {
 		tool = "pnpm";
-		const content = read("pnpm-workspace.yaml");
-		// Extract only the `packages:` section (stop at next top-level key or EOF)
-		const packagesMatch = content.match(/^packages:\s*\n((?:\s+-[^\n]*\n?)*)/m);
-		if (packagesMatch) {
-			const items = packagesMatch[1].match(/^\s+-\s+['"]?([^\s'"#]+)['"]?\s*$/gm) || [];
-			globs = items.map((m) =>
-				m
-					.replace(/^\s+-\s+/, "")
-					.replace(/['"]/g, "")
-					.trim(),
-			);
-		}
+		globs = parseYamlList(read("pnpm-workspace.yaml"), "packages");
 	}
 
 	if (tool === "none") {
@@ -135,7 +163,7 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 				if (parsed.workspaces) {
 					const ws = Array.isArray(parsed.workspaces) ? parsed.workspaces : parsed.workspaces.packages || [];
 					if (ws.length > 0) {
-						tool = has("yarn.lock") ? "yarn" : "npm";
+						tool = has("bun.lockb") ? "bun" : has("yarn.lock") ? "yarn" : "npm";
 						globs = ws;
 					}
 				}
@@ -159,6 +187,9 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 	// Detect orchestration tools (overlay on top of workspace tool)
 	if (has("turbo.json") && tool !== "none" && tool !== "melos") tool = "turborepo";
 	if (has("nx.json") && tool !== "none" && tool !== "melos") tool = "nx";
+
+	// Filter out negation patterns (pnpm !prefix exclusions)
+	globs = globs.filter((g) => !g.startsWith("!"));
 
 	if (tool === "none" || globs.length === 0) {
 		// No workspace config — check for conventional multi-dir layouts

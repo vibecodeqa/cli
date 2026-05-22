@@ -55,7 +55,7 @@ export interface WorkspacePackage {
 
 export interface WorkspaceInfo {
 	isMonorepo: boolean;
-	tool: "pnpm" | "npm" | "yarn" | "lerna" | "turborepo" | "nx" | "melos" | "none";
+	tool: "pnpm" | "npm" | "yarn" | "bun" | "lerna" | "turborepo" | "nx" | "melos" | "none";
 	packages: WorkspacePackage[];
 	/** All directories containing source code (resolved from workspace packages) */
 	srcRoots: string[];

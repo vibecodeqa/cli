@@ -491,8 +491,9 @@ async function runFix(cwd: string): Promise<void> {
 
 	const workspace = detectWorkspace(cwd);
 	setGlobalSrcRoots(workspace.isMonorepo ? workspace.srcRoots : undefined);
-	const isDart = stack.language === "dart";
-	const checks = runChecks(cwd, stack, workspace, true, isDart, true);
+	const enrichedStack = detectStack(cwd, workspace);
+	const isDart = enrichedStack.language === "dart";
+	const checks = runChecks(cwd, enrichedStack, workspace, true, isDart, true);
 	const score = computeScore(checks);
 
 	// Collect actionable issues with fix suggestions
@@ -622,8 +623,8 @@ async function main() {
 
 	validateCwd(cwd);
 
-	const stack = detectStack(cwd);
 	const workspace = detectWorkspace(cwd);
+	const stack = detectStack(cwd, workspace);
 	setGlobalSrcRoots(workspace.isMonorepo ? workspace.srcRoots : undefined);
 	if (!jsonOnly) printHeader(cwd, stack, workspace);
 
