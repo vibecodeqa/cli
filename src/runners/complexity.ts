@@ -106,9 +106,10 @@ function extractFunctions(content: string, filePath: string): FunctionMetric[] {
 			}
 		}
 
-		// Track brace depth
+		// Track brace depth (strip strings and comments to avoid counting braces inside them)
 		if (funcStart !== -1) {
-			for (const ch of line) {
+			const stripped = line.replace(/\/\/.*$/, "").replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g, "");
+			for (const ch of stripped) {
 				if (ch === "{") braceCount++;
 				if (ch === "}") braceCount--;
 			}

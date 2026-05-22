@@ -47,7 +47,7 @@ const SECRET_PATTERNS: { name: string; pattern: RegExp }[] = [
 	{ name: "Stripe Publishable Key", pattern: /pk_live_[0-9a-zA-Z]{24,}/ },
 	{
 		name: "OpenAI API Key",
-		pattern: /sk-[A-Za-z0-9]{20,}T3BlbkFJ[A-Za-z0-9]{20,}/,
+		pattern: /sk-(?:proj-|svc-|[A-Za-z0-9]{2,})[A-Za-z0-9_-]{20,}/,
 	},
 	{ name: "Anthropic API Key", pattern: /sk-ant-api\d{2}-[A-Za-z0-9-]{80,}/ },
 	{ name: "Google API Key", pattern: /AIza[0-9A-Za-z_-]{35}/ },

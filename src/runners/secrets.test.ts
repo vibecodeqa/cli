@@ -58,6 +58,13 @@ describe("runSecrets", () => {
 		cleanup();
 	});
 
+	it("detects modern OpenAI API keys (sk-proj-)", () => {
+		setup({ "src/ai.ts": 'const key = "sk-proj-abcdefghijklmnopqrstuvwxyz123456";' });
+		const result = runSecrets(TMP);
+		expect(result.issues.some((i) => i.message.includes("OpenAI"))).toBe(true);
+		cleanup();
+	});
+
 	it("gives A for empty project", () => {
 		setup({});
 		// No src files to scan

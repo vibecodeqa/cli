@@ -70,6 +70,36 @@ describe("runBestPractices", () => {
 		rmSync(dir, { recursive: true });
 	});
 
+	it("does not credit missing tsconfig as strict mode", () => {
+		// Projects with no tsconfig.json should NOT get credit for strict mode
+		const dir = makeProject({ "package.json": "{}" });
+		const result = runBestPractices(dir);
+		// Should not have ts-strict-mode issue (because practice isn't counted at all)
+		expect(result.issues.some((i) => i.rule === "ts-strict-mode")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("flags tsconfig without strict mode", () => {
+		const dir = makeProject({
+			"package.json": "{}",
+			"tsconfig.json": '{"compilerOptions":{}}',
+		});
+		const result = runBestPractices(dir);
+		expect(result.issues.some((i) => i.rule === "ts-strict-mode")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("does not credit docker-compose-only projects for Dockerfile practices", () => {
+		const dir = makeProject({
+			"package.json": "{}",
+			"docker-compose.yml": "version: '3'\nservices:\n  app:\n    image: node:20\n",
+		});
+		const result = runBestPractices(dir);
+		// Should not have docker-pin-version issue since there's no Dockerfile to check
+		expect(result.issues.some((i) => i.rule === "docker-pin-version")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
 	it("produces a score between 0-100", () => {
 		const dir = makeProject({ "package.json": "{}" });
 		const result = runBestPractices(dir);

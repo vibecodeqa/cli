@@ -33,7 +33,7 @@ export function loadHistory(historyDir: string): HistoryEntry[] {
 		}
 	}
 
-	return entries;
+	return entries.slice(-30);
 }
 
 /** Compute a human-friendly delta badge like "up 3 from last week" or "down 5 from yesterday". */

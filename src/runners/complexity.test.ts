@@ -57,6 +57,26 @@ export function greet(name: string): string {
 		cleanup();
 	});
 
+	it("handles braces in strings without truncating function", () => {
+		setup({
+			"src/braces.ts": [
+				'export function render(data: any) {',
+				'  const open = "{";',
+				'  const close = "}";',
+				'  const msg = `Value: ${data.value}`;',
+				'  if (data.valid) {',
+				'    return open + msg + close;',
+				'  }',
+				'  return "none";',
+				'}',
+			].join("\n"),
+		});
+		const result = runComplexity(TMP);
+		// Should detect 1 function with correct line count (9 lines), not truncate at the string brace
+		expect((result.details as any).functionCount).toBe(1);
+		cleanup();
+	});
+
 	it("returns A for empty src", () => {
 		setup({});
 		const result = runComplexity(TMP);

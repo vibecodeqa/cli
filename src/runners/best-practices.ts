@@ -190,17 +190,19 @@ function checkDevExperience(cwd: string, has: HasFn): CategoryResult {
 	let practices = 0;
 	let followed = 0;
 
-	// .env.example
-	practices++;
+	// .env.example (only check if env files exist)
 	const hasEnvFiles = has(".env") || has(".env.local") || has(".env.development");
-	if (hasEnvFiles && !has(".env.example")) {
-		issues.push({
-			severity: "info",
-			message: "Has .env files but no .env.example — new developers won't know what vars are needed",
-			rule: "env-example",
-		});
-	} else {
-		followed++;
+	if (hasEnvFiles) {
+		practices++;
+		if (has(".env.example")) {
+			followed++;
+		} else {
+			issues.push({
+				severity: "info",
+				message: "Has .env files but no .env.example — new developers won't know what vars are needed",
+				rule: "env-example",
+			});
+		}
 	}
 
 	// Pre-commit hooks (husky, lefthook, lint-staged)
@@ -282,17 +284,19 @@ function checkCodeQualityTooling(cwd: string, has: HasFn, read: ReadFn, workspac
 		});
 	}
 
-	// TypeScript strict mode
-	practices++;
+	// TypeScript strict mode (only check if tsconfig exists)
 	const tsconfig = read("tsconfig.json") || read("tsconfig.base.json");
-	if (!tsconfig || tsconfig.includes('"strict": true') || tsconfig.includes('"strict":true')) {
-		followed++;
-	} else {
-		issues.push({
-			severity: "info",
-			message: "TypeScript strict mode not enabled — allows implicit any and null errors",
-			rule: "ts-strict-mode",
-		});
+	if (tsconfig) {
+		practices++;
+		if (tsconfig.includes('"strict": true') || tsconfig.includes('"strict":true')) {
+			followed++;
+		} else {
+			issues.push({
+				severity: "info",
+				message: "TypeScript strict mode not enabled — allows implicit any and null errors",
+				rule: "ts-strict-mode",
+			});
+		}
 	}
 
 	return { practices, followed, issues };
@@ -335,18 +339,20 @@ function checkDocker(has: HasFn, read: ReadFn): CategoryResult {
 
 	// Dockerfile best practices (if Docker is used)
 	if (has("Dockerfile") || has("docker-compose.yml") || has("docker-compose.yaml")) {
-		practices++;
 		const dockerfile = read("Dockerfile");
-		if (dockerfile.includes("FROM") && !dockerfile.includes("latest")) {
-			followed++;
-		} else if (dockerfile.includes(":latest")) {
-			issues.push({
-				severity: "warning",
-				message: "Dockerfile uses :latest tag — pin to a specific version for reproducible builds",
-				rule: "docker-pin-version",
-			});
-		} else {
-			followed++;
+		if (dockerfile) {
+			practices++;
+			if (dockerfile.includes("FROM") && !dockerfile.includes(":latest")) {
+				followed++;
+			} else if (dockerfile.includes(":latest")) {
+				issues.push({
+					severity: "warning",
+					message: "Dockerfile uses :latest tag — pin to a specific version for reproducible builds",
+					rule: "docker-pin-version",
+				});
+			} else {
+				followed++;
+			}
 		}
 
 		// Multi-stage build

@@ -54,6 +54,18 @@ describe("loadHistory", () => {
 		expect(entries).toHaveLength(1);
 	});
 
+	it("limits to last 30 entries", () => {
+		for (let i = 0; i < 40; i++) {
+			const day = String(i + 1).padStart(2, "0");
+			writeReport(tmp, `2026-01-${day}T10-00-00.json`, 50 + i, [{ name: "lint", score: 60 + i }], `2026-01-${day}T10:00:00.000Z`);
+		}
+		const entries = loadHistory(tmp);
+		expect(entries).toHaveLength(30);
+		// Should keep the LAST 30 (most recent)
+		expect(entries[0].score).toBe(60); // entry 11 (index 10, score 50+10=60)
+		expect(entries[29].score).toBe(89); // entry 40 (index 39, score 50+39=89)
+	});
+
 	it("skips non-json files", () => {
 		writeReport(tmp, "2026-05-15T10-00-00.json", 72, [{ name: "lint", score: 80 }], "2026-05-15T10:00:00.000Z");
 		writeFileSync(join(tmp, "readme.txt"), "hello");
