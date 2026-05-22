@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { isCheckEnabled, loadConfig } from "./config.js";
+import { getCheckIgnore, isCheckEnabled, loadConfig } from "./config.js";
 
 function makeDir(files: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-config-"));
@@ -65,6 +65,17 @@ describe("loadConfig", () => {
 		const config = loadConfig(dir);
 		expect(config.ignore).toEqual(["generated/**", "*.pb.ts"]);
 		rmSync(dir, { recursive: true });
+	});
+});
+
+describe("getCheckIgnore", () => {
+	it("returns undefined for checks without ignore", () => {
+		expect(getCheckIgnore({}, "lint")).toBeUndefined();
+	});
+
+	it("returns ignore patterns for configured checks", () => {
+		const config = { checks: { standards: { ignore: ["generated/**"] } } };
+		expect(getCheckIgnore(config, "standards")).toEqual(["generated/**"]);
 	});
 });
 

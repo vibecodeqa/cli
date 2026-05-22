@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { getCheckMeta } from "./check-meta.js";
-import { isCheckEnabled, loadConfig, type VcqaConfig } from "./config.js";
+import { getCheckIgnore, isCheckEnabled, loadConfig, type VcqaConfig } from "./config.js";
 import { detectRepoUrl, detectStack, detectWorkspace } from "./detect.js";
 import { setGlobalIgnore, setGlobalSrcRoots } from "./fs-utils.js";
 import { generatePages } from "./report/html.js";
@@ -32,7 +32,7 @@ import { runTypeSafety } from "./runners/type-safety.js";
 import { runTypeCheck } from "./runners/types-check.js";
 import { postPRComment } from "./pr-comment.js";
 import { computeScore } from "./score.js";
-import { computeTrend, formatTrend } from "./trend.js";
+import { type TrendDelta, computeTrend, formatTrend } from "./trend.js";
 import type { CheckResult, VibeReport, WorkspaceInfo } from "./types.js";
 import { gradeFromScore } from "./types.js";
 
@@ -53,6 +53,8 @@ interface ParsedFlags {
 	failUnder: number | null; // exit 1 if score < this, null = use --ci default
 	diffBase: string | null; // --diff [base] — only report issues in changed files
 	prComment: boolean; // --pr-comment — post score as GitHub PR comment
+	markdownMode: boolean; // --markdown — output markdown summary
+	annotations: boolean; // --annotations — GitHub Actions ::warning annotations
 }
 
 function parseFlags(): ParsedFlags {
@@ -107,6 +109,8 @@ function parseFlags(): ParsedFlags {
 		failUnder,
 		diffBase,
 		prComment: flags.has("--pr-comment"),
+		markdownMode: flags.has("--markdown"),
+		annotations: flags.has("--annotations"),
 	};
 }
 
@@ -387,7 +391,9 @@ function printHelp(): void {
     --upload          Upload report to app.vibecodeqa.online
     --top [N]         Show top N issues to fix (default: 5)
     --diff [base]     Only show issues in changed files (vs HEAD or branch)
+    --markdown        Output markdown summary (pipe to file or clipboard)
     --pr-comment      Post score as GitHub PR comment (needs GITHUB_TOKEN)
+    --annotations     Emit GitHub Actions ::warning/::error annotations
     --watch           Re-scan on file changes
     -v, --version     Print version
     -h, --help        Show this help
@@ -683,6 +689,57 @@ function validateCwd(cwd: string): void {
 	}
 }
 
+function generateMarkdown(report: VibeReport, trend: TrendDelta | null): string {
+	const { score, grade, checks } = report;
+	const gradeEmoji = grade === "A" ? "🟢" : grade === "B" ? "🟡" : grade === "C" ? "🟠" : "🔴";
+	let md = `# ${gradeEmoji} VibeCode QA: ${grade} ${score}/100\n\n`;
+
+	if (trend) {
+		const arrow = trend.scoreDelta > 0 ? "📈" : trend.scoreDelta < 0 ? "📉" : "➡️";
+		md += `${arrow} **${trend.scoreDelta > 0 ? "+" : ""}${trend.scoreDelta}** vs previous`;
+		if (trend.fixedIssues > 0) md += ` · ${trend.fixedIssues} fixed`;
+		if (trend.newIssues > 0) md += ` · ${trend.newIssues} new`;
+		md += "\n\n";
+	}
+
+	md += "| Check | Score | Grade |\n|-------|-------|-------|\n";
+	for (const c of checks) {
+		const det = c.details as Record<string, unknown>;
+		if (det.skipped || det.comingSoon) continue;
+		const emoji = c.score >= 90 ? "🟢" : c.score >= 75 ? "🟡" : c.score >= 60 ? "🟠" : "🔴";
+		md += `| ${emoji} ${c.name} | ${c.score}/100 | ${c.grade} |\n`;
+	}
+
+	const errors = checks.flatMap((c) => c.issues.filter((i) => i.severity === "error"));
+	const warnings = checks.flatMap((c) => c.issues.filter((i) => i.severity === "warning"));
+	if (errors.length + warnings.length > 0) {
+		md += `\n## Issues (${errors.length} errors, ${warnings.length} warnings)\n\n`;
+		for (const i of [...errors, ...warnings].slice(0, 15)) {
+			const loc = i.file ? ` \`${i.file}${i.line ? `:${i.line}` : ""}\`` : "";
+			md += `- ${i.severity === "error" ? "❌" : "⚠️"} ${i.message}${loc}\n`;
+		}
+		const remaining = errors.length + warnings.length - 15;
+		if (remaining > 0) md += `\n*...and ${remaining} more*\n`;
+	}
+
+	md += `\n---\n*vcqa v${report.version} · ${report.meta.duration}ms*\n`;
+	return md;
+}
+
+function emitAnnotations(report: VibeReport): void {
+	for (const c of report.checks) {
+		for (const i of c.issues) {
+			if (i.severity === "info") continue;
+			const level = i.severity === "error" ? "error" : "warning";
+			const file = i.file && typeof i.file === "string" ? i.file : "";
+			const line = i.line || "";
+			const loc = file ? ` file=${file}${line ? `,line=${line}` : ""}` : "";
+			// GitHub Actions annotation format
+			console.log(`::${level}${loc ? loc : ""}::${c.name}: ${i.message}`);
+		}
+	}
+}
+
 /** Get changed files from git diff. Returns null if git unavailable. */
 function getChangedFiles(cwd: string, base: string): Set<string> | null {
 	try {
@@ -752,10 +809,25 @@ async function main() {
 	const stack = detectStack(cwd, workspace);
 	setGlobalSrcRoots(workspace.isMonorepo ? workspace.srcRoots : undefined);
 	setGlobalIgnore(config.ignore);
-	if (!jsonOnly) printHeader(cwd, stack, workspace);
+	const quietMode = jsonOnly || flags.markdownMode;
+	if (!quietMode) printHeader(cwd, stack, workspace);
 
 	const isDart = stack.language === "dart";
-	const checks = runChecks(cwd, stack, workspace, skipTests, isDart, jsonOnly, config);
+	const checks = runChecks(cwd, stack, workspace, skipTests, isDart, quietMode, config);
+
+	// Per-check ignore: filter issues matching check-specific ignore patterns
+	for (const c of checks) {
+		const patterns = getCheckIgnore(config, c.name);
+		if (!patterns?.length) continue;
+		c.issues = c.issues.filter((i) => {
+			if (!i.file) return true;
+			return !patterns.some((p) => {
+				if (p.endsWith("/**")) return i.file!.startsWith(p.slice(0, -3) + "/");
+				if (p.startsWith("*")) return i.file!.endsWith(p.slice(1));
+				return i.file!.startsWith(p);
+			});
+		});
+	}
 
 	// --diff: filter issues to only changed files
 	if (diffBase) {
@@ -783,7 +855,16 @@ async function main() {
 	const trend = computeTrend(report, outputDir);
 
 	await writeOutputs(report, outputDir, flags);
-	await printResults(report, trend, flags, outputDir);
+
+	if (flags.markdownMode) {
+		console.log(generateMarkdown(report, trend));
+	} else {
+		await printResults(report, trend, flags, outputDir);
+	}
+
+	if (flags.annotations) {
+		emitAnnotations(report);
+	}
 
 	if (flags.uploadMode) {
 		await handleUpload(report, cwd, jsonOnly);

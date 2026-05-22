@@ -151,6 +151,31 @@ describe("explain command", () => {
 	});
 });
 
+describe("output modes", () => {
+	it(
+		"--markdown produces clean markdown",
+		() => {
+			const out = run("--skip-tests --markdown .");
+			expect(out).toContain("# ");
+			expect(out).toContain("VibeCode QA");
+			expect(out).toContain("| Check | Score | Grade |");
+			// Should NOT contain ANSI escape codes
+			expect(out).not.toContain("\x1b[");
+		},
+		30_000,
+	);
+
+	it(
+		"--annotations emits GitHub Actions format",
+		() => {
+			const out = run("--skip-tests --annotations .");
+			// Should contain ::warning or ::error annotations
+			expect(out).toMatch(/::(warning|error)/);
+		},
+		30_000,
+	);
+});
+
 describe("config file", () => {
 	it(
 		"disables checks via .vcqa.json",
