@@ -156,6 +156,7 @@ Each check produces a score from 0-100. The composite score is a weighted averag
 | `--sarif` | Generate SARIF 2.1.0 for GitHub Code Scanning |
 | `--upload` | Upload report to app.vibecodeqa.online |
 | `--top [N]` | Show top N issues to fix (default: 5) |
+| `--diff [base]` | Only show issues in changed files (vs HEAD or branch) |
 | `--watch` | Re-scan automatically on file changes |
 
 ## Stack detection
@@ -167,6 +168,27 @@ Auto-detects from `package.json`, `pubspec.yaml`, and config files:
 - **Test runner:** vitest, jest, flutter_test, dart_test
 - **Linter:** Biome, ESLint, dart analyze
 - **Package manager:** pnpm, npm, yarn, bun, pub
+
+## Configuration
+
+Create `.vcqa.json` in your project root (or add a `"vcqa"` field to `package.json`):
+
+```json
+{
+  "checks": {
+    "confusion": { "enabled": false },
+    "react": { "enabled": false }
+  },
+  "ignore": ["generated/**", "*.pb.ts", "vendor/**"],
+  "failUnder": 70
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `checks` | Disable individual checks with `"enabled": false` |
+| `ignore` | Extra glob patterns to skip when scanning source files |
+| `failUnder` | Default score threshold (overridden by `--fail-under` flag) |
 
 ## Monorepo support
 
