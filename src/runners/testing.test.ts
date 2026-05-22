@@ -95,6 +95,34 @@ describe("runTesting", () => {
 		rmSync(dir, { recursive: true });
 	});
 
+	it("reads existing coverage when skipping tests", () => {
+		const dir = makeProject({
+			"src/app.ts": "export const x = 1;",
+			"src/app.test.ts": "import { describe, it, expect } from 'vitest';\ndescribe('app', () => { it('works', () => { expect(1).toBe(1); }); });\n",
+			"coverage/coverage-summary.json": JSON.stringify({
+				total: { statements: { pct: 85 }, branches: { pct: 70 }, lines: { pct: 88 }, functions: { pct: 92 } },
+			}),
+		});
+		const result = runTesting(dir, tsStack, true); // skipExec=true
+		expect((result.details as any).coverage).toBeDefined();
+		expect((result.details as any).coverage.stmts).toBe(85);
+		expect(result.score).toBeGreaterThan(0);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("reads lcov.info when skipping tests", () => {
+		const lcov = "SF:src/app.ts\nLF:10\nLH:8\nBRF:4\nBRH:3\nFNF:2\nFNH:2\nend_of_record\n";
+		const dir = makeProject({
+			"src/app.ts": "export const x = 1;",
+			"src/app.test.ts": "import { describe, it, expect } from 'vitest';\ndescribe('app', () => { it('works', () => { expect(1).toBe(1); }); });\n",
+			"coverage/lcov.info": lcov,
+		});
+		const result = runTesting(dir, tsStack, true);
+		expect((result.details as any).coverage).toBeDefined();
+		expect((result.details as any).coverage.lines).toBe(80);
+		rmSync(dir, { recursive: true });
+	});
+
 	it("handles empty project", () => {
 		const dir = makeProject({});
 		const result = runTesting(dir, tsStack, true);

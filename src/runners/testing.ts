@@ -231,6 +231,7 @@ function runTestsWithCoverage(
 }
 
 function readCoverageFile(cwd: string): CoverageData | null {
+	// Try JSON coverage-summary (vitest, jest, istanbul)
 	const searchPaths = ["coverage/coverage-summary.json", "test-results/coverage/coverage-summary.json"];
 	for (const p of searchPaths) {
 		const full = join(cwd, p);
@@ -250,7 +251,37 @@ function readCoverageFile(cwd: string): CoverageData | null {
 			}
 		}
 	}
+	// Try lcov.info (common output from c8, nyc, lcov)
+	const lcovPaths = ["coverage/lcov.info", "lcov.info"];
+	for (const p of lcovPaths) {
+		const full = join(cwd, p);
+		if (existsSync(full)) {
+			return parseLcov(readFileSync(full, "utf-8"));
+		}
+	}
 	return null;
+}
+
+function parseLcov(content: string): CoverageData | null {
+	let linesHit = 0, linesTotal = 0;
+	let branchesHit = 0, branchesTotal = 0;
+	let functionsHit = 0, functionsTotal = 0;
+	for (const line of content.split("\n")) {
+		if (line.startsWith("LH:")) linesHit += parseInt(line.slice(3), 10) || 0;
+		if (line.startsWith("LF:")) linesTotal += parseInt(line.slice(3), 10) || 0;
+		if (line.startsWith("BRH:")) branchesHit += parseInt(line.slice(4), 10) || 0;
+		if (line.startsWith("BRF:")) branchesTotal += parseInt(line.slice(4), 10) || 0;
+		if (line.startsWith("FNH:")) functionsHit += parseInt(line.slice(4), 10) || 0;
+		if (line.startsWith("FNF:")) functionsTotal += parseInt(line.slice(4), 10) || 0;
+	}
+	if (linesTotal === 0) return null;
+	const pct = (hit: number, total: number) => total > 0 ? Math.round((hit / total) * 10000) / 100 : 0;
+	return {
+		statements: pct(linesHit, linesTotal), // lcov doesn't distinguish statements from lines
+		lines: pct(linesHit, linesTotal),
+		branches: pct(branchesHit, branchesTotal),
+		functions: pct(functionsHit, functionsTotal),
+	};
 }
 
 // ── Test execution ──
@@ -443,22 +474,25 @@ export function runTesting(cwd: string, stack: StackInfo, skipExec: boolean, src
 				issues.push({ severity: "error", message: `${execution.failed} of ${execution.total} tests failing`, rule: "failing-tests" });
 			}
 		}
+	} else {
+		// --skip-tests: still try to read existing coverage reports
+		coverage = readCoverageFile(cwd);
+	}
 
-		if (coverage) {
-			if (coverage.branches < 50) {
-				issues.push({
-					severity: "warning",
-					message: `Branch coverage ${coverage.branches}% — below 50% threshold`,
-					rule: "low-branch-coverage",
-				});
-			}
-			if (coverage.statements < 60) {
-				issues.push({
-					severity: "warning",
-					message: `Statement coverage ${coverage.statements}% — below 60% threshold`,
-					rule: "low-statement-coverage",
-				});
-			}
+	if (coverage) {
+		if (coverage.branches < 50) {
+			issues.push({
+				severity: "warning",
+				message: `Branch coverage ${coverage.branches}% — below 50% threshold`,
+				rule: "low-branch-coverage",
+			});
+		}
+		if (coverage.statements < 60) {
+			issues.push({
+				severity: "warning",
+				message: `Statement coverage ${coverage.statements}% — below 60% threshold`,
+				rule: "low-statement-coverage",
+			});
 		}
 	}
 

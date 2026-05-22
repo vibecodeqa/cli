@@ -4,8 +4,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { getCheckMeta } from "./check-meta.js";
+import { isCheckEnabled, loadConfig, type VcqaConfig } from "./config.js";
 import { detectRepoUrl, detectStack, detectWorkspace } from "./detect.js";
-import { setGlobalSrcRoots } from "./fs-utils.js";
+import { setGlobalIgnore, setGlobalSrcRoots } from "./fs-utils.js";
 import { generatePages } from "./report/html.js";
 import { runAccessibility } from "./runners/accessibility.js";
 import { runArchitecture } from "./runners/architecture.js";
@@ -49,6 +50,7 @@ interface ParsedFlags {
 	uploadMode: boolean;
 	topN: number; // 0 = don't show, N = show top N issues
 	failUnder: number | null; // exit 1 if score < this, null = use --ci default
+	diffBase: string | null; // --diff [base] — only report issues in changed files
 }
 
 function parseFlags(): ParsedFlags {
@@ -75,6 +77,19 @@ function parseFlags(): ParsedFlags {
 	const topN = parseValueFlag("--top", 5) ?? 0;
 	const failUnder = parseValueFlag("--fail-under");
 
+	// --diff [base] — only show issues in changed files
+	let diffBase: string | null = null;
+	const diffIdx = args.indexOf("--diff");
+	if (diffIdx !== -1) {
+		const next = args[diffIdx + 1];
+		if (next && !next.startsWith("--") && !next.startsWith("/") && !next.startsWith(".")) {
+			diffBase = next;
+			valueArgIndices.add(diffIdx + 1);
+		} else {
+			diffBase = "HEAD"; // default: uncommitted changes
+		}
+	}
+
 	const cwd = resolve(args.find((a, i) => !a.startsWith("--") && !valueArgIndices.has(i)) || ".");
 	return {
 		cwd,
@@ -88,6 +103,7 @@ function parseFlags(): ParsedFlags {
 		uploadMode: flags.has("--upload"),
 		topN,
 		failUnder,
+		diffBase,
 	};
 }
 
@@ -104,6 +120,7 @@ function runChecks(
 	skipTests: boolean,
 	isDart: boolean,
 	jsonOnly: boolean,
+	config?: VcqaConfig,
 ): CheckResult[] {
 	const srcRoots = workspace.isMonorepo ? workspace.srcRoots : undefined;
 	const runners: { name: string; fn: () => CheckResult }[] = [
@@ -140,6 +157,19 @@ function runChecks(
 
 	const checks: CheckResult[] = [];
 	for (const runner of runners) {
+		// Skip checks disabled in config
+		if (config && !isCheckEnabled(config, runner.name)) {
+			checks.push({
+				name: runner.name,
+				score: 0,
+				grade: "F",
+				details: { skipped: true, reason: "disabled in config" },
+				issues: [],
+				duration: 0,
+			});
+			if (!jsonOnly) console.log(`  ${runner.name.padEnd(14)}\x1b[2mskip — disabled\x1b[0m`);
+			continue;
+		}
 		if (!jsonOnly) process.stdout.write(`  ${runner.name.padEnd(14)}`);
 		let result: CheckResult;
 		try {
@@ -352,6 +382,7 @@ function printHelp(): void {
     --sarif           Generate SARIF for GitHub Code Scanning
     --upload          Upload report to app.vibecodeqa.online
     --top [N]         Show top N issues to fix (default: 5)
+    --diff [base]     Only show issues in changed files (vs HEAD or branch)
     --watch           Re-scan on file changes
     -v, --version     Print version
     -h, --help        Show this help
@@ -579,6 +610,19 @@ function validateCwd(cwd: string): void {
 	}
 }
 
+/** Get changed files from git diff. Returns null if git unavailable. */
+function getChangedFiles(cwd: string, base: string): Set<string> | null {
+	try {
+		const { execSync } = require("node:child_process") as typeof import("node:child_process");
+		const cmd = base === "HEAD" ? "git diff --name-only" : `git diff --name-only ${base}...HEAD`;
+		const stdout = execSync(cmd, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+		if (!stdout) return new Set();
+		return new Set(stdout.split("\n").filter((f) => f.length > 0));
+	} catch {
+		return null;
+	}
+}
+
 function printHeader(cwd: string, stack: ReturnType<typeof detectStack>, workspace: WorkspaceInfo): void {
 	console.log("");
 	console.log(`  \x1b[1m\x1b[38;5;141mvcqa\x1b[0m v${VERSION}`);
@@ -621,18 +665,30 @@ async function main() {
 	}
 
 	const flags = parseFlags();
-	const { cwd, outputDir, jsonOnly, ciMode, skipTests, watchMode } = flags;
+	const { cwd, outputDir, jsonOnly, ciMode, skipTests, watchMode, diffBase } = flags;
 	const start = Date.now();
 
 	validateCwd(cwd);
 
+	const config = loadConfig(cwd);
 	const workspace = detectWorkspace(cwd);
 	const stack = detectStack(cwd, workspace);
 	setGlobalSrcRoots(workspace.isMonorepo ? workspace.srcRoots : undefined);
+	setGlobalIgnore(config.ignore);
 	if (!jsonOnly) printHeader(cwd, stack, workspace);
 
 	const isDart = stack.language === "dart";
-	const checks = runChecks(cwd, stack, workspace, skipTests, isDart, jsonOnly);
+	const checks = runChecks(cwd, stack, workspace, skipTests, isDart, jsonOnly, config);
+
+	// --diff: filter issues to only changed files
+	if (diffBase) {
+		const changedFiles = getChangedFiles(cwd, diffBase);
+		if (changedFiles) {
+			for (const c of checks) {
+				c.issues = c.issues.filter((i) => !i.file || changedFiles.has(i.file));
+			}
+		}
+	}
 
 	const score = computeScore(checks);
 	const grade = gradeFromScore(score);
@@ -657,7 +713,7 @@ async function main() {
 	}
 
 	// CI exit code: fail if score below threshold (skip in watch mode)
-	const failUnder = flags.failUnder ?? (ciMode ? 60 : 0);
+	const failUnder = flags.failUnder ?? (ciMode ? 60 : config.failUnder ?? 0);
 	if (failUnder > 0 && score < failUnder && !watchMode) {
 		if (!jsonOnly) console.log(`  \x1b[31mFailing: score ${score} < ${failUnder}\x1b[0m\n`);
 		process.exit(1);

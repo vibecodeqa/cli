@@ -47,6 +47,11 @@ export function setGlobalSrcRoots(roots: string[] | undefined): void {
 	_globalSrcRoots = roots;
 }
 
+let _globalIgnore: string[] | undefined;
+export function setGlobalIgnore(patterns: string[] | undefined): void {
+	_globalIgnore = patterns;
+}
+
 /** Walk source directories and return all code files. */
 export function collectSourceFiles(cwd: string, opts?: { includeTests?: boolean; extraExts?: boolean; srcRoots?: string[] }): SourceFile[] {
 	const files: SourceFile[] = [];
@@ -112,10 +117,28 @@ function extractScript(content: string): string {
 	return scripts.length > 0 ? scripts.join("\n") : content;
 }
 
+function shouldIgnore(relPath: string): boolean {
+	if (!_globalIgnore) return false;
+	return _globalIgnore.some((pattern) => {
+		// Simple glob: "generated/**" matches "generated/foo.ts"
+		// "*.generated.ts" matches "foo.generated.ts"
+		if (pattern.endsWith("/**")) {
+			const prefix = pattern.slice(0, -3);
+			return relPath.startsWith(prefix + "/") || relPath === prefix;
+		}
+		if (pattern.startsWith("*")) {
+			return relPath.endsWith(pattern.slice(1));
+		}
+		return relPath.startsWith(pattern);
+	});
+}
+
 function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>): void {
 	for (const entry of readdirSync(dir)) {
 		if (SKIP_DIRS.has(entry)) continue;
 		const full = join(dir, entry);
+		const relPath = full.replace(`${cwd}/`, "");
+		if (shouldIgnore(relPath)) continue;
 		// Skip symlinks to prevent traversal attacks (H3)
 		if (lstatSync(full).isSymbolicLink()) continue;
 		if (statSync(full).isDirectory()) {
