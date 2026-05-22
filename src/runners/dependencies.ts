@@ -89,26 +89,36 @@ export function runDependencies(cwd: string, stack: StackInfo): CheckResult {
 	const outdatedResult = run(`${outdatedCmd} 2>/dev/null || true`, cwd);
 	let outdatedCount = 0;
 	let majorOutdated = 0;
+	const majorOutdatedPkgs: string[] = [];
 	try {
 		const outdated = JSON.parse(outdatedResult.stdout);
 		// npm/pnpm format: object keyed by package name
-		for (const [, info] of Object.entries(outdated) as [string, any][]) {
+		for (const [name, info] of Object.entries(outdated) as [string, any][]) {
 			outdatedCount++;
 			const current = info.current || info.version || "";
 			const latest = info.latest || "";
 			if (current && latest && current.split(".")[0] !== latest.split(".")[0]) {
 				majorOutdated++;
+				majorOutdatedPkgs.push(`${name} ${current} → ${latest}`);
 			}
 		}
 	} catch {
 		/* no outdated data */
 	}
 
-	if (majorOutdated > 0)
+	if (majorOutdated > 0) {
 		issues.push({
 			severity: "warning",
 			message: `${majorOutdated} packages behind by a major version`,
+			rule: "major-outdated",
 		});
+		for (const pkg of majorOutdatedPkgs.slice(0, 5)) {
+			issues.push({ severity: "info", message: pkg, rule: "outdated-package" });
+		}
+		if (majorOutdatedPkgs.length > 5) {
+			issues.push({ severity: "info", message: `...and ${majorOutdatedPkgs.length - 5} more`, rule: "outdated-package" });
+		}
+	}
 
 	// Score: harsh on critical/high, with diminishing returns for many vulns
 	const critPenalty = Math.min(50, vulnCritical * 20);

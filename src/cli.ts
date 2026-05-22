@@ -374,7 +374,8 @@ function printHelp(): void {
 
   \x1b[1mCommands:\x1b[0m
     init [path]       Set up CI workflow + recommended configs
-    fix [path]        Auto-fix top issues (runs biome, shows patches)
+    fix [path]        Auto-fix (.gitignore, strict mode, biome/eslint, suggestions)
+    explain [check]   Deep-dive explanation of a check (what/risk/fix)
 
   \x1b[1mFlags:\x1b[0m
     --skip-tests      Skip test execution (faster scan)
@@ -488,6 +489,40 @@ jobs:
 	console.log("");
 }
 
+// ── explain command ──
+
+async function runExplain(checkName?: string): Promise<void> {
+	if (!checkName) {
+		console.log("\n  \x1b[1mUsage:\x1b[0m vcqa explain <check>\n");
+		console.log("  Available checks:");
+		const { CHECK_META } = await import("./check-meta.js");
+		for (const [name, meta] of Object.entries(CHECK_META)) {
+			console.log(`    \x1b[1m${name.padEnd(16)}\x1b[0m ${meta.label} (${meta.category}, ${meta.weight}%)`);
+		}
+		console.log("");
+		return;
+	}
+	const meta = getCheckMeta(checkName);
+	if (!meta.description || meta.description.length < 20) {
+		console.log(`\n  \x1b[31mUnknown check: ${checkName}\x1b[0m`);
+		console.log("  Run \x1b[1mvcqa explain\x1b[0m to see available checks.\n");
+		return;
+	}
+	console.log("");
+	console.log(`  \x1b[1m\x1b[38;5;141m${meta.label}\x1b[0m  \x1b[2m${meta.category} · ${meta.priority} priority · ${meta.weight}% weight\x1b[0m`);
+	console.log("");
+	console.log(`  \x1b[1mWhat:\x1b[0m ${meta.description}`);
+	console.log("");
+	console.log(`  \x1b[1mRisk:\x1b[0m ${meta.risk}`);
+	console.log("");
+	console.log(`  \x1b[1mFix:\x1b[0m ${meta.recommendation}`);
+	if (meta.deeperTools?.length) {
+		console.log("");
+		console.log(`  \x1b[1mGo deeper:\x1b[0m ${meta.deeperTools.join(", ")}`);
+	}
+	console.log("");
+}
+
 // ── fix command ──
 
 async function runFix(cwd: string): Promise<void> {
@@ -500,6 +535,40 @@ async function runFix(cwd: string): Promise<void> {
 
 	const stack = detectStack(cwd);
 	let fixed = 0;
+
+	// 0. Auto-fix structure issues (missing files)
+	if (!existsSync(join(cwd, ".gitignore"))) {
+		writeFileSync(join(cwd, ".gitignore"), "node_modules\ndist\n.vibe-check\ncoverage\n.env\n.env.local\n");
+		console.log("  \x1b[32m\u2713 Created .gitignore\x1b[0m");
+		fixed++;
+	}
+
+	// Add .vibe-check to existing .gitignore if missing
+	if (existsSync(join(cwd, ".gitignore"))) {
+		const gi = readFileSync(join(cwd, ".gitignore"), "utf-8");
+		if (!gi.includes(".vibe-check")) {
+			writeFileSync(join(cwd, ".gitignore"), gi.trimEnd() + "\n.vibe-check/\n");
+			console.log("  \x1b[32m\u2713 Added .vibe-check/ to .gitignore\x1b[0m");
+			fixed++;
+		}
+	}
+
+	// Enable strict mode if tsconfig exists without it
+	const tsconfigPath = join(cwd, "tsconfig.json");
+	if (existsSync(tsconfigPath)) {
+		try {
+			const raw = readFileSync(tsconfigPath, "utf-8");
+			const tsconfig = JSON.parse(raw);
+			if (!tsconfig.compilerOptions?.strict) {
+				tsconfig.compilerOptions = { ...tsconfig.compilerOptions, strict: true };
+				writeFileSync(tsconfigPath, JSON.stringify(tsconfig, null, 2) + "\n");
+				console.log('  \x1b[32m\u2713 Enabled "strict": true in tsconfig.json\x1b[0m');
+				fixed++;
+			}
+		} catch {
+			/* can't parse tsconfig */
+		}
+	}
 
 	// 1. Run biome format (auto-fixable lint + format issues)
 	if (stack.linter === "biome") {
@@ -665,6 +734,10 @@ async function main() {
 	if (args[0] === "fix") {
 		const path = args.slice(1).find((a) => !a.startsWith("-")) || ".";
 		await runFix(resolve(path));
+		return;
+	}
+	if (args[0] === "explain") {
+		await runExplain(args[1]);
 		return;
 	}
 

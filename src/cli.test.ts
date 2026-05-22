@@ -108,6 +108,76 @@ describe("CLI flags", () => {
 		},
 		30_000,
 	);
+
+	it(
+		"--diff filters issues to changed files",
+		() => {
+			// Initialize a git repo for diff to work
+			execSync("git init && git add -A && git commit -m init", { cwd: TMP, stdio: "pipe" });
+			writeFileSync(join(TMP, "src", "new.ts"), 'eval("bad");');
+			const out = run("--skip-tests --json --diff HEAD .");
+			const report = JSON.parse(out);
+			// Issues should only reference changed files (src/new.ts)
+			for (const c of report.checks) {
+				for (const i of c.issues) {
+					if (i.file) expect(i.file).toContain("new.ts");
+				}
+			}
+		},
+		30_000,
+	);
+});
+
+describe("explain command", () => {
+	it("lists all checks when no argument given", () => {
+		const out = run("explain");
+		expect(out).toContain("Available checks:");
+		expect(out).toContain("structure");
+		expect(out).toContain("confusion");
+		expect(out).toContain("testing");
+	});
+
+	it("shows check details when name given", () => {
+		const out = run("explain testing");
+		expect(out).toContain("Testing");
+		expect(out).toContain("What:");
+		expect(out).toContain("Risk:");
+		expect(out).toContain("Fix:");
+	});
+
+	it("shows error for unknown check", () => {
+		const out = run("explain nonexistent");
+		expect(out).toContain("Unknown check");
+	});
+});
+
+describe("config file", () => {
+	it(
+		"disables checks via .vcqa.json",
+		() => {
+			writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ checks: { confusion: { enabled: false }, context: { enabled: false } } }));
+			const out = run("--skip-tests --json .");
+			const report = JSON.parse(out);
+			const confusion = report.checks.find((c: any) => c.name === "confusion");
+			expect(confusion.details.skipped).toBe(true);
+			expect(confusion.details.reason).toBe("disabled in config");
+		},
+		30_000,
+	);
+
+	it(
+		"uses failUnder from config",
+		() => {
+			writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ failUnder: 99 }));
+			try {
+				execSync(`node ${CLI} --skip-tests --json .`, { encoding: "utf-8", timeout: 30_000, cwd: TMP });
+				expect.unreachable("should have thrown");
+			} catch (e: any) {
+				expect(e.status).toBe(1);
+			}
+		},
+		30_000,
+	);
 });
 
 describe("init command", () => {
