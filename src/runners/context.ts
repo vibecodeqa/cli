@@ -79,13 +79,13 @@ export function runContext(cwd: string): CheckResult {
 	}
 
 	// ── 3. Circular dependency detection ──
+	const knownPaths = new Set(files.map((f) => f.path));
 	const importGraph = new Map<string, Set<string>>();
 	for (const f of files) {
 		const deps = new Set<string>();
 		for (const imp of f.imports) {
-			// Resolve relative import to file path
-			const resolved = resolveImport(f.path, imp);
-			if (resolved && files.some((ff) => ff.path === resolved)) {
+			const resolved = resolveImport(f.path, imp, knownPaths);
+			if (resolved) {
 				deps.add(resolved);
 			}
 		}
@@ -161,7 +161,7 @@ function parseImports(content: string): string[] {
 	return imports;
 }
 
-function resolveImport(fromPath: string, importPath: string): string | null {
+function resolveImport(fromPath: string, importPath: string, knownPaths?: Set<string>): string | null {
 	const dir = fromPath.includes("/") ? fromPath.replace(/\/[^/]+$/, "") : "";
 	let resolved = importPath;
 	if (importPath.startsWith("./")) {
@@ -175,9 +175,21 @@ function resolveImport(fromPath: string, importPath: string): string | null {
 		}
 		resolved = parts.length > 0 ? `${parts.join("/")}/${imp}` : imp;
 	}
-	// If import already has a known SFC extension, keep it
-	if (/\.(vue|svelte)$/.test(resolved)) return resolved;
+	// If import already has an extension, check directly
+	if (/\.(vue|svelte|ts|tsx|js|jsx)$/.test(resolved)) {
+		return knownPaths && !knownPaths.has(resolved) ? null : resolved;
+	}
+	// Strip extension if present, then try known extensions
 	resolved = resolved.replace(/\.(js|ts|tsx|jsx)$/, "");
+	if (knownPaths) {
+		for (const ext of [".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte"]) {
+			if (knownPaths.has(resolved + ext)) return resolved + ext;
+		}
+		for (const ext of [".ts", ".tsx"]) {
+			if (knownPaths.has(`${resolved}/index${ext}`)) return `${resolved}/index${ext}`;
+		}
+		return null;
+	}
 	return `${resolved}.ts`;
 }
 

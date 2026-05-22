@@ -102,7 +102,7 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 				const isExternal =
 					/\b(?:body|response|res|request|req|text|data|payload|input|event|stdout)\b/.test(line) || /\.text\(\)|\.json\(\)/.test(line);
 				// Check if we're inside a try block
-				const context = lines.slice(Math.max(0, i - 8), i).join("\n");
+				const context = lines.slice(Math.max(0, i - 20), i).join("\n");
 				const inTry = context.includes("try");
 				if (isExternal && !inTry && !isKnownSafe) {
 					jsonParseUnsafe++;

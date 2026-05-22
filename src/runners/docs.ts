@@ -55,11 +55,17 @@ export function runDocs(cwd: string): CheckResult {
 				line.startsWith("export interface ")
 			) {
 				totalExports++;
-				// Check if preceded by a JSDoc or // comment
-				const prevLine = i > 0 ? lines[i - 1].trim() : "";
-				if (prevLine.endsWith("*/") || prevLine.startsWith("//") || prevLine.startsWith("/**")) {
-					documentedExports++;
+				// Check if preceded by a JSDoc or // comment (look back up to 3 lines for blank-line gaps)
+				let documented = false;
+				for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+					const prev = lines[j].trim();
+					if (prev === "") continue; // skip blank lines
+					if (prev.endsWith("*/") || prev.startsWith("//") || prev.startsWith("/**") || prev.startsWith("* ")) {
+						documented = true;
+					}
+					break;
 				}
+				if (documented) documentedExports++;
 			}
 		}
 	}

@@ -56,7 +56,22 @@ export function runTypeSafety(cwd: string, isDart = false): CheckResult {
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];
 			const trimmed = line.trim();
-			if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
+			// Check for @ts-* directives in comments BEFORE skipping comment lines
+			if (trimmed.startsWith("//")) {
+				for (const p of PATTERNS) {
+					if (!p.name.startsWith("@ts-")) continue;
+					const matches = line.match(p.pattern);
+					if (matches) {
+						counts[p.name] = (counts[p.name] || 0) + matches.length;
+						totalPenalty += p.weight * matches.length;
+						for (const _m of matches) {
+							issues.push({ severity: p.severity, message: p.name, file: sf.path, line: i + 1, rule: "unsafe-type" });
+						}
+					}
+				}
+				continue;
+			}
+			if (trimmed.startsWith("*")) continue;
 			// Skip pattern definition lines and string-heavy lines (prevents false positives)
 			if (/\bpattern\s*:|name:\s*["']|message:\s*["']|description:\s*["']|risk:\s*["']|recommendation:\s*["']/.test(trimmed)) continue;
 			if (/^\s*["'`].*["'`][,;]?\s*$/.test(line)) continue;

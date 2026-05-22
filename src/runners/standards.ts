@@ -133,7 +133,7 @@ export function runStandards(cwd: string, stack: StackInfo): CheckResult {
 	// ── Config hygiene ──
 	// tsconfig strict mode
 	if (stack.language === "typescript") {
-		const tsconfigPaths = ["tsconfig.json", "tsconfig.app.json"];
+		const tsconfigPaths = ["tsconfig.json", "tsconfig.app.json", "tsconfig.base.json"];
 		let strictFound = false;
 		for (const p of tsconfigPaths) {
 			try {

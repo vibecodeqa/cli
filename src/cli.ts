@@ -319,9 +319,12 @@ async function startWatch(cwd: string): Promise<void> {
 			if (debounce) clearTimeout(debounce);
 			debounce = setTimeout(async () => {
 				running = true;
-				console.log(`  \x1b[2mChanged: ${filename} — re-scanning...\x1b[0m`);
-				await main().catch(() => {});
-				running = false;
+				try {
+					console.log(`  \x1b[2mChanged: ${filename} — re-scanning...\x1b[0m`);
+					await main().catch(() => {});
+				} finally {
+					running = false;
+				}
 			}, 500);
 		});
 	}

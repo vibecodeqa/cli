@@ -11,17 +11,23 @@ describe("CHECK_META", () => {
 		"complexity",
 		"duplication",
 		"error-handling",
+		"react",
+		"accessibility",
 		"docs",
+		"best-practices",
 		"testing",
 		"secrets",
 		"security",
 		"dependencies",
 		"architecture",
+		"performance",
 		"confusion",
 		"context",
+		"doc-coherence",
+		"code-coherence",
 	];
 
-	it("has metadata for all 12 checks", () => {
+	it("has metadata for all 22 checks", () => {
 		for (const name of allChecks) {
 			expect(CHECK_META[name]).toBeDefined();
 			expect(CHECK_META[name].label).toBeTruthy();
