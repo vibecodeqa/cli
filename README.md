@@ -157,6 +157,7 @@ Each check produces a score from 0-100. The composite score is a weighted averag
 | `--upload` | Upload report to app.vibecodeqa.online |
 | `--top [N]` | Show top N issues to fix (default: 5) |
 | `--diff [base]` | Only show issues in changed files (vs HEAD or branch) |
+| `--pr-comment` | Post score as GitHub PR comment (needs `GITHUB_TOKEN`) |
 | `--watch` | Re-scan automatically on file changes |
 
 ## Stack detection
@@ -211,12 +212,17 @@ Add this to `.github/workflows/vibecodeqa.yml` for automatic PR scanning:
 ```yaml
 name: VibeCode QA
 on: [pull_request]
+permissions:
+  contents: read
+  pull-requests: write
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: npx @vibecodeqa/cli --skip-tests --ci --sarif
+      - run: npx @vibecodeqa/cli --skip-tests --ci --sarif --pr-comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:

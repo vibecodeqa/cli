@@ -30,6 +30,7 @@ import { runStructure } from "./runners/structure.js";
 import { runTesting } from "./runners/testing.js";
 import { runTypeSafety } from "./runners/type-safety.js";
 import { runTypeCheck } from "./runners/types-check.js";
+import { postPRComment } from "./pr-comment.js";
 import { computeScore } from "./score.js";
 import { computeTrend, formatTrend } from "./trend.js";
 import type { CheckResult, VibeReport, WorkspaceInfo } from "./types.js";
@@ -51,6 +52,7 @@ interface ParsedFlags {
 	topN: number; // 0 = don't show, N = show top N issues
 	failUnder: number | null; // exit 1 if score < this, null = use --ci default
 	diffBase: string | null; // --diff [base] — only report issues in changed files
+	prComment: boolean; // --pr-comment — post score as GitHub PR comment
 }
 
 function parseFlags(): ParsedFlags {
@@ -104,6 +106,7 @@ function parseFlags(): ParsedFlags {
 		topN,
 		failUnder,
 		diffBase,
+		prComment: flags.has("--pr-comment"),
 	};
 }
 
@@ -383,6 +386,7 @@ function printHelp(): void {
     --upload          Upload report to app.vibecodeqa.online
     --top [N]         Show top N issues to fix (default: 5)
     --diff [base]     Only show issues in changed files (vs HEAD or branch)
+    --pr-comment      Post score as GitHub PR comment (needs GITHUB_TOKEN)
     --watch           Re-scan on file changes
     -v, --version     Print version
     -h, --help        Show this help
@@ -710,6 +714,14 @@ async function main() {
 
 	if (flags.uploadMode) {
 		await handleUpload(report, cwd, jsonOnly);
+	}
+
+	if (flags.prComment) {
+		const posted = await postPRComment(report, trend, cwd);
+		if (!jsonOnly) {
+			if (posted) console.log("  \x1b[32m\u2713 PR comment posted\x1b[0m");
+			else console.log("  \x1b[2mNo PR detected or no GITHUB_TOKEN — skipping PR comment\x1b[0m");
+		}
 	}
 
 	// CI exit code: fail if score below threshold (skip in watch mode)
