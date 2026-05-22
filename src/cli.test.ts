@@ -62,6 +62,52 @@ describe("CLI flags", () => {
 		const out = execSync(`node ${CLI} --skip-tests /nonexistent 2>&1 || true`, { encoding: "utf-8" });
 		expect(out).toContain("does not exist");
 	});
+
+	it(
+		"--fail-under exits with code 1 when score is below threshold",
+		() => {
+			// An empty project with no LICENSE, .gitignore, etc. scores low
+			try {
+				execSync(`node ${CLI} --skip-tests --json --fail-under 99 .`, { encoding: "utf-8", timeout: 30_000, cwd: TMP });
+				// Should not reach here — expect exit code 1
+				expect.unreachable("should have thrown");
+			} catch (e: any) {
+				expect(e.status).toBe(1);
+			}
+		},
+		30_000,
+	);
+
+	it(
+		"--fail-under does not exit when score is above threshold",
+		() => {
+			const out = run("--skip-tests --json --fail-under 0 .");
+			const report = JSON.parse(out);
+			expect(report.score).toBeGreaterThanOrEqual(0);
+		},
+		30_000,
+	);
+
+	it(
+		"--ci sets fail-under threshold",
+		() => {
+			// With --ci, score must be >= 60. Our test project scores ~71, so it passes.
+			const out = run("--skip-tests --json --ci .");
+			const report = JSON.parse(out);
+			expect(report.score).toBeGreaterThanOrEqual(60);
+		},
+		30_000,
+	);
+
+	it(
+		"--top limits issue output",
+		() => {
+			const out = run("--skip-tests --top 3 .");
+			// --top mode should show "Top 3 issues" or similar
+			expect(out).toContain("Top");
+		},
+		30_000,
+	);
 });
 
 describe("init command", () => {
@@ -153,6 +199,37 @@ describe("report output", () => {
 			run("--skip-tests --badge --sarif .");
 			expect(existsSync(join(TMP, ".vibe-check", "badge.svg"))).toBe(true);
 			expect(existsSync(join(TMP, ".vibe-check", "report.sarif"))).toBe(true);
+		},
+		30_000,
+	);
+
+	it(
+		"--sarif produces valid SARIF 2.1.0",
+		() => {
+			run("--skip-tests --sarif .");
+			const sarif = JSON.parse(readFileSync(join(TMP, ".vibe-check", "report.sarif"), "utf-8"));
+			expect(sarif.$schema).toContain("sarif");
+			expect(sarif.version).toBe("2.1.0");
+			expect(sarif.runs).toBeInstanceOf(Array);
+			expect(sarif.runs.length).toBe(1);
+			expect(sarif.runs[0].tool.driver.name).toBe("VibeCode QA");
+			expect(sarif.runs[0].results).toBeInstanceOf(Array);
+			// Verify rules are defined
+			expect(sarif.runs[0].tool.driver.rules).toBeInstanceOf(Array);
+			expect(sarif.runs[0].tool.driver.rules.length).toBeGreaterThan(0);
+		},
+		30_000,
+	);
+
+	it(
+		"generates multi-page HTML report",
+		() => {
+			run("--skip-tests .");
+			const reportDir = join(TMP, ".vibe-check", "report");
+			expect(existsSync(join(reportDir, "index.html"))).toBe(true);
+			const html = readFileSync(join(reportDir, "index.html"), "utf-8");
+			expect(html).toContain("<!DOCTYPE html>");
+			expect(html).toContain("VibeCode QA");
 		},
 		30_000,
 	);
