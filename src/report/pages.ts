@@ -2,6 +2,7 @@
 
 import { getCheckMeta } from "../check-meta.js";
 import { loadHistory } from "../history.js";
+import { buildCoverageMapInput, generateCoverageMap } from "../diagrams/coverage.js";
 import {
 	generateArchSVG,
 	generateDSM,
@@ -164,7 +165,7 @@ ${fileHotspotsHtml}
 
 // ── Single category page ──────────────────────────────────────────
 
-export function categoryPage(cs: CatScore, fl: FL): string {
+export function categoryPage(cs: CatScore, fl: FL, allChecks?: CheckResult[]): string {
 	const checkSections = cs.checks
 		.map((c) => {
 			const meta = getCheckMeta(c.name);
@@ -231,6 +232,7 @@ ${meta.description ? `<div class="info-panel"><div class="ip-row"><span class="i
 ${sk ? `<p class="skip-r">${e(det(c).reason || "skipped")}</p>` : ""}
 ${c.name === "architecture" && !sk ? renderArchSection(c.details) : ""}
 ${c.name === "testing" && !sk && det(c).pyramid ? `<div class="arch-svg">${buildPyramid(det(c).pyramid as { unit: number; integration: number; component: number; e2e: number })}</div>` : ""}
+${c.name === "testing" && !sk && allChecks ? renderCoverageMap(allChecks) : ""}
 ${detailsFiltered ? `<div class="kvs">${detailsFiltered}</div>` : ""}
 ${issuesHtml ? `<div class="iss-list">${issuesHtml}</div>` : '<p style="color:var(--muted);font-size:0.8rem;margin-top:1rem">No issues found.</p>'}
 </section>`;
@@ -304,6 +306,20 @@ export function filesPage(
 		}, new Set<string>()).size
 	} checks.</p>
 ${heatmapRows}`;
+}
+
+// ── Coverage map renderer ─────────────────────────────────
+
+function renderCoverageMap(checks: CheckResult[]): string {
+	const archCheck = checks.find((c) => c.name === "architecture");
+	const testingCheck = checks.find((c) => c.name === "testing");
+	if (!archCheck || det(archCheck).skipped) return "";
+
+	const graph = archCheck.details.graph as Record<string, { imports: string[]; importedBy: string[]; dir: string }> | undefined;
+	const input = buildCoverageMapInput(graph, testingCheck ? { issues: testingCheck.issues } : undefined);
+	if (!input) return "";
+
+	return `<h3 style="margin-top:1.5rem">Test Coverage Map</h3><div class="arch-svg">${generateCoverageMap(input)}</div>`;
 }
 
 // ── Architecture section renderer ────────────────────────

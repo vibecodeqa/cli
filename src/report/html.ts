@@ -109,7 +109,7 @@ export function generatePages(report: VibeReport, historyDir?: string): Map<stri
 	for (let i = 0; i < GROUPS.length; i++) {
 		const g = GROUPS[i];
 		const cs = catScores[i];
-		pages.set(g.file, w(g.id, categoryPage(cs, fl)));
+		pages.set(g.file, w(g.id, categoryPage(cs, fl, allChecks)));
 	}
 
 	pages.set("issues.html", w("issues", issuesPage(allChecks, totalIssues, fl)));
