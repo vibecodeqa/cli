@@ -112,8 +112,8 @@ describe("CLI flags", () => {
 	it(
 		"--diff filters issues to changed files",
 		() => {
-			// Initialize a git repo for diff to work
-			execSync("git init && git add -A && git commit -m init", { cwd: TMP, stdio: "pipe" });
+			// Initialize a git repo for diff to work (configure identity for CI)
+			execSync("git init && git config user.email 'test@test.com' && git config user.name 'Test' && git add -A && git commit -m init", { cwd: TMP, stdio: "pipe" });
 			writeFileSync(join(TMP, "src", "new.ts"), 'eval("bad");');
 			const out = run("--skip-tests --json --diff HEAD .");
 			const report = JSON.parse(out);
