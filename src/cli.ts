@@ -315,11 +315,17 @@ async function printResults(
 async function handleUpload(report: VibeReport, cwd: string, jsonOnly: boolean): Promise<void> {
 	const repo = report.meta.repoUrl?.replace(/^https:\/\/github\.com\//, "") || cwd.split("/").pop() || "project";
 	const token = process.env.VCQA_TOKEN || "";
+	// Get current commit SHA for quality gate status
+	let sha: string | undefined;
+	try {
+		const { execSync } = await import("node:child_process");
+		sha = execSync("git rev-parse HEAD", { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+	} catch { /* not a git repo */ }
 	try {
 		const res = await fetch("https://api.vibecodeqa.online/api/reports", {
 			method: "POST",
 			headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-			body: JSON.stringify({ repo, report }),
+			body: JSON.stringify({ repo, report, sha }),
 		});
 		if (res.ok) {
 			const data = (await res.json()) as { totalReports?: number };
