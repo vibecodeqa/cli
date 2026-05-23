@@ -88,7 +88,7 @@ Weights sum to 100 (Pro checks have weight 0).
 ## Tool delegation
 
 Tries dedicated tools first, falls back to built-in:
-- **Secrets**: gitleaks → 13 regex patterns
+- **Secrets**: gitleaks → 14 regex patterns
 - **Duplication**: jscpd (if in devDeps) → line-hash
 - **Dead code**: Knip (if available)
 - **React hooks**: eslint-plugin-react-hooks (if installed, skips built-in)
