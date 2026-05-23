@@ -124,42 +124,52 @@ export function runConfusion(cwd: string): CheckResult {
 	let ambiguousAbbrevs = 0;
 
 	// ── 1. File name confusability ──
-	// Only compare files in the same directory tree (not across monorepo packages)
-	for (let i = 0; i < files.length; i++) {
-		for (let j = i + 1; j < files.length; j++) {
-			const a = files[i].base;
-			const b = files[j].base;
+	// Group files by directory to avoid O(n²) across the whole project
+	const dirGroups = new Map<string, typeof files>();
+	for (const f of files) {
+		const dir = f.path.includes("/") ? f.path.replace(/\/[^/]+$/, "") : ".";
+		// Use workspace package prefix for grouping (packages/X, apps/X, etc.)
+		const pkg = f.path.match(/^(packages|apps|libs|modules|internal)\/[^/]+/)?.[0];
+		const groupKey = pkg || dir;
+		const group = dirGroups.get(groupKey) || [];
+		group.push(f);
+		dirGroups.set(groupKey, group);
+	}
 
-			// Skip cross-package comparisons in monorepos
-			// Only skip when files are in DIFFERENT workspace packages (packages/X vs packages/Y)
-			const pathA = files[i].path;
-			const pathB = files[j].path;
-			const pkgPrefixA = pathA.match(/^(packages|apps|libs)\/[^/]+/)?.[0];
-			const pkgPrefixB = pathB.match(/^(packages|apps|libs)\/[^/]+/)?.[0];
-			if (pkgPrefixA && pkgPrefixB && pkgPrefixA !== pkgPrefixB) continue;
+	// Also do a global comparison but only for files in the same top-level group
+	for (const group of dirGroups.values()) {
+		for (let i = 0; i < group.length; i++) {
+			for (let j = i + 1; j < group.length; j++) {
+				const a = group[i].base;
+				const b = group[j].base;
 
-			// Near-identical (Levenshtein ≤ 2, but skip very short names where distance 1 is expected)
-			if (a !== b && a.length >= 3 && b.length >= 3 && levenshtein(a, b) <= 2) {
-				fileConfusability++;
-				issues.push({
-					severity: "warning",
-					message: `Similar filenames: ${a} ↔ ${b} (edit distance ${levenshtein(a, b)})`,
-					file: files[i].path,
-					rule: "similar-filename",
-				});
-			}
+				// Near-identical (Levenshtein ≤ 2, but skip very short names where distance 1 is expected)
+				// Early exit: length diff > 2 means edit distance > 2
+				if (a !== b && a.length >= 3 && b.length >= 3 && Math.abs(a.length - b.length) <= 2) {
+					const dist = levenshtein(a, b);
+					if (dist <= 2) {
+						fileConfusability++;
+						issues.push({
+							severity: "warning",
+							message: `Similar filenames: ${a} ↔ ${b} (edit distance ${dist})`,
+							file: group[i].path,
+							rule: "similar-filename",
+						});
+					}
+				}
 
-			// Synonym pairs
-			for (const [s1, s2] of SYNONYM_PAIRS) {
-				if ((a.includes(s1) && b.includes(s2)) || (a.includes(s2) && b.includes(s1))) {
-					fileConfusability++;
-					issues.push({
-						severity: "warning",
-						message: `Synonym filenames: ${a} ↔ ${b} (${s1}/${s2} are interchangeable — pick one convention)`,
-						file: files[i].path,
-						rule: "synonym-filename",
-					});
-					break;
+				// Synonym pairs
+				for (const [s1, s2] of SYNONYM_PAIRS) {
+					if ((a.includes(s1) && b.includes(s2)) || (a.includes(s2) && b.includes(s1))) {
+						fileConfusability++;
+						issues.push({
+							severity: "warning",
+							message: `Synonym filenames: ${a} ↔ ${b} (${s1}/${s2} are interchangeable — pick one convention)`,
+							file: group[i].path,
+							rule: "synonym-filename",
+						});
+						break;
+					}
 				}
 			}
 		}

@@ -481,7 +481,26 @@ jobs:
 		created++;
 	}
 
-	// 3. Add .vibe-check to .gitignore
+	// 3. Create .vcqa.json if not present
+	const vcqaConfigPath = join(cwd, ".vcqa.json");
+	if (!existsSync(vcqaConfigPath)) {
+		writeFileSync(
+			vcqaConfigPath,
+			JSON.stringify(
+				{
+					checks: {},
+					ignore: [],
+					failUnder: 60,
+				},
+				null,
+				2,
+			) + "\n",
+		);
+		console.log(`  \x1b[32m+\x1b[0m .vcqa.json`);
+		created++;
+	}
+
+	// 4. Add .vibe-check to .gitignore
 	const gitignorePath = join(cwd, ".gitignore");
 	if (existsSync(gitignorePath)) {
 		const content = readFileSync(gitignorePath, "utf-8");
