@@ -7,7 +7,7 @@ Code health scanner for the AI coding era. Zero runtime deps, pure TypeScript.
 ```bash
 pnpm install        # install dev deps
 pnpm build          # tsc → dist/
-pnpm test           # vitest run (262 tests across 29 files)
+pnpm test           # vitest run (271 tests across 30 files)
 pnpm lint           # biome check src/
 node dist/cli.js    # self-scan
 node dist/cli.js init               # set up CI workflow + configs
@@ -107,7 +107,7 @@ Tries dedicated tools first, falls back to built-in:
 ## Testing
 
 ```bash
-pnpm test                    # 262 tests across 29 files
+pnpm test                    # 271 tests across 30 files
 pnpm test -- --reporter=verbose  # see all test names
 ```
 

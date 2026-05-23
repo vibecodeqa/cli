@@ -97,7 +97,7 @@ One deep check with 6 sub-dimensions:
 
 | Check | Weight | What it measures |
 |-------|--------|-----------------|
-| **Secrets** | 6% | 13 patterns (AWS, GitHub, Stripe, OpenAI, Anthropic, private keys) |
+| **Secrets** | 6% | 14 patterns (AWS, GitHub, Stripe, OpenAI, Anthropic, Google, private keys) |
 | **Security** | 5% | 25 CWE-mapped patterns (XSS, injection, SSRF, crypto, prototype pollution) |
 | **Dependencies** | 5% | npm audit / dart pub outdated vulnerabilities + outdated packages |
 
@@ -157,7 +157,9 @@ Each check produces a score from 0-100. The composite score is a weighted averag
 | `--upload` | Upload report to app.vibecodeqa.online |
 | `--top [N]` | Show top N issues to fix (default: 5) |
 | `--diff [base]` | Only show issues in changed files (vs HEAD or branch) |
+| `--markdown` | Output markdown summary (pipe to file or clipboard) |
 | `--pr-comment` | Post score as GitHub PR comment (needs `GITHUB_TOKEN`) |
+| `--annotations` | Emit GitHub Actions `::warning`/`::error` inline annotations |
 | `--watch` | Re-scan automatically on file changes |
 
 ## Stack detection
