@@ -513,9 +513,16 @@ export function runBestPractices(cwd: string, workspace?: WorkspaceInfo): CheckR
 		issues.push(...cat.issues);
 	}
 
-	// ── Score ──
-	const pct = practices > 0 ? Math.round((followed / practices) * 100) : 100;
-	const score = pct;
+	// ── Score (severity-weighted) ──
+	// Warnings cost significantly more than infos — missing CODEOWNERS (info)
+	// should not penalize as much as missing linter config (warning).
+	let penalty = 0;
+	for (const issue of issues) {
+		if (issue.severity === "error") penalty += 15;
+		else if (issue.severity === "warning") penalty += 8;
+		else penalty += 2; // info
+	}
+	const score = Math.max(0, Math.min(100, 100 - penalty));
 
 	return {
 		name: "best-practices",
@@ -524,7 +531,7 @@ export function runBestPractices(cwd: string, workspace?: WorkspaceInfo): CheckR
 		details: {
 			practicesChecked: practices,
 			practicesFollowed: followed,
-			adherence: `${pct}%`,
+			adherence: `${practices > 0 ? Math.round((followed / practices) * 100) : 100}%`,
 		},
 		issues,
 		duration: Date.now() - start,
