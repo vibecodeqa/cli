@@ -42,8 +42,8 @@ src/
 │   ├── docs.ts         # README quality, JSDoc coverage, CHANGELOG
 │   ├── best-practices.ts  # CI/CD, supply chain, repo hygiene
 │   ├── testing.ts      # Pyramid, execution, coverage (.ts/.dart aware)
-│   ├── secrets.ts      # Delegates to gitleaks, falls back to 13 regex + .env audit
-│   ├── security.ts     # 21 CWE patterns + localStorage audit + v-html/\{@html\}
+│   ├── secrets.ts      # Delegates to gitleaks, falls back to 14 regex + .env audit
+│   ├── security.ts     # 25 CWE patterns + localStorage audit + v-html/\{@html\}
 │   ├── dependencies.ts # npm audit / dart pub outdated
 │   ├── architecture.ts # Import graph, cycles, god modules (Vue/Svelte import resolution)
 │   ├── confusion.ts    # Naming ambiguity (Levenshtein, cross-package aware)
