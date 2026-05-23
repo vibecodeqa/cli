@@ -109,11 +109,7 @@ describe("collectSourceFiles with monorepo srcRoots", () => {
 		});
 		const files = collectSourceFiles(dir, { srcRoots: ["packages/sdk/src", "packages/cli/src"] });
 		expect(files).toHaveLength(3);
-		expect(files.map((f) => f.path).sort()).toEqual([
-			"packages/cli/src/main.ts",
-			"packages/sdk/src/index.ts",
-			"packages/sdk/src/utils.ts",
-		]);
+		expect(files.map((f) => f.path).sort()).toEqual(["packages/cli/src/main.ts", "packages/sdk/src/index.ts", "packages/sdk/src/utils.ts"]);
 		rmSync(dir, { recursive: true });
 	});
 

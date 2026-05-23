@@ -68,7 +68,10 @@ export function generateSequenceDiagram(details: Record<string, unknown>): strin
 	const entries = Object.entries(graph);
 	const entryPoint = entries.find(([path, info]) => {
 		const name = basename(path, extname(path));
-		return info.importedBy.length === 0 && ["index", "main", "cli", "App", "app", "server", "+page", "+layout", "+server", "page", "layout"].includes(name);
+		return (
+			info.importedBy.length === 0 &&
+			["index", "main", "cli", "App", "app", "server", "+page", "+layout", "+server", "page", "layout"].includes(name)
+		);
 	});
 	if (!entryPoint) return "";
 

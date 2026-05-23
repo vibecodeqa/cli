@@ -2,8 +2,8 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import type { VibeReport } from "./types.js";
 import type { TrendDelta } from "./trend.js";
+import type { VibeReport } from "./types.js";
 
 const MARKER = "<!-- vcqa-report -->";
 
@@ -122,13 +122,26 @@ function buildCommentBody(report: VibeReport, trend: TrendDelta | null): string 
 
 function getCategoryForCheck(name: string): string {
 	const map: Record<string, string> = {
-		structure: "Foundations", lint: "Foundations", types: "Foundations", "type-safety": "Foundations", standards: "Foundations",
-		complexity: "Quality", duplication: "Quality", "error-handling": "Quality", react: "Quality",
-		accessibility: "Quality", docs: "Quality", "best-practices": "Quality",
+		structure: "Foundations",
+		lint: "Foundations",
+		types: "Foundations",
+		"type-safety": "Foundations",
+		standards: "Foundations",
+		complexity: "Quality",
+		duplication: "Quality",
+		"error-handling": "Quality",
+		react: "Quality",
+		accessibility: "Quality",
+		docs: "Quality",
+		"best-practices": "Quality",
 		testing: "Testing",
-		secrets: "Security", security: "Security", dependencies: "Security",
-		architecture: "Architecture", performance: "Architecture",
-		confusion: "AI Readiness", context: "AI Readiness",
+		secrets: "Security",
+		security: "Security",
+		dependencies: "Security",
+		architecture: "Architecture",
+		performance: "Architecture",
+		confusion: "AI Readiness",
+		context: "AI Readiness",
 	};
 	return map[name] || "Other";
 }

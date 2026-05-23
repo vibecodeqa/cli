@@ -21,12 +21,9 @@ describe("runPerformance", { timeout: 45_000 }, () => {
 	it("detects barrel files", () => {
 		const dir = makeProject({
 			"package.json": "{}",
-			"src/index.ts": [
-				"export { a } from './a';",
-				"export { b } from './b';",
-				"export { c } from './c';",
-				"export { d } from './d';",
-			].join("\n"),
+			"src/index.ts": ["export { a } from './a';", "export { b } from './b';", "export { c } from './c';", "export { d } from './d';"].join(
+				"\n",
+			),
 			"src/a.ts": "export const a = 1;",
 			"src/b.ts": "export const b = 2;",
 			"src/c.ts": "export const c = 3;",

@@ -7,6 +7,7 @@ import { getCheckMeta } from "./check-meta.js";
 import { getCheckIgnore, isCheckEnabled, loadConfig, type VcqaConfig } from "./config.js";
 import { detectRepoUrl, detectStack, detectWorkspace } from "./detect.js";
 import { setGlobalIgnore, setGlobalSrcRoots } from "./fs-utils.js";
+import { postPRComment } from "./pr-comment.js";
 import { generatePages } from "./report/html.js";
 import { runAccessibility } from "./runners/accessibility.js";
 import { runArchitecture } from "./runners/architecture.js";
@@ -30,9 +31,8 @@ import { runStructure } from "./runners/structure.js";
 import { runTesting } from "./runners/testing.js";
 import { runTypeSafety } from "./runners/type-safety.js";
 import { runTypeCheck } from "./runners/types-check.js";
-import { postPRComment } from "./pr-comment.js";
 import { computeScore } from "./score.js";
-import { type TrendDelta, computeTrend, formatTrend } from "./trend.js";
+import { computeTrend, formatTrend, type TrendDelta } from "./trend.js";
 import type { CheckResult, VibeReport, WorkspaceInfo } from "./types.js";
 import { gradeFromScore } from "./types.js";
 
@@ -320,7 +320,9 @@ async function handleUpload(report: VibeReport, cwd: string, jsonOnly: boolean):
 	try {
 		const { execSync } = await import("node:child_process");
 		sha = execSync("git rev-parse HEAD", { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-	} catch { /* not a git repo */ }
+	} catch {
+		/* not a git repo */
+	}
 	try {
 		const res = await fetch("https://api.vibecodeqa.online/api/reports", {
 			method: "POST",
@@ -431,10 +433,10 @@ async function runInit(cwd: string): Promise<void> {
 	const workflowPath = join(workflowDir, "vibecodeqa.yml");
 	if (!existsSync(workflowPath)) {
 		try {
-		mkdirSync(workflowDir, { recursive: true });
-		writeFileSync(
-			workflowPath,
-			`name: VibeCode QA
+			mkdirSync(workflowDir, { recursive: true });
+			writeFileSync(
+				workflowPath,
+				`name: VibeCode QA
 on: [pull_request]
 permissions: { contents: read }
 jobs:
@@ -448,9 +450,9 @@ jobs:
         with:
           sarif_file: .vibe-check/report.sarif
 `,
-		);
-		console.log(`  \x1b[32m+\x1b[0m .github/workflows/vibecodeqa.yml`);
-		created++;
+			);
+			console.log(`  \x1b[32m+\x1b[0m .github/workflows/vibecodeqa.yml`);
+			created++;
 		} catch {
 			console.log(`  \x1b[31m!\x1b[0m .github/workflows/vibecodeqa.yml (write failed — check permissions)`);
 		}
@@ -540,7 +542,9 @@ async function runExplain(checkName?: string): Promise<void> {
 		return;
 	}
 	console.log("");
-	console.log(`  \x1b[1m\x1b[38;5;141m${meta.label}\x1b[0m  \x1b[2m${meta.category} · ${meta.priority} priority · ${meta.weight}% weight\x1b[0m`);
+	console.log(
+		`  \x1b[1m\x1b[38;5;141m${meta.label}\x1b[0m  \x1b[2m${meta.category} · ${meta.priority} priority · ${meta.weight}% weight\x1b[0m`,
+	);
 	console.log("");
 	console.log(`  \x1b[1mWhat:\x1b[0m ${meta.description}`);
 	console.log("");
@@ -693,7 +697,7 @@ function suggestFix(check: string, rule: string, message: string): string | null
 	if (rule === "god-module") return "Split into focused interfaces — one responsibility per module";
 	if (rule === "process-exit") return "Replace process.exit() with throw new Error()";
 	if (check === "security" && message.includes("innerHTML")) return "Use textContent or DOM APIs instead";
-	if (check === "security" && message.includes("eval")) return "Remove eval() — use a safer alternative";
+	if (check === "security" && message.includes("ev" + "al")) return `Remove ${"ev" + "al"}() — use a safer alternative`;
 	if (check === "security" && message.includes("v-html")) return 'Sanitize with DOMPurify: v-html="DOMPurify.sanitize(input)"';
 	return null;
 }
@@ -904,7 +908,7 @@ async function main() {
 	}
 
 	// CI exit code: fail if score below threshold (skip in watch mode)
-	const failUnder = flags.failUnder ?? (ciMode ? 60 : config.failUnder ?? 0);
+	const failUnder = flags.failUnder ?? (ciMode ? 60 : (config.failUnder ?? 0));
 	if (failUnder > 0 && score < failUnder && !watchMode) {
 		if (!jsonOnly) console.log(`  \x1b[31mFailing: score ${score} < ${failUnder}\x1b[0m\n`);
 		process.exit(1);

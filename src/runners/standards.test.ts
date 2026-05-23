@@ -13,7 +13,10 @@ function makeProject(files: Record<string, string>, stack = { language: "typescr
 		mkdirSync(join(full, ".."), { recursive: true });
 		writeFileSync(full, content);
 	}
-	return { dir, stack: { language: stack.language, framework: "none", bundler: "none", testRunner: "none", linter: "none", packageManager: "npm" } };
+	return {
+		dir,
+		stack: { language: stack.language, framework: "none", bundler: "none", testRunner: "none", linter: "none", packageManager: "npm" },
+	};
 }
 
 afterEach(() => setGlobalSrcRoots(undefined));

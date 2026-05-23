@@ -263,9 +263,12 @@ function readCoverageFile(cwd: string): CoverageData | null {
 }
 
 function parseLcov(content: string): CoverageData | null {
-	let linesHit = 0, linesTotal = 0;
-	let branchesHit = 0, branchesTotal = 0;
-	let functionsHit = 0, functionsTotal = 0;
+	let linesHit = 0,
+		linesTotal = 0;
+	let branchesHit = 0,
+		branchesTotal = 0;
+	let functionsHit = 0,
+		functionsTotal = 0;
 	for (const line of content.split("\n")) {
 		if (line.startsWith("LH:")) linesHit += parseInt(line.slice(3), 10) || 0;
 		if (line.startsWith("LF:")) linesTotal += parseInt(line.slice(3), 10) || 0;
@@ -275,7 +278,7 @@ function parseLcov(content: string): CoverageData | null {
 		if (line.startsWith("FNF:")) functionsTotal += parseInt(line.slice(4), 10) || 0;
 	}
 	if (linesTotal === 0) return null;
-	const pct = (hit: number, total: number) => total > 0 ? Math.round((hit / total) * 10000) / 100 : 0;
+	const pct = (hit: number, total: number) => (total > 0 ? Math.round((hit / total) * 10000) / 100 : 0);
 	return {
 		statements: pct(linesHit, linesTotal), // lcov doesn't distinguish statements from lines
 		lines: pct(linesHit, linesTotal),

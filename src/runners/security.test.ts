@@ -20,28 +20,28 @@ afterEach(() => setGlobalSrcRoots(undefined));
 
 describe("runSecurity", () => {
 	it("detects innerHTML XSS", () => {
-		const dir = makeProject({ "src/app.ts": 'el.innerHTML = userInput;\n' });
+		const dir = makeProject({ "src/app.ts": "el.innerHTML = userInput;\n" });
 		const result = runSecurity(dir);
 		expect(result.issues.some((i) => i.message.includes("XSS") && i.message.includes("innerHTML"))).toBe(true);
 		rmSync(dir, { recursive: true });
 	});
 
 	it("detects dangerouslySetInnerHTML", () => {
-		const dir = makeProject({ "src/App.tsx": 'return <div dangerouslySetInnerHTML={{ __html: html }} />;\n' });
+		const dir = makeProject({ "src/App.tsx": "return <div dangerouslySetInnerHTML={{ __html: html }} />;\n" });
 		const result = runSecurity(dir);
 		expect(result.issues.some((i) => i.message.includes("dangerouslySetInnerHTML"))).toBe(true);
 		rmSync(dir, { recursive: true });
 	});
 
 	it("detects eval()", () => {
-		const dir = makeProject({ "src/app.ts": 'eval(userInput);\n' });
+		const dir = makeProject({ "src/app.ts": "eval(userInput);\n" });
 		const result = runSecurity(dir);
 		expect(result.issues.some((i) => i.message.includes("eval"))).toBe(true);
 		rmSync(dir, { recursive: true });
 	});
 
 	it("detects SQL injection patterns", () => {
-		const dir = makeProject({ "src/db.ts": 'db.query(`SELECT * FROM users WHERE id = ${userId}`);\n' });
+		const dir = makeProject({ "src/db.ts": "db.query(`SELECT * FROM users WHERE id = ${userId}`);\n" });
 		const result = runSecurity(dir);
 		expect(result.issues.some((i) => i.message.includes("SQL"))).toBe(true);
 		rmSync(dir, { recursive: true });

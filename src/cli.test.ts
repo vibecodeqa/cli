@@ -44,88 +44,67 @@ describe("CLI flags", () => {
 		expect(out).toContain("fix");
 	});
 
-	it(
-		"--json produces valid JSON",
-		() => {
-			const out = run("--skip-tests --json .");
-			const report = JSON.parse(out);
-			expect(report.version).toBeDefined();
-			expect(report.score).toBeGreaterThanOrEqual(0);
-			expect(report.score).toBeLessThanOrEqual(100);
-			expect(report.checks).toBeInstanceOf(Array);
-			expect(report.checks.length).toBe(22);
-		},
-		30_000,
-	);
+	it("--json produces valid JSON", () => {
+		const out = run("--skip-tests --json .");
+		const report = JSON.parse(out);
+		expect(report.version).toBeDefined();
+		expect(report.score).toBeGreaterThanOrEqual(0);
+		expect(report.score).toBeLessThanOrEqual(100);
+		expect(report.checks).toBeInstanceOf(Array);
+		expect(report.checks.length).toBe(22);
+	}, 30_000);
 
 	it("nonexistent path exits with error", () => {
 		const out = execSync(`node ${CLI} --skip-tests /nonexistent 2>&1 || true`, { encoding: "utf-8" });
 		expect(out).toContain("does not exist");
 	});
 
-	it(
-		"--fail-under exits with code 1 when score is below threshold",
-		() => {
-			// An empty project with no LICENSE, .gitignore, etc. scores low
-			try {
-				execSync(`node ${CLI} --skip-tests --json --fail-under 99 .`, { encoding: "utf-8", timeout: 30_000, cwd: TMP });
-				// Should not reach here — expect exit code 1
-				expect.unreachable("should have thrown");
-			} catch (e: any) {
-				expect(e.status).toBe(1);
+	it("--fail-under exits with code 1 when score is below threshold", () => {
+		// An empty project with no LICENSE, .gitignore, etc. scores low
+		try {
+			execSync(`node ${CLI} --skip-tests --json --fail-under 99 .`, { encoding: "utf-8", timeout: 30_000, cwd: TMP });
+			// Should not reach here — expect exit code 1
+			expect.unreachable("should have thrown");
+		} catch (e: any) {
+			expect(e.status).toBe(1);
+		}
+	}, 30_000);
+
+	it("--fail-under does not exit when score is above threshold", () => {
+		const out = run("--skip-tests --json --fail-under 0 .");
+		const report = JSON.parse(out);
+		expect(report.score).toBeGreaterThanOrEqual(0);
+	}, 30_000);
+
+	it("--ci sets fail-under threshold", () => {
+		// With --ci, score must be >= 60. Our test project scores ~71, so it passes.
+		const out = run("--skip-tests --json --ci .");
+		const report = JSON.parse(out);
+		expect(report.score).toBeGreaterThanOrEqual(60);
+	}, 30_000);
+
+	it("--top limits issue output", () => {
+		const out = run("--skip-tests --top 3 .");
+		// --top mode should show "Top 3 issues" or similar
+		expect(out).toContain("Top");
+	}, 30_000);
+
+	it("--diff filters issues to changed files", () => {
+		// Initialize a git repo for diff to work (configure identity for CI)
+		execSync("git init && git config user.email 'test@test.com' && git config user.name 'Test' && git add -A && git commit -m init", {
+			cwd: TMP,
+			stdio: "pipe",
+		});
+		writeFileSync(join(TMP, "src", "new.ts"), 'eval("bad");');
+		const out = run("--skip-tests --json --diff HEAD .");
+		const report = JSON.parse(out);
+		// Issues should only reference changed files (src/new.ts)
+		for (const c of report.checks) {
+			for (const i of c.issues) {
+				if (i.file) expect(i.file).toContain("new.ts");
 			}
-		},
-		30_000,
-	);
-
-	it(
-		"--fail-under does not exit when score is above threshold",
-		() => {
-			const out = run("--skip-tests --json --fail-under 0 .");
-			const report = JSON.parse(out);
-			expect(report.score).toBeGreaterThanOrEqual(0);
-		},
-		30_000,
-	);
-
-	it(
-		"--ci sets fail-under threshold",
-		() => {
-			// With --ci, score must be >= 60. Our test project scores ~71, so it passes.
-			const out = run("--skip-tests --json --ci .");
-			const report = JSON.parse(out);
-			expect(report.score).toBeGreaterThanOrEqual(60);
-		},
-		30_000,
-	);
-
-	it(
-		"--top limits issue output",
-		() => {
-			const out = run("--skip-tests --top 3 .");
-			// --top mode should show "Top 3 issues" or similar
-			expect(out).toContain("Top");
-		},
-		30_000,
-	);
-
-	it(
-		"--diff filters issues to changed files",
-		() => {
-			// Initialize a git repo for diff to work (configure identity for CI)
-			execSync("git init && git config user.email 'test@test.com' && git config user.name 'Test' && git add -A && git commit -m init", { cwd: TMP, stdio: "pipe" });
-			writeFileSync(join(TMP, "src", "new.ts"), 'eval("bad");');
-			const out = run("--skip-tests --json --diff HEAD .");
-			const report = JSON.parse(out);
-			// Issues should only reference changed files (src/new.ts)
-			for (const c of report.checks) {
-				for (const i of c.issues) {
-					if (i.file) expect(i.file).toContain("new.ts");
-				}
-			}
-		},
-		30_000,
-	);
+		}
+	}, 30_000);
 });
 
 describe("explain command", () => {
@@ -152,57 +131,41 @@ describe("explain command", () => {
 });
 
 describe("output modes", () => {
-	it(
-		"--markdown produces clean markdown",
-		() => {
-			const out = run("--skip-tests --markdown .");
-			expect(out).toContain("# ");
-			expect(out).toContain("VibeCode QA");
-			expect(out).toContain("| Check | Score | Grade |");
-			// Should NOT contain ANSI escape codes
-			expect(out).not.toContain("\x1b[");
-		},
-		30_000,
-	);
+	it("--markdown produces clean markdown", () => {
+		const out = run("--skip-tests --markdown .");
+		expect(out).toContain("# ");
+		expect(out).toContain("VibeCode QA");
+		expect(out).toContain("| Check | Score | Grade |");
+		// Should NOT contain ANSI escape codes
+		expect(out).not.toContain("\x1b[");
+	}, 30_000);
 
-	it(
-		"--annotations emits GitHub Actions format",
-		() => {
-			const out = run("--skip-tests --annotations .");
-			// Should contain ::warning or ::error annotations
-			expect(out).toMatch(/::(warning|error)/);
-		},
-		30_000,
-	);
+	it("--annotations emits GitHub Actions format", () => {
+		const out = run("--skip-tests --annotations .");
+		// Should contain ::warning or ::error annotations
+		expect(out).toMatch(/::(warning|error)/);
+	}, 30_000);
 });
 
 describe("config file", () => {
-	it(
-		"disables checks via .vcqa.json",
-		() => {
-			writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ checks: { confusion: { enabled: false }, context: { enabled: false } } }));
-			const out = run("--skip-tests --json .");
-			const report = JSON.parse(out);
-			const confusion = report.checks.find((c: any) => c.name === "confusion");
-			expect(confusion.details.skipped).toBe(true);
-			expect(confusion.details.reason).toBe("disabled in config");
-		},
-		30_000,
-	);
+	it("disables checks via .vcqa.json", () => {
+		writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ checks: { confusion: { enabled: false }, context: { enabled: false } } }));
+		const out = run("--skip-tests --json .");
+		const report = JSON.parse(out);
+		const confusion = report.checks.find((c: any) => c.name === "confusion");
+		expect(confusion.details.skipped).toBe(true);
+		expect(confusion.details.reason).toBe("disabled in config");
+	}, 30_000);
 
-	it(
-		"uses failUnder from config",
-		() => {
-			writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ failUnder: 99 }));
-			try {
-				execSync(`node ${CLI} --skip-tests --json .`, { encoding: "utf-8", timeout: 30_000, cwd: TMP });
-				expect.unreachable("should have thrown");
-			} catch (e: any) {
-				expect(e.status).toBe(1);
-			}
-		},
-		30_000,
-	);
+	it("uses failUnder from config", () => {
+		writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ failUnder: 99 }));
+		try {
+			execSync(`node ${CLI} --skip-tests --json .`, { encoding: "utf-8", timeout: 30_000, cwd: TMP });
+			expect.unreachable("should have thrown");
+		} catch (e: any) {
+			expect(e.status).toBe(1);
+		}
+	}, 30_000);
 });
 
 describe("init command", () => {
@@ -248,24 +211,16 @@ describe("init command", () => {
 });
 
 describe("fix command", () => {
-	it(
-		"shows fix suggestions for empty catch",
-		() => {
-			writeFileSync(join(TMP, "src", "bad.ts"), "export function f() { try { x() } catch {} }\n");
-			const out = run("fix .");
-			expect(out).toContain("Fix:");
-		},
-		30_000,
-	);
+	it("shows fix suggestions for empty catch", () => {
+		writeFileSync(join(TMP, "src", "bad.ts"), "export function f() { try { x() } catch {} }\n");
+		const out = run("fix .");
+		expect(out).toContain("Fix:");
+	}, 30_000);
 
-	it(
-		"shows score after fix",
-		() => {
-			const out = run("fix .");
-			expect(out).toContain("Score after fix:");
-		},
-		30_000,
-	);
+	it("shows score after fix", () => {
+		const out = run("fix .");
+		expect(out).toContain("Score after fix:");
+	}, 30_000);
 
 	it("validates path", () => {
 		const out = execSync(`node ${CLI} fix /nonexistent 2>&1 || true`, { encoding: "utf-8" });
@@ -274,58 +229,42 @@ describe("fix command", () => {
 });
 
 describe("report output", () => {
-	it(
-		"--json produces report with 22 checks and workspace info",
-		() => {
-			const out = run("--skip-tests --json .");
-			const report = JSON.parse(out);
-			expect(report.checks.length).toBe(22);
-			expect(report.meta.workspace).toBeDefined();
-			expect(typeof report.meta.workspace.isMonorepo).toBe("boolean");
-			// Also verify report file was written
-			expect(existsSync(join(TMP, ".vibe-check", "report.json"))).toBe(true);
-		},
-		30_000,
-	);
+	it("--json produces report with 22 checks and workspace info", () => {
+		const out = run("--skip-tests --json .");
+		const report = JSON.parse(out);
+		expect(report.checks.length).toBe(22);
+		expect(report.meta.workspace).toBeDefined();
+		expect(typeof report.meta.workspace.isMonorepo).toBe("boolean");
+		// Also verify report file was written
+		expect(existsSync(join(TMP, ".vibe-check", "report.json"))).toBe(true);
+	}, 30_000);
 
-	it(
-		"--badge and --sarif generate output files",
-		() => {
-			run("--skip-tests --badge --sarif .");
-			expect(existsSync(join(TMP, ".vibe-check", "badge.svg"))).toBe(true);
-			expect(existsSync(join(TMP, ".vibe-check", "report.sarif"))).toBe(true);
-		},
-		30_000,
-	);
+	it("--badge and --sarif generate output files", () => {
+		run("--skip-tests --badge --sarif .");
+		expect(existsSync(join(TMP, ".vibe-check", "badge.svg"))).toBe(true);
+		expect(existsSync(join(TMP, ".vibe-check", "report.sarif"))).toBe(true);
+	}, 30_000);
 
-	it(
-		"--sarif produces valid SARIF 2.1.0",
-		() => {
-			run("--skip-tests --sarif .");
-			const sarif = JSON.parse(readFileSync(join(TMP, ".vibe-check", "report.sarif"), "utf-8"));
-			expect(sarif.$schema).toContain("sarif");
-			expect(sarif.version).toBe("2.1.0");
-			expect(sarif.runs).toBeInstanceOf(Array);
-			expect(sarif.runs.length).toBe(1);
-			expect(sarif.runs[0].tool.driver.name).toBe("VibeCode QA");
-			expect(sarif.runs[0].results).toBeInstanceOf(Array);
-			// Verify rules are defined
-			expect(sarif.runs[0].tool.driver.rules).toBeInstanceOf(Array);
-			expect(sarif.runs[0].tool.driver.rules.length).toBeGreaterThan(0);
-		},
-		30_000,
-	);
+	it("--sarif produces valid SARIF 2.1.0", () => {
+		run("--skip-tests --sarif .");
+		const sarif = JSON.parse(readFileSync(join(TMP, ".vibe-check", "report.sarif"), "utf-8"));
+		expect(sarif.$schema).toContain("sarif");
+		expect(sarif.version).toBe("2.1.0");
+		expect(sarif.runs).toBeInstanceOf(Array);
+		expect(sarif.runs.length).toBe(1);
+		expect(sarif.runs[0].tool.driver.name).toBe("VibeCode QA");
+		expect(sarif.runs[0].results).toBeInstanceOf(Array);
+		// Verify rules are defined
+		expect(sarif.runs[0].tool.driver.rules).toBeInstanceOf(Array);
+		expect(sarif.runs[0].tool.driver.rules.length).toBeGreaterThan(0);
+	}, 30_000);
 
-	it(
-		"generates multi-page HTML report",
-		() => {
-			run("--skip-tests .");
-			const reportDir = join(TMP, ".vibe-check", "report");
-			expect(existsSync(join(reportDir, "index.html"))).toBe(true);
-			const html = readFileSync(join(reportDir, "index.html"), "utf-8");
-			expect(html).toContain("<!DOCTYPE html>");
-			expect(html).toContain("VibeCode QA");
-		},
-		30_000,
-	);
+	it("generates multi-page HTML report", () => {
+		run("--skip-tests .");
+		const reportDir = join(TMP, ".vibe-check", "report");
+		expect(existsSync(join(reportDir, "index.html"))).toBe(true);
+		const html = readFileSync(join(reportDir, "index.html"), "utf-8");
+		expect(html).toContain("<!DOCTYPE html>");
+		expect(html).toContain("VibeCode QA");
+	}, 30_000);
 });

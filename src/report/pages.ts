@@ -1,8 +1,8 @@
 /** Page renderers for the HTML report. */
 
 import { getCheckMeta } from "../check-meta.js";
-import { loadHistory } from "../history.js";
 import { buildCoverageMapInput, generateCoverageMap } from "../diagrams/coverage.js";
+import { loadHistory } from "../history.js";
 import {
 	generateArchSVG,
 	generateDSM,

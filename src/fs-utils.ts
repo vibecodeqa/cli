@@ -109,9 +109,7 @@ export function collectAllFiles(cwd: string, opts?: { extraExts?: boolean }): So
 function extractScript(content: string): string {
 	const scripts: string[] = [];
 	// Match <script ...> ... </script> blocks (including <script setup>, <script lang="ts">)
-	const regex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
-	let match;
-	while ((match = regex.exec(content)) !== null) {
+	for (const match of content.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)) {
 		if (match[1]) scripts.push(match[1]);
 	}
 	return scripts.length > 0 ? scripts.join("\n") : content;

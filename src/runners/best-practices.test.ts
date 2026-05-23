@@ -2,7 +2,6 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { WorkspaceInfo } from "../types.js";
 import { runBestPractices } from "./best-practices.js";
 
 function makeProject(files: Record<string, string>): string {
@@ -111,7 +110,11 @@ describe("runBestPractices", () => {
 	it("improves score with more practices followed", () => {
 		const dirBare = makeProject({ "package.json": "{}" });
 		const dirGood = makeProject({
-			"package.json": JSON.stringify({ scripts: { test: "vitest", build: "tsc" }, engines: { node: ">=18" }, repository: { url: "https://github.com/test/test" } }),
+			"package.json": JSON.stringify({
+				scripts: { test: "vitest", build: "tsc" },
+				engines: { node: ">=18" },
+				repository: { url: "https://github.com/test/test" },
+			}),
 			"pnpm-lock.yaml": "",
 			"biome.json": "{}",
 			".github/workflows/ci.yml": "name: CI\non: push\n",

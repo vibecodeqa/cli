@@ -21,7 +21,10 @@ afterEach(() => setGlobalSrcRoots(undefined));
 describe("runContext", () => {
 	it("flags high token count files", () => {
 		const dir = makeProject({
-			"src/big.ts": Array.from({ length: 500 }, (_, i) => `export const val${i} = ${i}; // some padding text here to increase token count`).join("\n"),
+			"src/big.ts": Array.from(
+				{ length: 500 },
+				(_, i) => `export const val${i} = ${i}; // some padding text here to increase token count`,
+			).join("\n"),
 		});
 		const result = runContext(dir);
 		expect(result.issues.some((i) => i.rule === "high-token-count")).toBe(true);

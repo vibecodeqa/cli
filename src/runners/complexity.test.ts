@@ -60,15 +60,15 @@ export function greet(name: string): string {
 	it("handles braces in strings without truncating function", () => {
 		setup({
 			"src/braces.ts": [
-				'export function render(data: any) {',
+				"export function render(data: any) {",
 				'  const open = "{";',
 				'  const close = "}";',
-				'  const msg = `Value: ${data.value}`;',
-				'  if (data.valid) {',
-				'    return open + msg + close;',
-				'  }',
+				"  const msg = `Value: ${data.value}`;",
+				"  if (data.valid) {",
+				"    return open + msg + close;",
+				"  }",
 				'  return "none";',
-				'}',
+				"}",
 			].join("\n"),
 		});
 		const result = runComplexity(TMP);

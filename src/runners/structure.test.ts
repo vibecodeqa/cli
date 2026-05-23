@@ -6,7 +6,14 @@ import { setGlobalSrcRoots } from "../fs-utils.js";
 import type { StackInfo, WorkspaceInfo } from "../types.js";
 import { runStructure } from "./structure.js";
 
-const tsStack: StackInfo = { language: "typescript", framework: "none", bundler: "none", testRunner: "none", linter: "none", packageManager: "npm" };
+const tsStack: StackInfo = {
+	language: "typescript",
+	framework: "none",
+	bundler: "none",
+	testRunner: "none",
+	linter: "none",
+	packageManager: "npm",
+};
 
 function makeProject(files: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-struct-"));
@@ -33,7 +40,7 @@ describe("runStructure", () => {
 		const dir = makeProject({
 			"package.json": JSON.stringify({ scripts: { test: "vitest", build: "tsc" } }),
 			"tsconfig.json": "{}",
-			"LICENSE": "MIT",
+			LICENSE: "MIT",
 			".gitignore": "node_modules",
 			"README.md": "# App",
 			"pnpm-lock.yaml": "",

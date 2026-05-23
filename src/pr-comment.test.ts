@@ -17,9 +17,7 @@ describe("pr-comment module", () => {
 			timestamp: new Date().toISOString(),
 			score: 75,
 			grade: "B" as const,
-			checks: [
-				{ name: "lint", score: 80, grade: "B" as const, details: {}, issues: [], duration: 10 },
-			],
+			checks: [{ name: "lint", score: 80, grade: "B" as const, details: {}, issues: [], duration: 10 }],
 			meta: { cwd: "/tmp", node: "v22", duration: 100, stack: {} as any, repoUrl: null, branch: "main" },
 		};
 		// No GITHUB_TOKEN, no GITHUB_EVENT_PATH, no gh CLI context
