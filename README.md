@@ -73,7 +73,7 @@ Output goes to `.vibe-check/`:
 | **React Patterns** | 3% | Conditional hooks, missing keys, index keys, prop spreading |
 | **Accessibility** | 4% | img alt, click on non-interactive elements, form labels, html lang |
 | **Docs** | 3% | README quality, JSDoc coverage of exports |
-| **Best Practices** | 3% | CI/CD, lockfile, linter config, test scripts, supply chain hygiene |
+| **Best Practices** | 3% | CI/CD, lockfile, linter config, test scripts, supply chain hygiene (severity-weighted: warnings cost 8pts, infos 2pts) |
 
 ### Testing (15%)
 
@@ -119,7 +119,13 @@ Novel checks that no other tool offers:
 
 ## Scoring
 
-Each check produces a score from 0-100. The composite score is a weighted average (weights shown above, sum to 100%). Grades:
+Each check produces a score from 0-100. The composite score is a **weighted average**:
+
+```
+composite = Σ(check_score × weight) / Σ(weight)
+```
+
+Weights sum to 100% (see table above). Skipped checks are excluded from both numerator and denominator. Within each check, scoring is **proportional to codebase size** — no absolute-count cliffs. The `best-practices` check uses **severity-weighted penalties** (error=15pts, warning=8pts, info=2pts) so missing nice-to-haves like CODEOWNERS don't tank your score.
 
 | Grade | Score | Meaning |
 |-------|-------|---------|
