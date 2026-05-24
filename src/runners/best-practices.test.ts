@@ -99,6 +99,26 @@ describe("runBestPractices", () => {
 		rmSync(dir, { recursive: true });
 	});
 
+	it("flags missing health endpoint for server projects", () => {
+		const dir = makeProject({
+			"package.json": JSON.stringify({ dependencies: { express: "^4" } }),
+			"src/index.ts": 'import express from "express";\nconst app = express();\napp.listen(3000);\n',
+		});
+		const result = runBestPractices(dir);
+		expect(result.issues.some((i) => i.rule === "no-health-endpoint")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("credits health endpoint when present", () => {
+		const dir = makeProject({
+			"package.json": JSON.stringify({ dependencies: { express: "^4" } }),
+			"src/index.ts": 'import express from "express";\nconst app = express();\napp.get("/health", (req, res) => res.json({ ok: true }));\napp.listen(3000);\n',
+		});
+		const result = runBestPractices(dir);
+		expect(result.issues.some((i) => i.rule === "no-health-endpoint")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
 	it("produces a score between 0-100", () => {
 		const dir = makeProject({ "package.json": "{}" });
 		const result = runBestPractices(dir);

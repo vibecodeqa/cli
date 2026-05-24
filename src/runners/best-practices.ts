@@ -12,7 +12,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { readDeps } from "../fs-utils.js";
+import { collectAllFiles, readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
@@ -431,7 +431,8 @@ function checkMonitoring(cwd: string): CategoryResult {
 	const deps = readDeps(cwd);
 
 	// Error tracking (Sentry, Bugsnag, etc.) — only for apps/servers, not CLI tools
-	const isApp = deps.react || deps.vue || deps.svelte || deps.express || deps.fastify || deps.hono || deps.next || deps.nuxt;
+	const isServer = deps.express || deps.fastify || deps.hono || deps["@hono/node-server"] || deps.koa;
+	const isApp = deps.react || deps.vue || deps.svelte || deps.next || deps.nuxt || isServer;
 	if (isApp) {
 		practices++;
 		if (deps["@sentry/node"] || deps["@sentry/react"] || deps["@sentry/browser"] || deps.bugsnag || deps["@bugsnag/js"]) {
@@ -441,6 +442,39 @@ function checkMonitoring(cwd: string): CategoryResult {
 				severity: "info",
 				message: "No error tracking (Sentry/Bugsnag) — production errors may go unnoticed",
 				rule: "error-tracking",
+			});
+		}
+	}
+
+	// Health check endpoint — only for server/API/worker projects
+	if (isServer) {
+		practices++;
+		const allFiles = collectAllFiles(cwd);
+		const hasHealthEndpoint = allFiles.some(
+			(f) => /["'`]\/health["'`]|["'`]\/healthz["'`]|["'`]\/readyz["'`]|\.get\s*\(\s*["'`]\/health/.test(f.content),
+		);
+		if (hasHealthEndpoint) {
+			followed++;
+		} else {
+			issues.push({
+				severity: "info",
+				message: "No /health or /healthz endpoint — add one for load balancer and uptime monitoring",
+				rule: "no-health-endpoint",
+			});
+		}
+
+		// Graceful shutdown handler
+		practices++;
+		const hasShutdown = allFiles.some(
+			(f) => /process\.on\s*\(\s*["']SIG(?:TERM|INT)["']/.test(f.content) || /graceful|shutdown/i.test(f.content),
+		);
+		if (hasShutdown) {
+			followed++;
+		} else {
+			issues.push({
+				severity: "info",
+				message: "No SIGTERM/SIGINT handler — server may drop in-flight requests on deploy",
+				rule: "no-graceful-shutdown",
 			});
 		}
 	}

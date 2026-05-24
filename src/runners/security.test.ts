@@ -114,6 +114,51 @@ describe("runSecurity", () => {
 		rmSync(dir, { recursive: true });
 	});
 
+	it("detects permissive CORS", () => {
+		const dir = makeProject({
+			"src/server.ts": 'res.setHeader("Access-Control-Allow-Origin", "*");\n',
+		});
+		const result = runSecurity(dir);
+		expect(result.issues.some((i) => i.message.includes("CORS"))).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("detects HTTP fetch (non-localhost)", () => {
+		const dir = makeProject({
+			"src/api.ts": 'const data = await fetch("http://api.example.com/data");\n',
+		});
+		const result = runSecurity(dir);
+		expect(result.issues.some((i) => i.message.includes("HTTP"))).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("allows HTTP localhost fetch", () => {
+		const dir = makeProject({
+			"src/dev.ts": 'const data = await fetch("http://localhost:3000/api");\n',
+		});
+		const result = runSecurity(dir);
+		expect(result.issues.some((i) => i.message.includes("plain HTTP"))).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("detects unvalidated redirect", () => {
+		const dir = makeProject({
+			"src/auth.ts": "res.redirect(req.query.returnUrl);\n",
+		});
+		const result = runSecurity(dir);
+		expect(result.issues.some((i) => i.message.includes("redirect"))).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("detects debug mode enabled", () => {
+		const dir = makeProject({
+			"src/config.ts": "export const config = { debug: true, port: 3000 };\n",
+		});
+		const result = runSecurity(dir);
+		expect(result.issues.some((i) => i.message.includes("Debug"))).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
 	it("reports storage audit summary", () => {
 		const dir = makeProject({
 			"src/auth.ts": 'localStorage.setItem("token", jwt);\nconst dbUrl = "postgres://root:pass@localhost/db";\n',

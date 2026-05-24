@@ -245,6 +245,49 @@ const PATTERNS: SecurityPattern[] = [
 		cwe: "CWE-614",
 	},
 
+	// Permissive CORS
+	{
+		name: "CORS wildcard with credentials",
+		pattern: /Access-Control-Allow-Origin["']\s*[:=,]\s*["']\*/,
+		severity: "warning",
+		message: "CORS allows all origins (*) — restrict to specific domains, especially with credentials",
+		cwe: "CWE-346",
+	},
+	{
+		name: "CORS wildcard header",
+		pattern: /["']Access-Control-Allow-Origin["']\s*,\s*["']\*/,
+		severity: "warning",
+		message: "Permissive CORS: Access-Control-Allow-Origin set to * — allows any site to read responses",
+		cwe: "CWE-346",
+	},
+
+	// HTTP without TLS
+	{
+		name: "HTTP URL in fetch",
+		pattern: /fetch\s*\(\s*["'`]http:\/\/(?!localhost|127\.0\.0\.1|0\.0\.0\.0)/,
+		severity: "warning",
+		message: "Fetching over plain HTTP — use HTTPS to prevent man-in-the-middle attacks",
+		cwe: "CWE-319",
+	},
+
+	// Unvalidated redirect
+	{
+		name: "redirect from user input",
+		pattern: /(?:res\.redirect|location\.href|window\.location)\s*(?:=|\()\s*(?:req\.(?:query|params|body)|searchParams\.get)/,
+		severity: "warning",
+		message: "Unvalidated redirect from user input — validate against an allowlist of URLs",
+		cwe: "CWE-601",
+	},
+
+	// Debug mode in production config
+	{
+		name: "debug mode enabled",
+		pattern: /(?:debug|devtools|verbose)\s*[:=]\s*true/i,
+		severity: "info",
+		message: "Debug/devtools mode enabled — ensure this is disabled in production builds",
+		cwe: "CWE-489",
+	},
+
 	// Missing security headers (in response construction)
 	{
 		name: "no-cache header missing",

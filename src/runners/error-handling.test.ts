@@ -68,4 +68,13 @@ describe("runErrorHandling", () => {
 		expect(result.score).toBe(100);
 		rmSync(dir, { recursive: true });
 	});
+
+	it("detects error info leakage to client", () => {
+		const dir = makeProject({
+			"app.ts": 'export function handler(req: any, res: any) {\n  try { doStuff(); } catch(err) { res.json({ error: err.stack }); }\n}\n',
+		});
+		const result = runErrorHandling(dir, tsStack);
+		expect(result.issues.some((i) => i.rule === "error-info-leak")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
 });

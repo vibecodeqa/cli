@@ -131,6 +131,29 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 				}
 			}
 
+			// Error info leakage — sending stack traces or error details to client
+			if (/(?:res\.(?:json|send|status)|Response\.json|new Response)\s*\(.*(?:err\.stack|err\.message|error\.stack|error\.message)/.test(line)) {
+				issues.push({
+					severity: "warning",
+					message: "Error details sent to client — stack traces reveal internal structure. Log server-side, return generic message",
+					file: f.path,
+					line: i + 1,
+					rule: "error-info-leak",
+				});
+			}
+			if (/catch\s*\([^)]*\)\s*\{[^}]*(?:return|res\.\w+\().*(?:\.message|\.stack)/.test(lines.slice(i, Math.min(i + 5, lines.length)).join(" "))) {
+				const alreadyCaught = issues.some((iss) => iss.file === f.path && iss.line === i + 1 && iss.rule === "error-info-leak");
+				if (!alreadyCaught) {
+					issues.push({
+						severity: "info",
+						message: "Catch block may expose error details to caller — consider logging and returning a safe message",
+						file: f.path,
+						line: i + 1,
+						rule: "error-info-leak",
+					});
+				}
+			}
+
 			// process.exit() in non-CLI files (library code shouldn't exit)
 			if (/\bprocess\.exit\s*\(/.test(line) && !f.path.includes("cli") && !f.path.includes("bin/")) {
 				processExit++;
