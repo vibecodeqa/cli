@@ -149,7 +149,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		priority: "critical",
 		weight: 6,
 		description:
-			"Scans source files for hardcoded secrets: AWS keys, GitHub tokens, Stripe keys, OpenAI/Anthropic API keys, Google API keys, private keys, and generic secret patterns. Checks 13 regex patterns against every non-test source file.",
+			"Scans source files for hardcoded secrets: AWS keys, GitHub tokens, Stripe keys, OpenAI/Anthropic API keys, Google API keys, private keys, and generic secret patterns. Checks 14 regex patterns against every non-test source file. Delegates to gitleaks when installed.",
 		risk: "Hardcoded secrets in source code are the #1 cause of credential leaks. Once pushed to Git, secrets are in the history forever — even if deleted in a later commit. Leaked API keys can be exploited within minutes by automated scanners.",
 		recommendation:
 			"Never hardcode secrets. Use environment variables or a secret manager (Bitwarden, AWS Secrets Manager, Cloudflare Secrets). If a secret was committed, rotate it immediately — deleting the file is not enough.",
@@ -162,7 +162,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		priority: "critical",
 		weight: 5,
 		description:
-			"Static analysis for 15 vulnerability patterns mapped to CWE (Common Weakness Enumeration) IDs. Covers: XSS (innerHTML, dangerouslySetInnerHTML, document.write), injection (eval, new Function, SQL template literals, command injection), weak crypto (Math.random for tokens, MD5/SHA1), prototype pollution, path traversal, SSRF, and missing security headers.",
+			"Static analysis for 31 vulnerability patterns mapped to CWE IDs. Covers: XSS, injection, weak crypto, prototype pollution, path traversal, SSRF, credential storage (localStorage/sessionStorage/cookies/connection strings/hardcoded passwords), and missing security headers. Delegates to eslint-plugin-security when installed (adds ReDoS, timing attacks, non-literal require/fs).",
 		risk: "These patterns represent the most commonly exploited vulnerabilities in web applications (OWASP Top 10). A single XSS or injection vulnerability can lead to account takeover, data theft, or complete system compromise.",
 		recommendation:
 			"Replace innerHTML with textContent or DOM APIs. Never use eval(). Use parameterized queries for SQL. Use crypto.randomUUID() instead of Math.random() for tokens. Validate all user input before use in file paths or URLs.",

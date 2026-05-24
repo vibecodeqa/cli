@@ -2,9 +2,10 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getProductionFiles } from "../fs-utils.js";
+import { getProductionFiles, readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
+import { run } from "./exec.js";
 
 interface SecurityPattern {
 	name: string;
@@ -257,6 +258,17 @@ const PATTERNS: SecurityPattern[] = [
 export function runSecurity(cwd: string): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
+	let tool: "built-in" | "eslint-plugin-security" = "built-in";
+
+	// ── Delegate to eslint-plugin-security if installed ──
+	const deps = readDeps(cwd);
+	if (deps["eslint-plugin-security"]) {
+		const eslintIssues = tryEslintPluginSecurity(cwd);
+		if (eslintIssues) {
+			tool = "eslint-plugin-security";
+			issues.push(...eslintIssues);
+		}
+	}
 
 	const sourceFiles = getProductionFiles(cwd);
 
@@ -379,8 +391,53 @@ export function runSecurity(cwd: string): CheckResult {
 		name: "security",
 		score,
 		grade: gradeFromScore(score),
-		details: { filesScanned: sourceFiles.length, patterns: issues.length, cweCategories: cwePrefixes.size, errors, warnings, storageAudit },
+		details: { filesScanned: sourceFiles.length, patterns: issues.length, cweCategories: cwePrefixes.size, errors, warnings, storageAudit, tool },
 		issues,
 		duration: Date.now() - start,
 	};
+}
+
+/** Try running eslint-plugin-security. Returns issues or null if unavailable. */
+function tryEslintPluginSecurity(cwd: string): Issue[] | null {
+	// Run eslint with security plugin rules using inline config
+	const rules = [
+		"security/detect-unsafe-regex",
+		"security/detect-buffer-noassert",
+		"security/detect-child-process",
+		"security/detect-eval-with-expression",
+		"security/detect-no-csrf-before-method-override",
+		"security/detect-non-literal-fs-filename",
+		"security/detect-non-literal-regexp",
+		"security/detect-non-literal-require",
+		"security/detect-object-injection",
+		"security/detect-possible-timing-attacks",
+		"security/detect-pseudoRandomBytes",
+	];
+	const ruleConfig = rules.map((r) => `"${r}":"warn"`).join(",");
+	const { stdout } = run(
+		`npx eslint --no-eslintrc --plugin security --rule '{${ruleConfig}}' --format json src/ 2>/dev/null || true`,
+		cwd,
+		30_000,
+	);
+
+	try {
+		const files = JSON.parse(stdout) as { filePath: string; messages: { severity: number; message: string; line: number; ruleId: string }[] }[];
+		const issues: Issue[] = [];
+		for (const file of files) {
+			const relPath = file.filePath.replace(`${cwd}/`, "");
+			for (const msg of file.messages) {
+				if (!msg.ruleId?.startsWith("security/")) continue;
+				issues.push({
+					severity: msg.severity === 2 ? "error" : "warning",
+					message: `[eslint-plugin-security] ${msg.message}`,
+					file: relPath,
+					line: msg.line,
+					rule: msg.ruleId,
+				});
+			}
+		}
+		return issues.length > 0 ? issues : null;
+	} catch {
+		return null;
+	}
 }
