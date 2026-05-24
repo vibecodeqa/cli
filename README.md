@@ -98,7 +98,7 @@ One deep check with 6 sub-dimensions:
 | Check | Weight | What it measures |
 |-------|--------|-----------------|
 | **Secrets** | 6% | 14 patterns (AWS, GitHub, Stripe, OpenAI, Anthropic, Google, private keys) |
-| **Security** | 5% | 25 CWE-mapped patterns (XSS, injection, SSRF, crypto, prototype pollution) |
+| **Security** | 5% | 31 CWE-mapped patterns (XSS, injection, SSRF, crypto, credential storage, cookie security) |
 | **Dependencies** | 5% | npm audit / dart pub outdated vulnerabilities + outdated packages |
 
 ### AI Readiness (11%)

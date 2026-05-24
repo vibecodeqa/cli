@@ -83,4 +83,45 @@ describe("runSecurity", () => {
 		expect(result.issues.some((i) => i.message.includes("localStorage"))).toBe(true);
 		rmSync(dir, { recursive: true });
 	});
+
+	it("detects sessionStorage storing secrets", () => {
+		const dir = makeProject({ "src/auth.ts": 'sessionStorage.setItem("authToken", token);\n' });
+		const result = runSecurity(dir);
+		expect(result.issues.some((i) => i.message.includes("sessionStorage"))).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("detects connection strings with embedded credentials", () => {
+		const dir = makeProject({ "src/db.ts": 'const url = "postgres://admin:secretpass@db.example.com/mydb";\n' });
+		const result = runSecurity(dir);
+		expect(result.issues.some((i) => i.message.includes("Connection string"))).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("detects hardcoded passwords in config", () => {
+		const dir = makeProject({ "src/config.ts": 'const config = { password: "admin123456" };\n' });
+		const result = runSecurity(dir);
+		expect(result.issues.some((i) => i.message.includes("Hardcoded password"))).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("detects API keys in fetch headers", () => {
+		const dir = makeProject({
+			"src/api.ts": 'const res = await fetch(url, { headers: { "Authorization": "Bearer sk-proj-abc123" } });\n',
+		});
+		const result = runSecurity(dir);
+		expect(result.issues.some((i) => i.message.includes("API key hardcoded"))).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("reports storage audit summary", () => {
+		const dir = makeProject({
+			"src/auth.ts": 'localStorage.setItem("token", jwt);\nconst dbUrl = "postgres://root:pass@localhost/db";\n',
+		});
+		const result = runSecurity(dir);
+		const audit = (result.details as any).storageAudit;
+		expect(audit).toBeDefined();
+		expect(audit.total).toBeGreaterThan(0);
+		rmSync(dir, { recursive: true });
+	});
 });

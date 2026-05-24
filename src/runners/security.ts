@@ -174,6 +174,60 @@ const PATTERNS: SecurityPattern[] = [
 		cwe: "CWE-922",
 	},
 
+	// sessionStorage (same XSS risk as localStorage)
+	{
+		name: "token in sessionStorage",
+		pattern: /sessionStorage\.setItem\s*\(\s*['"][^'"]*(?:token|secret|password|apiKey|api_key|auth|session|jwt)[^'"]*['"]/i,
+		severity: "warning",
+		message: "Storing auth/secret data in sessionStorage — vulnerable to XSS. Use HttpOnly cookies",
+		cwe: "CWE-922",
+	},
+
+	// Connection strings with embedded credentials
+	{
+		name: "connection string with password",
+		pattern: /(?:postgres|mysql|mongodb|redis|amqp):\/\/[^:]+:[^@]+@/,
+		severity: "error",
+		message: "Connection string with embedded credentials — use environment variables",
+		cwe: "CWE-798",
+	},
+
+	// Hardcoded credentials in config objects
+	{
+		name: "hardcoded password in config",
+		pattern: /(?:password|passwd|secret)\s*[:=]\s*["'][^'"]{4,}["']/i,
+		severity: "warning",
+		message: "Hardcoded password/secret in code — use environment variables or a secret manager",
+		cwe: "CWE-798",
+	},
+
+	// Frontend API key exposure (client-side files with server-side keys)
+	{
+		name: "API key in fetch header",
+		pattern: /(?:Authorization|x-api-key|api-key)["']\s*[:=,]\s*["'`](?:Bearer\s+)?(?:sk-|key-|token-)/i,
+		severity: "error",
+		message: "API key hardcoded in request header — move to server-side proxy",
+		cwe: "CWE-798",
+	},
+
+	// IndexedDB storing secrets
+	{
+		name: "token in IndexedDB",
+		pattern: /(?:put|add)\s*\(\s*\{[^}]*(?:token|secret|password|apiKey|jwt)[^}]*\}/i,
+		severity: "info",
+		message: "Storing auth data in IndexedDB — same XSS risk as localStorage",
+		cwe: "CWE-922",
+	},
+
+	// postMessage without origin check
+	{
+		name: "postMessage without origin",
+		pattern: /addEventListener\s*\(\s*["']message["'][^)]*\)\s*(?:=>|\{)(?:(?!origin)[\s\S]){0,200}(?:token|secret|password|auth)/i,
+		severity: "warning",
+		message: "Message handler accesses auth data without origin validation — cross-origin credential leak",
+		cwe: "CWE-346",
+	},
+
 	// Cookie security
 	{
 		name: "cookie without HttpOnly",
@@ -303,6 +357,16 @@ export function runSecurity(cwd: string): CheckResult {
 		}
 	}
 
+	// ── Data storage audit summary ──
+	const storageIssues = issues.filter((i) => i.rule === "CWE-922" || i.rule === "CWE-798" || i.rule === "CWE-1004" || i.rule === "CWE-346");
+	const storageAudit = {
+		localStorageSecrets: issues.filter((i) => i.rule === "CWE-922" && i.message.includes("localStorage")).length,
+		sessionStorageSecrets: issues.filter((i) => i.rule === "CWE-922" && i.message.includes("sessionStorage")).length,
+		hardcodedCredentials: issues.filter((i) => i.rule === "CWE-798").length,
+		insecureCookies: issues.filter((i) => i.rule === "CWE-1004" || i.rule === "CWE-614" || i.rule === "CWE-525").length,
+		total: storageIssues.length,
+	};
+
 	const errors = issues.filter((i) => i.severity === "error").length;
 	const warnings = issues.filter((i) => i.severity === "warning").length;
 	// Errors are critical but scale slightly with codebase size
@@ -315,7 +379,7 @@ export function runSecurity(cwd: string): CheckResult {
 		name: "security",
 		score,
 		grade: gradeFromScore(score),
-		details: { filesScanned: sourceFiles.length, patterns: issues.length, cweCategories: cwePrefixes.size, errors, warnings },
+		details: { filesScanned: sourceFiles.length, patterns: issues.length, cweCategories: cwePrefixes.size, errors, warnings, storageAudit },
 		issues,
 		duration: Date.now() - start,
 	};
