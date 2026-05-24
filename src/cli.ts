@@ -486,18 +486,28 @@ jobs:
 	// 3. Create .vcqa.json if not present
 	const vcqaConfigPath = join(cwd, ".vcqa.json");
 	if (!existsSync(vcqaConfigPath)) {
-		writeFileSync(
-			vcqaConfigPath,
-			JSON.stringify(
-				{
-					checks: {},
-					ignore: [],
-					failUnder: 60,
-				},
-				null,
-				2,
-			) + "\n",
-		);
+		const allCheckNames = [
+			"structure", "lint", "types", "type-safety", "standards",
+			"complexity", "duplication", "error-handling", "react", "accessibility",
+			"docs", "best-practices", "testing",
+			"secrets", "security", "dependencies",
+			"architecture", "performance",
+			"confusion", "context",
+		];
+		const checksConfig: Record<string, Record<string, unknown>> = {};
+		for (const name of allCheckNames) {
+			checksConfig[name] = {};
+		}
+		const config = {
+			_comment: "vcqa config — docs: https://vibecodeqa.online/skills",
+			checks: checksConfig,
+			_checks_help: "Set { \"enabled\": false } to disable. Add \"ignore\": [\"generated/**\"] to skip files per-check.",
+			ignore: [],
+			_ignore_help: "Global file patterns to skip: [\"vendor/**\", \"*.generated.ts\", \"proto/**\"]",
+			failUnder: 60,
+			_failUnder_help: "Exit with code 1 if score below this. Overridden by --fail-under flag.",
+		};
+		writeFileSync(vcqaConfigPath, JSON.stringify(config, null, 2) + "\n");
 		console.log(`  \x1b[32m+\x1b[0m .vcqa.json`);
 		created++;
 	}
