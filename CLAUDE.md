@@ -43,7 +43,7 @@ src/
 │   ├── best-practices.ts  # CI/CD, supply chain, repo hygiene
 │   ├── testing.ts      # Pyramid, execution, coverage (.ts/.dart aware)
 │   ├── secrets.ts      # Delegates to gitleaks, falls back to 14 regex + .env audit
-│   ├── security.ts     # 31 CWE patterns + data storage audit + v-html/\{@html\}
+│   ├── security.ts     # 36 CWE patterns + data storage audit + eslint-plugin-security delegation
 │   ├── dependencies.ts # npm audit / dart pub outdated
 │   ├── architecture.ts # Import graph, cycles, god modules (Vue/Svelte import resolution)
 │   ├── confusion.ts    # Naming ambiguity (Levenshtein, cross-package aware)

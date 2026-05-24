@@ -69,11 +69,11 @@ Output goes to `.vibe-check/`:
 |-------|--------|-----------------|
 | **Complexity** | 5% | Cognitive complexity per function, functions >60 lines |
 | **Duplication** | 5% | Copy-pasted 6+ line blocks |
-| **Error Handling** | 3% | Empty catch blocks, throw string, missing Error Boundaries |
+| **Error Handling** | 3% | Empty catch blocks, throw string, missing Error Boundaries, [error info leakage](https://cheatsheetseries.owasp.org/cheatsheets/Error_Handling_Cheat_Sheet.html) (stack traces sent to client) |
 | **React Patterns** | 3% | Conditional hooks, missing keys, index keys, prop spreading |
 | **Accessibility** | 4% | img alt, click on non-interactive elements, form labels, html lang |
 | **Docs** | 3% | README quality, JSDoc coverage of exports |
-| **Best Practices** | 3% | CI/CD, lockfile, linter config, test scripts, supply chain hygiene (severity-weighted: warnings cost 8pts, infos 2pts) |
+| **Best Practices** | 3% | CI/CD, lockfile, linter config, test scripts, supply chain, [health endpoints](https://nodejs.org/learn/getting-started/security-best-practices), graceful shutdown (severity-weighted: warnings=8pts, infos=2pts) |
 
 ### Testing (15%)
 
@@ -98,7 +98,7 @@ One deep check with 6 sub-dimensions:
 | Check | Weight | What it measures |
 |-------|--------|-----------------|
 | **Secrets** | 6% | 14 patterns (AWS, GitHub, Stripe, OpenAI, Anthropic, Google, private keys) |
-| **Security** | 5% | 31 CWE-mapped patterns (XSS, injection, SSRF, crypto, credential storage, cookie security) |
+| **Security** | 5% | 36 CWE-mapped patterns (XSS, injection, SSRF, CORS, credential storage, cookies, redirects, debug mode). Delegates to [eslint-plugin-security](https://github.com/eslint-community/eslint-plugin-security) when installed |
 | **Dependencies** | 5% | npm audit / dart pub outdated vulnerabilities + outdated packages |
 
 ### AI Readiness (11%)
