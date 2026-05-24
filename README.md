@@ -73,7 +73,7 @@ Output goes to `.vibe-check/`:
 | **React Patterns** | 3% | Conditional hooks, missing keys, index keys, prop spreading |
 | **Accessibility** | 4% | img alt, click on non-interactive elements, form labels, html lang |
 | **Docs** | 3% | README quality, JSDoc coverage of exports |
-| **Best Practices** | 3% | CI/CD, lockfile, linter config, test scripts, supply chain, [health endpoints](https://nodejs.org/learn/getting-started/security-best-practices), graceful shutdown (severity-weighted: warnings=8pts, infos=2pts) |
+| **Best Practices** | 3% | CI/CD, lockfile, linter, test scripts, supply chain, [health endpoints](https://nodejs.org/learn/getting-started/security-best-practices), graceful shutdown, [Helmet.js](https://helmetjs.github.io/), input validation ([Zod](https://zod.dev)/Joi), [GitHub Actions security](https://docs.github.com/en/actions/security) (pwn requests, script injection, permissions). Severity-weighted: warnings=8pts, infos=2pts |
 
 ### Testing (15%)
 
