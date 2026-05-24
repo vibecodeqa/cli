@@ -204,10 +204,90 @@ describe("init command", () => {
 		expect(existsSync(join(TMP, "biome.json"))).toBe(true);
 	});
 
+	it("generates .vcqa.json with all check names listed", () => {
+		run("init .");
+		expect(existsSync(join(TMP, ".vcqa.json"))).toBe(true);
+		const config = JSON.parse(readFileSync(join(TMP, ".vcqa.json"), "utf-8"));
+		// Should list all 20 scorable checks
+		expect(Object.keys(config.checks)).toContain("structure");
+		expect(Object.keys(config.checks)).toContain("testing");
+		expect(Object.keys(config.checks)).toContain("security");
+		expect(Object.keys(config.checks)).toContain("confusion");
+		expect(Object.keys(config.checks)).toContain("context");
+		expect(Object.keys(config.checks).length).toBe(20);
+		// Should have help fields
+		expect(config._comment).toContain("vibecodeqa.online");
+		expect(config._checks_help).toContain("enabled");
+		expect(config._ignore_help).toContain("vendor");
+		expect(config.failUnder).toBe(60);
+	});
+
+	it("does not overwrite existing .vcqa.json", () => {
+		writeFileSync(join(TMP, ".vcqa.json"), '{"failUnder":99}');
+		run("init .");
+		const config = JSON.parse(readFileSync(join(TMP, ".vcqa.json"), "utf-8"));
+		expect(config.failUnder).toBe(99);
+	});
+
+	it("generated .vcqa.json is valid for the config loader", () => {
+		run("init .");
+		const out = run("--skip-tests --json .");
+		const report = JSON.parse(out);
+		// Config should load without error and not disable any checks
+		expect(report.checks.length).toBe(22);
+		const disabled = report.checks.filter((c: any) => c.details.reason === "disabled in config");
+		expect(disabled).toHaveLength(0);
+	}, 30_000);
+
 	it("validates path", () => {
 		const out = execSync(`node ${CLI} init /nonexistent 2>&1 || true`, { encoding: "utf-8" });
 		expect(out).toContain("does not exist");
 	});
+});
+
+describe("config disabling checks", () => {
+	it("disabled checks are excluded from scoring", () => {
+		writeFileSync(
+			join(TMP, ".vcqa.json"),
+			JSON.stringify({ checks: { confusion: { enabled: false }, context: { enabled: false } } }),
+		);
+		const out = run("--skip-tests --json .");
+		const report = JSON.parse(out);
+		const confusion = report.checks.find((c: any) => c.name === "confusion");
+		const context = report.checks.find((c: any) => c.name === "context");
+		expect(confusion.details.skipped).toBe(true);
+		expect(context.details.skipped).toBe(true);
+		// Score should be computed without these checks
+		expect(report.score).toBeGreaterThan(0);
+	}, 30_000);
+
+	it("per-check ignore filters issues from matching files", () => {
+		writeFileSync(join(TMP, "src", "gen.ts"), 'eval("bad");\n');
+		writeFileSync(
+			join(TMP, ".vcqa.json"),
+			JSON.stringify({ checks: { security: { ignore: ["src/gen.ts"] } } }),
+		);
+		const out = run("--skip-tests --json .");
+		const report = JSON.parse(out);
+		const sec = report.checks.find((c: any) => c.name === "security");
+		// The eval issue in src/gen.ts should be filtered out
+		const genIssues = sec.issues.filter((i: any) => i.file === "src/gen.ts");
+		expect(genIssues).toHaveLength(0);
+	}, 30_000);
+
+	it("global ignore skips files from scanning", () => {
+		mkdirSync(join(TMP, "src", "vendor"), { recursive: true });
+		writeFileSync(join(TMP, "src", "vendor", "lib.ts"), 'eval("bad"); console.log("debug");\n');
+		writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ ignore: ["src/vendor/**"] }));
+		const out = run("--skip-tests --json .");
+		const report = JSON.parse(out);
+		// No issues should reference src/vendor/
+		for (const c of report.checks) {
+			for (const i of c.issues) {
+				if (i.file) expect(i.file).not.toContain("vendor/lib.ts");
+			}
+		}
+	}, 30_000);
 });
 
 describe("fix command", () => {
