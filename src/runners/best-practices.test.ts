@@ -159,6 +159,55 @@ describe("runBestPractices", () => {
 		rmSync(dir, { recursive: true });
 	});
 
+	it("flags pull_request_target with checkout (pwn request)", () => {
+		const dir = makeProject({
+			"package.json": "{}",
+			".github/workflows/ci.yml": [
+				"name: CI",
+				"on: pull_request_target",
+				"jobs:",
+				"  test:",
+				"    runs-on: ubuntu-latest",
+				"    steps:",
+				"      - uses: actions/checkout@v4",
+				"        with:",
+				"          ref: ${{ github.event.pull_request.head.sha }}",
+			].join("\n"),
+		});
+		const result = runBestPractices(dir);
+		expect(result.issues.some((i) => i.rule === "pwn-request")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("flags script injection in run blocks", () => {
+		const dir = makeProject({
+			"package.json": "{}",
+			".github/workflows/greet.yml": [
+				"name: Greet",
+				"on: issues",
+				"permissions: { contents: read }",
+				"jobs:",
+				"  greet:",
+				"    runs-on: ubuntu-latest",
+				"    steps:",
+				"      - run: echo \"Hello ${{ github.event.issue.title }}\"",
+			].join("\n"),
+		});
+		const result = runBestPractices(dir);
+		expect(result.issues.some((i) => i.rule === "gha-script-injection")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("flags write-all permissions", () => {
+		const dir = makeProject({
+			"package.json": "{}",
+			".github/workflows/ci.yml": "name: CI\non: push\npermissions: write-all\njobs:\n  test:\n    runs-on: ubuntu-latest\n",
+		});
+		const result = runBestPractices(dir);
+		expect(result.issues.some((i) => i.rule === "write-all-permissions")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
 	it("produces a score between 0-100", () => {
 		const dir = makeProject({ "package.json": "{}" });
 		const result = runBestPractices(dir);

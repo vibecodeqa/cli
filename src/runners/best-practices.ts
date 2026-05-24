@@ -93,6 +93,89 @@ function checkCICD(cwd: string, has: HasFn, read: ReadFn): CategoryResult {
 					rule: "frozen-lockfile-ci",
 				});
 			}
+
+			// Check: pull_request_target with checkout (pwn request vulnerability)
+			if (content.includes("pull_request_target")) {
+				const checksOutPR =
+					/actions\/checkout.*ref.*\$\{\{.*github\.event\.pull_request/s.test(content) ||
+					/actions\/checkout.*ref.*\$\{\{.*head/s.test(content);
+				if (checksOutPR) {
+					issues.push({
+						severity: "error",
+						message: `${wf}: pull_request_target + checkout of PR code — allows fork PRs to steal secrets. Use pull_request instead`,
+						file: `.github/workflows/${wf}`,
+						rule: "pwn-request",
+					});
+				}
+			}
+
+			// Check: script injection via untrusted input
+			const injectionPatterns = [
+				/\$\{\{\s*github\.event\.issue\.title\s*\}\}/,
+				/\$\{\{\s*github\.event\.issue\.body\s*\}\}/,
+				/\$\{\{\s*github\.event\.pull_request\.title\s*\}\}/,
+				/\$\{\{\s*github\.event\.pull_request\.body\s*\}\}/,
+				/\$\{\{\s*github\.event\.comment\.body\s*\}\}/,
+				/\$\{\{\s*github\.head_ref\s*\}\}/,
+			];
+			for (const pat of injectionPatterns) {
+				if (pat.test(content)) {
+					// Only flag if used in run: blocks (not just if: conditions)
+					const lines = content.split("\n");
+					for (let li = 0; li < lines.length; li++) {
+						const trimLine = lines[li].trim();
+						if (trimLine.startsWith("run:") || trimLine.startsWith("run :") || trimLine.startsWith("- run:") || trimLine.startsWith("- run :")) {
+							const runBlock = lines.slice(li, Math.min(li + 10, lines.length)).join("\n");
+							if (pat.test(runBlock)) {
+								issues.push({
+									severity: "error",
+									message: `${wf}: script injection — untrusted input used in run: block. Use an environment variable instead`,
+									file: `.github/workflows/${wf}`,
+									line: li + 1,
+									rule: "gha-script-injection",
+								});
+								break;
+							}
+						}
+					}
+				}
+			}
+
+			// Check: write-all permissions (overly broad)
+			if (/permissions:\s*write-all/.test(content)) {
+				issues.push({
+					severity: "warning",
+					message: `${wf}: permissions: write-all grants full access — use granular permissions (contents: read, etc.)`,
+					file: `.github/workflows/${wf}`,
+					rule: "write-all-permissions",
+				});
+			}
+
+			// Check: secrets in workflow env (exposed to all steps)
+			const envSecrets = content.match(/env:\s*\n(?:\s+\w+:\s*\$\{\{\s*secrets\.\w+\s*\}\}\s*\n)+/g);
+			if (envSecrets) {
+				const isTopLevel = content.indexOf(envSecrets[0]) < (content.indexOf("jobs:") || content.length);
+				if (isTopLevel) {
+					issues.push({
+						severity: "warning",
+						message: `${wf}: secrets in top-level env — exposed to all jobs/steps. Move secrets to the step that needs them`,
+						file: `.github/workflows/${wf}`,
+						rule: "secrets-in-global-env",
+					});
+				}
+			}
+
+			// Check: self-hosted runner without hardening
+			if (content.includes("self-hosted")) {
+				if (!content.includes("container:") && !content.includes("docker")) {
+					issues.push({
+						severity: "info",
+						message: `${wf}: self-hosted runner without container isolation — consider using container: for untrusted code`,
+						file: `.github/workflows/${wf}`,
+						rule: "self-hosted-no-container",
+					});
+				}
+			}
 		}
 	} else {
 		issues.push({
