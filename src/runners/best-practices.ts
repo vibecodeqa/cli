@@ -463,6 +463,41 @@ function checkMonitoring(cwd: string): CategoryResult {
 			});
 		}
 
+		// Security headers middleware (Helmet.js)
+		practices++;
+		if (deps.helmet || deps["@fastify/helmet"]) {
+			followed++;
+		} else {
+			// Check if security headers are set manually
+			const allFilesCached = allFiles;
+			const hasManualHeaders = allFilesCached.some(
+				(f) =>
+					/X-Content-Type-Options|X-Frame-Options|Strict-Transport-Security|Content-Security-Policy/.test(f.content) &&
+					/setHeader|set\s*\(|headers/.test(f.content),
+			);
+			if (hasManualHeaders) {
+				followed++;
+			} else {
+				issues.push({
+					severity: "warning",
+					message: "No security headers middleware (Helmet.js) — missing X-Content-Type-Options, X-Frame-Options, HSTS",
+					rule: "no-helmet",
+				});
+			}
+		}
+
+		// Input validation framework
+		practices++;
+		if (deps.zod || deps.joi || deps.yup || deps["class-validator"] || deps.ajv || deps.superstruct || deps.valibot) {
+			followed++;
+		} else {
+			issues.push({
+				severity: "warning",
+				message: "No input validation library (Zod/Joi/Yup/Valibot) — API inputs should be validated before use",
+				rule: "no-input-validation",
+			});
+		}
+
 		// Graceful shutdown handler
 		practices++;
 		const hasShutdown = allFiles.some(

@@ -115,6 +115,11 @@ export function runStructure(cwd: string, stack: StackInfo, workspace?: Workspac
 			}
 			if (!scripts.build && !scripts.dev && !workspace?.isMonorepo)
 				issues.push({ severity: "info", message: "No 'build' or 'dev' script in package.json", rule: "no-build-script" });
+			// Server projects should have a start script
+			const isServer = pkg.dependencies && (pkg.dependencies.express || pkg.dependencies.fastify || pkg.dependencies.hono || pkg.dependencies.koa);
+			if (isServer && !scripts.start && !workspace?.isMonorepo) {
+				issues.push({ severity: "info", message: "Server project with no 'start' script in package.json", rule: "no-start-script" });
+			}
 		} catch {
 			/* no package.json or parse error */
 		}

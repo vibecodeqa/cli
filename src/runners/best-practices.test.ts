@@ -109,6 +109,46 @@ describe("runBestPractices", () => {
 		rmSync(dir, { recursive: true });
 	});
 
+	it("flags missing Helmet.js for server projects", () => {
+		const dir = makeProject({
+			"package.json": JSON.stringify({ dependencies: { express: "^4" } }),
+			"src/index.ts": 'import express from "express";\nconst app = express();\napp.listen(3000);\n',
+		});
+		const result = runBestPractices(dir);
+		expect(result.issues.some((i) => i.rule === "no-helmet")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("credits Helmet.js when installed", () => {
+		const dir = makeProject({
+			"package.json": JSON.stringify({ dependencies: { express: "^4", helmet: "^7" } }),
+			"src/index.ts": 'import express from "express";\nconst app = express();\napp.listen(3000);\n',
+		});
+		const result = runBestPractices(dir);
+		expect(result.issues.some((i) => i.rule === "no-helmet")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("flags missing input validation for API projects", () => {
+		const dir = makeProject({
+			"package.json": JSON.stringify({ dependencies: { express: "^4" } }),
+			"src/index.ts": 'import express from "express";\nconst app = express();\napp.listen(3000);\n',
+		});
+		const result = runBestPractices(dir);
+		expect(result.issues.some((i) => i.rule === "no-input-validation")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("credits Zod when installed", () => {
+		const dir = makeProject({
+			"package.json": JSON.stringify({ dependencies: { express: "^4", zod: "^3" } }),
+			"src/index.ts": 'import express from "express";\nconst app = express();\napp.listen(3000);\n',
+		});
+		const result = runBestPractices(dir);
+		expect(result.issues.some((i) => i.rule === "no-input-validation")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
 	it("credits health endpoint when present", () => {
 		const dir = makeProject({
 			"package.json": JSON.stringify({ dependencies: { express: "^4" } }),
