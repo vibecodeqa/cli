@@ -2,7 +2,7 @@
 
 **Code health scanner for the AI coding era.**
 
-One command. 22 checks. Full report. Zero config.
+One command. 23 checks. Full report. Zero config.
 
 ```bash
 npx @vibecodeqa/cli
@@ -99,7 +99,7 @@ One deep check with 6 sub-dimensions:
 |-------|--------|-----------------|
 | **Secrets** | 6% | 14 patterns (AWS, GitHub, Stripe, OpenAI, Anthropic, Google, private keys) |
 | **Security** | 5% | 36 CWE-mapped patterns (XSS, injection, SSRF, CORS, credential storage, cookies, redirects, debug mode). Delegates to [eslint-plugin-security](https://github.com/eslint-community/eslint-plugin-security) when installed |
-| **Dependencies** | 5% | npm audit / dart pub outdated vulnerabilities + outdated packages |
+| **Dependencies** | 5% | npm audit vulnerabilities, outdated packages, [license compliance](https://www.npmjs.com/package/license-checker) (GPL/AGPL/copyleft detection) |
 
 ### AI Readiness (11%)
 
@@ -116,6 +116,7 @@ Novel checks that no other tool offers:
 |-------|-----------------|
 | **Doc Coherence** | LLM-powered detection of contradictions between docs and code (JSDoc mismatch, stale README refs) |
 | **Code Coherence** | LLM-powered detection of internal inconsistencies (mixed error patterns, duplicate exports) |
+| **Comment Staleness** | Stale TODOs (>6 months), numeric mismatches ("3 cases" but 5 exist), commented-out code blocks, @deprecated without replacement |
 
 ## Scoring
 
