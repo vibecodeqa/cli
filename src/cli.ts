@@ -13,6 +13,7 @@ import { runAccessibility } from "./runners/accessibility.js";
 import { runArchitecture } from "./runners/architecture.js";
 import { runBestPractices } from "./runners/best-practices.js";
 import { runCodeCoherence } from "./runners/code-coherence.js";
+import { runCommentStaleness } from "./runners/comment-staleness.js";
 import { runComplexity } from "./runners/complexity.js";
 import { runConfusion } from "./runners/confusion.js";
 import { runContext } from "./runners/context.js";
@@ -160,6 +161,7 @@ function runChecks(
 		// AI Analysis (premium)
 		{ name: "doc-coherence", fn: () => runDocCoherence(cwd) },
 		{ name: "code-coherence", fn: () => runCodeCoherence(cwd) },
+		{ name: "comment-staleness", fn: () => runCommentStaleness(cwd) },
 	];
 
 	const checks: CheckResult[] = [];
@@ -492,7 +494,7 @@ jobs:
 			"docs", "best-practices", "testing",
 			"secrets", "security", "dependencies",
 			"architecture", "performance",
-			"confusion", "context",
+			"confusion", "context", "comment-staleness",
 		];
 		const checksConfig: Record<string, Record<string, unknown>> = {};
 		for (const name of allCheckNames) {

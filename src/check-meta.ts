@@ -294,6 +294,19 @@ export const CHECK_META: Record<string, CheckMeta> = {
 			"Enable code-coherence with a VibeCode QA Pro subscription. The LLM analyzes cross-module patterns and surfaces behavioral contradictions that static analysis cannot detect.",
 		premium: true,
 	},
+	"comment-staleness": {
+		name: "comment-staleness",
+		label: "Comment Staleness",
+		category: "AI Analysis",
+		priority: "medium",
+		weight: 0,
+		description:
+			"Detects stale comments: TODOs older than 6 months, numeric claims that don't match code (\"handles 3 cases\" but switch has 5), commented-out code blocks, and @deprecated without replacement. LLM-powered semantic mismatch detection with Pro.",
+		risk: "Stale comments mislead developers and AI agents. A TODO from 2024 wastes attention. A comment saying '3 cases' when there are 5 causes readers to miss branches. Commented-out code blocks signal incomplete refactoring and confuse LLM context windows.",
+		recommendation:
+			"Delete TODOs that won't be done — create issues instead. Delete commented-out code (it's in git history). Update numeric claims when adding branches. Add replacement info to @deprecated.",
+		premium: true,
+	},
 };
 
 export function getCheckMeta(name: string): CheckMeta {

@@ -1,5 +1,7 @@
-/** Dependency health — vulnerabilities, outdated packages. */
+/** Dependency health — vulnerabilities, outdated packages, license compliance. */
 
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { CheckResult, Issue, StackInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
@@ -120,12 +122,42 @@ export function runDependencies(cwd: string, stack: StackInfo): CheckResult {
 		}
 	}
 
+	// ── License compliance audit ──
+	const licenseAudit = auditLicenses(cwd);
+	let copyleftCount = 0;
+	let unknownLicenseCount = 0;
+	if (licenseAudit) {
+		for (const finding of licenseAudit) {
+			if (finding.type === "copyleft") {
+				copyleftCount++;
+				issues.push({
+					severity: "warning",
+					message: `${finding.name}@${finding.version}: ${finding.license} — copyleft license, may require source disclosure`,
+					rule: "copyleft-license",
+				});
+			} else if (finding.type === "unknown") {
+				unknownLicenseCount++;
+				issues.push({
+					severity: "info",
+					message: `${finding.name}@${finding.version}: license unknown — verify manually`,
+					rule: "unknown-license",
+				});
+			}
+		}
+		if (copyleftCount > 5) {
+			// Truncate to avoid noise
+			const excess = copyleftCount - 5;
+			issues.push({ severity: "info", message: `...and ${excess} more copyleft dependencies`, rule: "copyleft-license" });
+		}
+	}
+
 	// Score: harsh on critical/high, with diminishing returns for many vulns
 	const critPenalty = Math.min(50, vulnCritical * 20);
 	const highPenalty = Math.min(30, vulnHigh * 10);
 	const modPenalty = Math.min(15, vulnModerate * 3);
 	const outdatedPenalty = Math.min(10, majorOutdated);
-	const score = Math.max(0, Math.min(100, Math.round(100 - critPenalty - highPenalty - modPenalty - outdatedPenalty)));
+	const licensePenalty = Math.min(15, copyleftCount * 5);
+	const score = Math.max(0, Math.min(100, Math.round(100 - critPenalty - highPenalty - modPenalty - outdatedPenalty - licensePenalty)));
 
 	return {
 		name: "dependencies",
@@ -140,8 +172,100 @@ export function runDependencies(cwd: string, stack: StackInfo): CheckResult {
 			},
 			outdated: outdatedCount,
 			majorOutdated,
+			licenses: licenseAudit ? { copyleft: copyleftCount, unknown: unknownLicenseCount } : undefined,
 		},
 		issues,
 		duration: Date.now() - start,
 	};
+}
+
+// ── License compliance ──
+
+const COPYLEFT_LICENSES = new Set([
+	"GPL-2.0", "GPL-2.0-only", "GPL-2.0-or-later",
+	"GPL-3.0", "GPL-3.0-only", "GPL-3.0-or-later",
+	"AGPL-1.0", "AGPL-3.0", "AGPL-3.0-only", "AGPL-3.0-or-later",
+	"LGPL-2.0", "LGPL-2.1", "LGPL-3.0",
+	"MPL-2.0", "EUPL-1.1", "EUPL-1.2",
+	"SSPL-1.0", "CPAL-1.0", "OSL-3.0",
+]);
+
+const PERMISSIVE_LICENSES = new Set([
+	"MIT", "ISC", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0",
+	"CC0-1.0", "Unlicense", "0BSD", "BlueOak-1.0.0", "Zlib",
+]);
+
+interface LicenseFinding {
+	name: string;
+	version: string;
+	license: string;
+	type: "copyleft" | "unknown";
+}
+
+function auditLicenses(cwd: string): LicenseFinding[] | null {
+	const nodeModules = join(cwd, "node_modules");
+	if (!existsSync(nodeModules)) return null;
+
+	const findings: LicenseFinding[] = [];
+	const seen = new Set<string>();
+
+	// Scan top-level node_modules (direct deps)
+	let entries: string[];
+	try {
+		entries = readdirSync(nodeModules);
+	} catch {
+		return null;
+	}
+
+	for (const entry of entries) {
+		if (entry.startsWith(".")) continue;
+
+		// Handle scoped packages (@org/pkg)
+		if (entry.startsWith("@")) {
+			try {
+				for (const sub of readdirSync(join(nodeModules, entry))) {
+					checkPackageLicense(join(nodeModules, entry, sub), `${entry}/${sub}`, findings, seen);
+				}
+			} catch { /* skip */ }
+		} else {
+			checkPackageLicense(join(nodeModules, entry), entry, findings, seen);
+		}
+	}
+
+	return findings;
+}
+
+function checkPackageLicense(pkgDir: string, name: string, findings: LicenseFinding[], seen: Set<string>): void {
+	if (seen.has(name)) return;
+	seen.add(name);
+
+	const pkgJsonPath = join(pkgDir, "package.json");
+	if (!existsSync(pkgJsonPath)) return;
+
+	try {
+		const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
+		const version = pkg.version || "?";
+		let license = pkg.license || "";
+
+		// Handle { type: "MIT" } format
+		if (typeof license === "object" && license.type) license = license.type;
+		if (!license && pkg.licenses) {
+			// Handle array format [{ type: "MIT" }]
+			license = Array.isArray(pkg.licenses) ? pkg.licenses.map((l: any) => l.type || l).join(" OR ") : "";
+		}
+
+		if (!license || license === "UNLICENSED") return; // private package
+		if (PERMISSIVE_LICENSES.has(license)) return; // all good
+
+		// Check for copyleft
+		const normalized = license.replace(/\s+/g, "");
+		if (COPYLEFT_LICENSES.has(normalized) || /GPL|AGPL|SSPL/i.test(license)) {
+			findings.push({ name, version, license, type: "copyleft" });
+		} else if (!PERMISSIVE_LICENSES.has(normalized) && !/^\(.*\)$/.test(license)) {
+			// Unknown/uncommon license (skip SPDX expressions like "(MIT OR Apache-2.0)")
+			findings.push({ name, version, license, type: "unknown" });
+		}
+	} catch {
+		/* can't read package.json */
+	}
 }
