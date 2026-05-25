@@ -151,6 +151,33 @@ export function runCommentStaleness(cwd: string): CheckResult {
 		}
 	}
 
+	// ── Collect comment+code pairs for LLM analysis (via --upload) ──
+	const commentPairs: { file: string; line: number; comment: string; code: string }[] = [];
+	if (proKey) {
+		for (const f of files) {
+			const lines = f.content.split("\n");
+			for (let i = 0; i < lines.length; i++) {
+				const trimmed = lines[i].trim();
+				if ((trimmed.startsWith("/**") || trimmed.startsWith("//")) && i < lines.length - 2) {
+					let commentEnd = i;
+					let comment = trimmed;
+					if (trimmed.startsWith("/**")) {
+						for (let j = i; j < Math.min(i + 15, lines.length); j++) {
+							comment += "\n" + lines[j];
+							if (lines[j].includes("*/")) { commentEnd = j; break; }
+						}
+					}
+					const nextLines = lines.slice(commentEnd + 1, Math.min(commentEnd + 4, lines.length)).join("\n");
+					const funcMatch = nextLines.match(/(?:export\s+)?(?:async\s+)?function\s+(\w+)|(?:export\s+)?(?:const|let)\s+(\w+)\s*=.*=>/);
+					if (funcMatch && comment.length > 15 && comment.length < 500) {
+						const funcBody = lines.slice(commentEnd + 1, Math.min(commentEnd + 21, lines.length)).join("\n");
+						commentPairs.push({ file: f.path, line: i + 1, comment: comment.slice(0, 300), code: funcBody.slice(0, 500) });
+					}
+				}
+			}
+		}
+	}
+
 	const score = issues.length === 0 ? 100 : Math.max(20, 100 - staleCount * 8 - (issues.length - staleCount) * 2);
 
 	return {
@@ -162,9 +189,11 @@ export function runCommentStaleness(cwd: string): CheckResult {
 			filesScanned: files.length,
 			totalComments,
 			staleComments: staleCount,
-			tool: "pro-local",
+			tool: proKey ? "pro-local+llm" : "pro-local",
+			commentPairsForLLM: commentPairs.length > 0 ? commentPairs.slice(0, 10) : undefined,
 		},
 		issues,
 		duration: Date.now() - start,
 	};
 }
+

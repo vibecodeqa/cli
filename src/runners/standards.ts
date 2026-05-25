@@ -131,14 +131,17 @@ export function runStandards(cwd: string, stack: StackInfo): CheckResult {
 	}
 
 	// ── Config hygiene ──
-	// tsconfig strict mode
+	// tsconfig maturity
 	if (stack.language === "typescript") {
 		const tsconfigPaths = ["tsconfig.json", "tsconfig.app.json", "tsconfig.base.json"];
 		let strictFound = false;
+		let compilerOpts: Record<string, unknown> = {};
 		for (const p of tsconfigPaths) {
 			try {
-				const tsconfig = JSON.parse(readFileSync(join(cwd, p), "utf-8"));
+				const raw = readFileSync(join(cwd, p), "utf-8");
+				const tsconfig = JSON.parse(raw.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, ""));
 				if (tsconfig.compilerOptions?.strict === true) strictFound = true;
+				if (tsconfig.compilerOptions) compilerOpts = { ...compilerOpts, ...tsconfig.compilerOptions };
 			} catch {
 				/* no tsconfig */
 			}
@@ -149,6 +152,30 @@ export function runStandards(cwd: string, stack: StackInfo): CheckResult {
 				message: 'TypeScript strict mode not enabled — add "strict": true to tsconfig',
 				rule: "ts-strict",
 			});
+		}
+		// Additional maturity flags (info — recommended, not required)
+		if (strictFound) {
+			if (!compilerOpts.noUncheckedIndexedAccess) {
+				issues.push({
+					severity: "info",
+					message: "Enable noUncheckedIndexedAccess — array/object index access returns T | undefined, catches real bugs",
+					rule: "ts-maturity",
+				});
+			}
+			if (!compilerOpts.verbatimModuleSyntax && !compilerOpts.isolatedModules) {
+				issues.push({
+					severity: "info",
+					message: "Enable verbatimModuleSyntax — enforces explicit type-only imports, better for bundlers",
+					rule: "ts-maturity",
+				});
+			}
+			if (!compilerOpts.skipLibCheck) {
+				issues.push({
+					severity: "info",
+					message: "Enable skipLibCheck — faster builds, skip type-checking .d.ts files from node_modules",
+					rule: "ts-maturity",
+				});
+			}
 		}
 	}
 
