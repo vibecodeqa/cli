@@ -79,6 +79,26 @@ describe("runStandards", () => {
 		rmSync(dir, { recursive: true });
 	});
 
+	it("suggests noUncheckedIndexedAccess when strict is enabled", () => {
+		const { dir, stack } = makeProject({
+			"src/app.ts": "export const x = 1;\n",
+			"tsconfig.json": '{"compilerOptions":{"strict":true}}',
+		});
+		const result = runStandards(dir, stack);
+		expect(result.issues.some((i) => i.rule === "ts-maturity" && i.message.includes("noUncheckedIndexedAccess"))).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("does not suggest maturity flags when strict is off", () => {
+		const { dir, stack } = makeProject({
+			"src/app.ts": "export const x = 1;\n",
+			"tsconfig.json": '{"compilerOptions":{}}',
+		});
+		const result = runStandards(dir, stack);
+		expect(result.issues.some((i) => i.rule === "ts-maturity")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
 	it("handles empty project gracefully", () => {
 		const { dir, stack } = makeProject({});
 		const result = runStandards(dir, stack);

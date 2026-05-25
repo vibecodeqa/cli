@@ -118,9 +118,9 @@ export function runCommentStaleness(cwd: string): CheckResult {
 			// ── Numeric claims in comments ──
 			if (trimmed.startsWith("//")) {
 				const numClaim = trimmed.match(/\/\/.*\b(\d+)\s+(?:cases?|options?|steps?|types?|variants?|modes?|states?)\b/i);
-				if (numClaim && i < lines.length - 20) {
+				if (numClaim && i < lines.length - 3) {
 					const claimed = parseInt(numClaim[1], 10);
-					// Look for switch/if-else chains below
+					// Look for switch/if-else chains below (up to 30 lines)
 					const block = lines.slice(i + 1, Math.min(i + 30, lines.length)).join("\n");
 					const caseCount = (block.match(/\bcase\s+/g) || []).length;
 					const ifCount = (block.match(/\belse\s+if\b/g) || []).length + (block.match(/^\s*if\s*\(/gm) || []).length;
