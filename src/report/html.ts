@@ -15,7 +15,7 @@ import { getCheckMeta } from "../check-meta.js";
 import type { CheckResult, VibeReport } from "../types.js";
 import { det, e, fileLink, gc } from "./components.js";
 import { FAVICON_SVG } from "./favicon.js";
-import { type CatScore, categoryPage, filesPage, issuesPage, overviewPage, trendsPage } from "./pages.js";
+import { type CatScore, categoryPage, featureMapPage, filesPage, issuesPage, overviewPage, trendsPage } from "./pages.js";
 import { CSS } from "./styles.js";
 
 export const GROUPS: { id: string; label: string; file: string; checks: string[] }[] = [
@@ -30,7 +30,7 @@ export const GROUPS: { id: string; label: string; file: string; checks: string[]
 	{ id: "arch", label: "Architecture", file: "architecture.html", checks: ["architecture", "performance"] },
 	{ id: "security", label: "Security", file: "security.html", checks: ["secrets", "security", "dependencies"] },
 	{ id: "llm", label: "AI Readiness", file: "ai-readiness.html", checks: ["confusion", "context"] },
-	{ id: "ai", label: "AI Analysis", file: "ai-analysis.html", checks: ["doc-coherence", "code-coherence"] },
+	{ id: "ai", label: "AI Analysis", file: "ai-analysis.html", checks: ["doc-coherence", "code-coherence", "comment-staleness", "dead-patterns"] },
 ];
 
 export function generatePages(report: VibeReport, historyDir?: string): Map<string, string> {
@@ -112,6 +112,10 @@ export function generatePages(report: VibeReport, historyDir?: string): Map<stri
 		pages.set(g.file, w(g.id, categoryPage(cs, fl, allChecks)));
 	}
 
+	// Feature Map (Pro page — reads dead-patterns check details)
+	const deadPatternsCheck = checkMap.get("dead-patterns");
+	pages.set("feature-map.html", w("feature-map", featureMapPage(deadPatternsCheck, fl)));
+
 	pages.set("issues.html", w("issues", issuesPage(allChecks, totalIssues, fl)));
 	pages.set("files.html", w("files", filesPage(topFiles, fileIssues, fl)));
 	pages.set("trends.html", w("trends", trendsPage(historyDir)));
@@ -141,6 +145,7 @@ function wrap(proj: string, currentId: string, report: VibeReport, totalIssues: 
 	const navItems = [
 		{ id: "overview", label: "Overview", file: "index.html" },
 		{ id: "checks", label: "Checks", file: GROUPS[0].file, active: isCheckPage },
+		{ id: "feature-map", label: "Feature Map", file: "feature-map.html" },
 		{ id: "trends", label: "Trends", file: "trends.html" },
 		{ id: "issues", label: `Issues (${totalIssues})`, file: "issues.html" },
 		{ id: "files", label: "Files", file: "files.html" },
@@ -169,6 +174,20 @@ function wrap(proj: string, currentId: string, report: VibeReport, totalIssues: 
   <span class="nav-project">${e(proj)}</span>
   <button class="hamburger" onclick="toggleMenu()" aria-label="Menu">&#9776;</button>
   <div class="nav-scroll">${nav}</div>
+  <button class="prefs-btn" onclick="togglePrefs()" aria-label="Preferences">Aa</button>
+  <div class="prefs-panel" id="prefs">
+    <div class="prefs-label">Theme</div>
+    <div class="prefs-row">
+      <button class="prefs-opt" data-theme-opt="dark" onclick="setTheme('dark')">Dark</button>
+      <button class="prefs-opt" data-theme-opt="light" onclick="setTheme('light')">Light</button>
+    </div>
+    <div class="prefs-label">Font size</div>
+    <div class="prefs-row">
+      <button class="prefs-opt" data-font-opt="14" onclick="setFont(14)">Compact</button>
+      <button class="prefs-opt" data-font-opt="17" onclick="setFont(17)">Default</button>
+      <button class="prefs-opt" data-font-opt="20" onclick="setFont(20)">Large</button>
+    </div>
+  </div>
 </nav>
 
 <aside class="side" id="sidebar">${sidebar}</aside>
@@ -196,6 +215,39 @@ document.addEventListener('click',function(ev){
   try{navigator.clipboard.writeText(text)}catch(e){const ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta)}
   btn.textContent='\\u2713';setTimeout(function(){btn.textContent='\\ud83d\\udccb'},1000);
 });
+/* Preferences */
+function togglePrefs(){document.getElementById('prefs').classList.toggle('open')}
+function setTheme(t){
+  document.documentElement.setAttribute('data-theme',t);
+  try{localStorage.setItem('vcqa-theme',t)}catch(e){}
+  updPrefsUI();
+}
+function setFont(s){
+  document.documentElement.style.fontSize=s+'px';
+  try{localStorage.setItem('vcqa-font',s)}catch(e){}
+  updPrefsUI();
+}
+function updPrefsUI(){
+  var t;try{t=localStorage.getItem('vcqa-theme')}catch(e){}
+  t=t||'dark';
+  document.querySelectorAll('[data-theme-opt]').forEach(function(b){b.classList.toggle('active',b.dataset.themeOpt===t)});
+  var f;try{f=localStorage.getItem('vcqa-font')}catch(e){}
+  f=f||'17';
+  document.querySelectorAll('[data-font-opt]').forEach(function(b){b.classList.toggle('active',b.dataset.fontOpt===f)});
+}
+/* Apply saved prefs on load */
+(function(){
+  var t;try{t=localStorage.getItem('vcqa-theme')}catch(e){}
+  if(t)document.documentElement.setAttribute('data-theme',t);
+  var f;try{f=localStorage.getItem('vcqa-font')}catch(e){}
+  if(f)document.documentElement.style.fontSize=f+'px';
+  updPrefsUI();
+  /* Close prefs panel on outside click */
+  document.addEventListener('click',function(ev){
+    var p=document.getElementById('prefs');
+    if(p.classList.contains('open')&&!ev.target.closest('.prefs-panel')&&!ev.target.closest('.prefs-btn'))p.classList.remove('open');
+  });
+})();
 </script>
 </body></html>`;
 }

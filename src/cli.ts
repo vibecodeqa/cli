@@ -15,6 +15,7 @@ import { runBestPractices } from "./runners/best-practices.js";
 import { runCodeCoherence } from "./runners/code-coherence.js";
 import { runCommentStaleness } from "./runners/comment-staleness.js";
 import { runComplexity } from "./runners/complexity.js";
+import { runDeadPatterns } from "./runners/dead-patterns.js";
 import { runConfusion } from "./runners/confusion.js";
 import { runContext } from "./runners/context.js";
 import { runDependencies } from "./runners/dependencies.js";
@@ -121,7 +122,7 @@ function color(grade: string): string {
 	return "\x1b[31m";
 }
 
-function runChecks(
+async function runChecks(
 	cwd: string,
 	stack: ReturnType<typeof detectStack>,
 	workspace: WorkspaceInfo,
@@ -129,9 +130,9 @@ function runChecks(
 	isDart: boolean,
 	jsonOnly: boolean,
 	config?: VcqaConfig,
-): CheckResult[] {
+): Promise<CheckResult[]> {
 	const srcRoots = workspace.isMonorepo ? workspace.srcRoots : undefined;
-	const runners: { name: string; fn: () => CheckResult }[] = [
+	const runners: { name: string; fn: () => CheckResult | Promise<CheckResult> }[] = [
 		// Foundations
 		{ name: "structure", fn: () => runStructure(cwd, stack, workspace) },
 		{ name: "lint", fn: () => runLint(cwd, stack, workspace) },
@@ -162,6 +163,7 @@ function runChecks(
 		{ name: "doc-coherence", fn: () => runDocCoherence(cwd) },
 		{ name: "code-coherence", fn: () => runCodeCoherence(cwd) },
 		{ name: "comment-staleness", fn: () => runCommentStaleness(cwd) },
+		{ name: "dead-patterns", fn: () => runDeadPatterns(cwd) },
 	];
 
 	const checks: CheckResult[] = [];
@@ -182,7 +184,8 @@ function runChecks(
 		if (!jsonOnly) process.stdout.write(`  ${runner.name.padEnd(14)}`);
 		let result: CheckResult;
 		try {
-			result = runner.fn();
+			const maybeResult = runner.fn();
+			result = maybeResult instanceof Promise ? await maybeResult : maybeResult;
 		} catch (err) {
 			// Runner crashed — record as errored, don't kill the scan
 			result = {
@@ -494,7 +497,7 @@ jobs:
 			"docs", "best-practices", "testing",
 			"secrets", "security", "dependencies",
 			"architecture", "performance",
-			"confusion", "context", "comment-staleness",
+			"confusion", "context", "comment-staleness", "dead-patterns",
 		];
 		const checksConfig: Record<string, Record<string, unknown>> = {};
 		for (const name of allCheckNames) {
@@ -647,7 +650,7 @@ async function runFix(cwd: string): Promise<void> {
 	setGlobalSrcRoots(workspace.isMonorepo ? workspace.srcRoots : undefined);
 	const enrichedStack = detectStack(cwd, workspace);
 	const isDart = enrichedStack.language === "dart";
-	const checks = runChecks(cwd, enrichedStack, workspace, true, isDart, true);
+	const checks = await runChecks(cwd, enrichedStack, workspace, true, isDart, true);
 	const score = computeScore(checks);
 
 	// Collect actionable issues with fix suggestions
@@ -854,7 +857,7 @@ async function main() {
 	if (!quietMode) printHeader(cwd, stack, workspace);
 
 	const isDart = stack.language === "dart";
-	const checks = runChecks(cwd, stack, workspace, skipTests, isDart, quietMode, config);
+	const checks = await runChecks(cwd, stack, workspace, skipTests, isDart, quietMode, config);
 
 	// Per-check ignore: filter issues matching check-specific ignore patterns
 	for (const c of checks) {

@@ -10,6 +10,7 @@ import {
 	generatePackageDiagram,
 	generateSequenceDiagram,
 } from "../runners/architecture.js";
+import type { FeatureCluster } from "../runners/dead-patterns.js";
 import type { CheckResult, VibeReport } from "../types.js";
 import { det, e, gc, pc } from "./components.js";
 import { buildPyramid, buildRadar, buildRing, buildTimeline } from "./svg.js";
@@ -476,4 +477,92 @@ export function trendsPage(historyDir: string | undefined): string {
 
 <h3 style="margin-top:2rem">Per-Check Trends</h3>
 <div class="trend-grid">${checkCharts}</div>`;
+}
+
+// ── Feature Map (Pro) ────────────────────────────────────
+
+export function featureMapPage(deadPatternsCheck: CheckResult | undefined, fl: FL): string {
+	const d = deadPatternsCheck?.details as Record<string, unknown> | undefined;
+	const featureMap = d?.featureMap as FeatureCluster[] | undefined;
+	const isPro = !!featureMap && featureMap.length > 0;
+
+	if (!isPro) {
+		return `
+<div class="fm-header">
+  <h2>Feature Map <span class="pro-badge">PRO</span></h2>
+  <p class="muted">AI-powered map of your codebase — every feature, its files, and refactor debt.</p>
+</div>
+<div class="fm-teaser">
+  <div class="fm-teaser-grid">
+    <div class="fm-card fm-card-blur"><div class="fm-card-label">Authentication</div><div class="fm-card-desc">User login, sessions, JWT</div><div class="fm-card-files">src/auth.ts, src/session.ts, src/middleware.ts</div><div class="fm-card-badge fm-warn">2 dead patterns</div></div>
+    <div class="fm-card fm-card-blur"><div class="fm-card-label">API Routes</div><div class="fm-card-desc">REST endpoint handlers</div><div class="fm-card-files">src/routes/users.ts, src/routes/posts.ts</div><div class="fm-card-badge fm-ok">Clean</div></div>
+    <div class="fm-card fm-card-blur"><div class="fm-card-label">Database</div><div class="fm-card-desc">Query builders, migrations</div><div class="fm-card-files">src/db/client.ts, src/db/schema.ts</div><div class="fm-card-badge fm-warn">1 dead pattern</div></div>
+    <div class="fm-card fm-card-blur"><div class="fm-card-label">UI Components</div><div class="fm-card-desc">Reusable React components</div><div class="fm-card-files">src/components/Button.tsx, ...</div><div class="fm-card-badge fm-ok">Clean</div></div>
+  </div>
+  <div class="fm-cta">
+    <p>Set <code>VCQA_PRO_KEY</code> to unlock the Feature Map</p>
+    <p class="muted" style="font-size:0.72rem">LLM-powered analysis identifies every feature in your codebase, maps it to source files, and detects refactor leftovers — fallbacks, parallel implementations, dead guards.</p>
+  </div>
+</div>`;
+	}
+
+	const totalFeatures = featureMap.length;
+	const totalFiles = featureMap.reduce((s, c) => s + c.fileCount, 0);
+	const withIssues = featureMap.filter((c) => c.findings.length > 0).length;
+	const totalFindings = featureMap.reduce((s, c) => s + c.findings.length, 0);
+
+	const cards = featureMap
+		.map((cluster, idx) => {
+			const hasFindings = cluster.findings.length > 0;
+			const warningCount = cluster.findings.filter((f) => f.severity === "warning").length;
+			const badgeClass = hasFindings ? (warningCount > 0 ? "fm-warn" : "fm-info") : "fm-ok";
+			const badgeText = hasFindings
+				? `${cluster.findings.length} dead pattern${cluster.findings.length !== 1 ? "s" : ""}`
+				: "Clean";
+
+			const fileList = cluster.files
+				.slice(0, 8)
+				.map((f) => `<div class="fm-file">${fl(f)}</div>`)
+				.join("");
+			const moreFiles = cluster.fileCount > 8 ? `<div class="fm-file fm-more">+${cluster.fileCount - 8} more</div>` : "";
+
+			let findingsHtml = "";
+			if (hasFindings) {
+				const rows = cluster.findings
+					.map((f) => {
+						const sevClass = f.severity === "warning" ? "fm-f-warn" : "fm-f-info";
+						const loc = f.file ? fl(f.file, f.line) : "";
+						return `<div class="fm-finding ${sevClass}"><span class="fm-f-sev">${f.severity === "warning" ? "W" : "I"}</span>${loc ? `<span class="fm-f-loc">${loc}</span>` : ""}<span class="fm-f-msg">${e(f.message)}</span>${f.rule ? `<span class="fm-f-rule">${e(f.rule)}</span>` : ""}</div>`;
+					})
+					.join("");
+				findingsHtml = `<div class="fm-findings" id="fm-findings-${idx}">${rows}</div>`;
+			}
+
+			return `<div class="fm-card${hasFindings ? " fm-card-issue" : ""}">
+  <div class="fm-card-top">
+    <div class="fm-card-label">${e(cluster.label)}</div>
+    <div class="fm-card-badge ${badgeClass}">${badgeText}</div>
+  </div>
+  ${cluster.description ? `<div class="fm-card-desc">${e(cluster.description)}</div>` : ""}
+  <div class="fm-card-dir">${e(cluster.dir)}</div>
+  <div class="fm-card-files">${fileList}${moreFiles}</div>
+  ${findingsHtml}
+</div>`;
+		})
+		.join("");
+
+	return `
+<div class="fm-header">
+  <h2>Feature Map <span class="pro-badge">PRO</span></h2>
+  <p class="muted">${totalFeatures} features detected across ${totalFiles} files${withIssues > 0 ? ` \u2014 <span style="color:var(--warn)">${totalFindings} dead patterns in ${withIssues} features</span>` : " \u2014 no dead patterns found"}</p>
+</div>
+
+<div class="fm-stats">
+  <div class="fm-stat"><span class="fm-stat-n">${totalFeatures}</span><span class="fm-stat-l">Features</span></div>
+  <div class="fm-stat"><span class="fm-stat-n">${totalFiles}</span><span class="fm-stat-l">Files</span></div>
+  <div class="fm-stat"><span class="fm-stat-n" style="color:${totalFindings > 0 ? "var(--warn)" : "var(--pass)"}">${totalFindings}</span><span class="fm-stat-l">Dead Patterns</span></div>
+  <div class="fm-stat"><span class="fm-stat-n" style="color:var(--pass)">${totalFeatures - withIssues}</span><span class="fm-stat-l">Clean Features</span></div>
+</div>
+
+<div class="fm-grid">${cards}</div>`;
 }

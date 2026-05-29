@@ -307,6 +307,19 @@ export const CHECK_META: Record<string, CheckMeta> = {
 			"Delete TODOs that won't be done — create issues instead. Delete commented-out code (it's in git history). Update numeric claims when adding branches. Add replacement info to @deprecated.",
 		premium: true,
 	},
+	"dead-patterns": {
+		name: "dead-patterns",
+		label: "Dead Patterns",
+		category: "AI Analysis",
+		priority: "high",
+		weight: 0,
+		description:
+			"Detects leftover code from incomplete refactors — the signature debt of AI-assisted development. Finds fallback code paths to old implementations, parallel systems doing the same thing, dead defensive guards, hardcoded feature flags with unreachable branches, orphaned abstractions, and redundant wrappers.",
+		risk: "Vibe-coded projects accumulate dead patterns fast. When AI refactors code, it creates fallbacks to the old way 'just in case' — but those fallbacks never get cleaned up. Over time, you end up with two implementations of everything, config flags that are always true, and catch blocks that fall back to code that should have been deleted months ago. This doubles the surface area for bugs and confuses both humans and AI tools navigating the codebase.",
+		recommendation:
+			"Enable dead-patterns with a VibeCode QA Pro subscription. The LLM analyzes code clusters to find refactor leftovers that static analysis cannot detect — parallel implementations, dead fallbacks, and orphaned abstractions.",
+		premium: true,
+	},
 };
 
 export function getCheckMeta(name: string): CheckMeta {
