@@ -214,7 +214,7 @@ describe("init command", () => {
 		expect(Object.keys(config.checks)).toContain("security");
 		expect(Object.keys(config.checks)).toContain("confusion");
 		expect(Object.keys(config.checks)).toContain("context");
-		expect(Object.keys(config.checks).length).toBe(22);
+		expect(Object.keys(config.checks).length).toBe(24);
 		// Should have help fields
 		expect(config._comment).toContain("vibecodeqa.online");
 		expect(config._checks_help).toContain("enabled");

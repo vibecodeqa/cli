@@ -23,7 +23,7 @@ src/
 ├── cli.ts              # Entry: flags, init/fix commands, runner orchestration
 ├── types.ts            # CheckResult, Issue, VibeReport, StackInfo, WorkspaceInfo
 ├── score.ts            # Weighted composite score from check-meta weights
-├── check-meta.ts       # Metadata for all 22 checks (weight, description, deeperTools)
+├── check-meta.ts       # Metadata for all 24 checks (weight, description, deeperTools)
 ├── detect.ts           # Auto-detect stack + workspace (monorepo, melos, turborepo, nx)
 ├── fs-utils.ts         # File walker (symlink-safe, SFC extraction, global srcRoots)
 ├── trend.ts            # Trend comparison + terminal sparkline
@@ -51,6 +51,8 @@ src/
 │   ├── performance.ts  # Barrel imports, heavy deps, dead code (Knip)
 │   ├── doc-coherence.ts   # Pro: JSDoc mismatch + README stale refs
 │   ├── code-coherence.ts  # Pro: mixed error patterns, duplicate exports
+│   ├── comment-staleness.ts # Pro: stale TODOs, numeric mismatches, commented-out code
+│   ├── dead-patterns.ts  # Pro: refactor debt, fallbacks, parallel impls (LLM-powered)
 │   └── exec.ts         # Shared execSync wrapper
 ├── diagrams/           # Architecture SVG generators (interactive)
 │   ├── index.ts        # Barrel re-export
@@ -65,7 +67,7 @@ src/
     └── components.ts   # HTML escape, file links, grade/priority colors
 ```
 
-## 22 Checks across 7 categories
+## 24 Checks across 7 categories
 
 Weights sum to 100 (Pro checks have weight 0).
 
@@ -77,7 +79,7 @@ Weights sum to 100 (Pro checks have weight 0).
 | **Architecture** | architecture, performance | 5+4 = 9 |
 | **Security** | secrets, security, dependencies | 6+5+5 = 16 |
 | **AI Readiness** | confusion, context | 6+5 = 11 |
-| **AI Analysis** | doc-coherence, code-coherence | 0+0 (PRO) |
+| **AI Analysis** | doc-coherence, code-coherence, comment-staleness, dead-patterns | 0+0+0+0 (PRO) |
 
 ## Supported stacks
 

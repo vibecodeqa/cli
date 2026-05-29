@@ -497,7 +497,8 @@ jobs:
 			"docs", "best-practices", "testing",
 			"secrets", "security", "dependencies",
 			"architecture", "performance",
-			"confusion", "context", "comment-staleness", "dead-patterns",
+			"confusion", "context",
+			"doc-coherence", "code-coherence", "comment-staleness", "dead-patterns",
 		];
 		const checksConfig: Record<string, Record<string, unknown>> = {};
 		for (const name of allCheckNames) {
