@@ -393,6 +393,7 @@ function printHelp(): void {
     init [path]       Set up CI workflow + recommended configs
     fix [path]        Auto-fix (.gitignore, strict mode, biome/eslint, suggestions)
     explain [check]   Deep-dive explanation of a check (what/risk/fix)
+    monitor [path]    Live quality control panel — re-scans on file changes
 
   \x1b[1mFlags:\x1b[0m
     --skip-tests      Skip test execution (faster scan)
@@ -840,6 +841,12 @@ async function main() {
 	}
 	if (args[0] === "explain") {
 		await runExplain(args[1]);
+		return;
+	}
+	if (args[0] === "monitor") {
+		const path = args.slice(1).find((a) => !a.startsWith("-")) || ".";
+		const { startMonitor } = await import("./monitor.js");
+		await startMonitor(resolve(path));
 		return;
 	}
 

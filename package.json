@@ -48,7 +48,12 @@
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.15",
 		"@types/node": "^25.8.0",
+		"@types/react": "^18.3.29",
 		"typescript": "^5.8.3",
 		"vitest": "^4.1.6"
+	},
+	"dependencies": {
+		"ink": "^5.2.1",
+		"react": "^18.3.1"
 	}
 }
