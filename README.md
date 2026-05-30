@@ -2,17 +2,17 @@
 
 **Code health scanner for the AI coding era.**
 
-One command. 24 checks. Full report. Zero config.
+One command. 25 checks. Full report. Zero config.
 
 ```bash
 npx @vibecodeqa/cli
 ```
 
-![Grade](https://img.shields.io/badge/checks-24-blue) ![TypeScript](https://img.shields.io/badge/TypeScript-first-3178C6) ![License](https://img.shields.io/badge/license-MIT-green)
+![Grade](https://img.shields.io/badge/checks-25-blue) ![TypeScript](https://img.shields.io/badge/TypeScript-first-3178C6) ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## What it does
 
-vcqa scans your TypeScript/JavaScript/Dart/Flutter codebase and produces a scored health report with actionable findings. It auto-detects your stack (React, Flutter, Vite, vitest, Biome, etc.) and runs 24 checks across 7 categories.
+vcqa scans your TypeScript/JavaScript/Dart/Flutter codebase and produces a scored health report with actionable findings. It auto-detects your stack (React, Flutter, Vite, vitest, Biome, etc.) and runs 25 checks across 7 categories.
 
 The output is a self-contained HTML report with radar charts, architecture diagrams, score timeline, testing pyramid, and drill-down issue lists — all navigable via sidebar and tab navigation.
 
