@@ -40,21 +40,27 @@ export function runStructure(cwd: string, stack: StackInfo, workspace?: Workspac
 
 	// Check standard files
 	for (const fc of EXPECTED_FILES) {
-		// tsconfig: in monorepos, tsconfig.base.json or per-package tsconfigis acceptable
+		// tsconfig: in monorepos, tsconfig.base.json or per-package tsconfig is acceptable
 		let required = fc.name === "tsconfig.json" ? stack.language === "typescript" : fc.required;
 		if (fc.name === "tsconfig.json" && workspace?.isMonorepo) {
-			// Accept tsconfig.base.json or any tsconfig variant
 			if (existsSync(join(cwd, "tsconfig.base.json")) || existsSync(join(cwd, "tsconfig.json"))) {
 				found.push(fc.name);
 				continue;
 			}
-			// Check if packages have their own tsconfigs
 			const pkgHasTsconfig = workspace.packages.some((p) => existsSync(join(cwd, p.path, "tsconfig.json")));
 			if (pkgHasTsconfig) {
 				found.push("tsconfig (per-package)");
 				continue;
 			}
-			required = true; // still missing
+			required = true;
+		}
+		// Melos monorepo: pubspec.yaml and analysis_options.yaml live in packages, not root
+		if ((fc.name === "pubspec.yaml" || fc.name === "analysis_options.yaml") && workspace?.isMonorepo && workspace.tool === "melos") {
+			const inPkg = workspace.packages.some((p) => existsSync(join(cwd, p.path, fc.name)));
+			if (inPkg) {
+				found.push(`${fc.name} (per-package)`);
+				continue;
+			}
 		}
 		if (existsSync(join(cwd, fc.path))) {
 			found.push(fc.name);
@@ -68,9 +74,12 @@ export function runStructure(cwd: string, stack: StackInfo, workspace?: Workspac
 		}
 	}
 
-	// Check for lockfile
+	// Check for lockfile — in monorepos, lockfiles may be in packages
 	const lockfiles = isDart ? ["pubspec.lock"] : ["pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lockb"];
-	const hasLock = lockfiles.some((f) => existsSync(join(cwd, f)));
+	let hasLock = lockfiles.some((f) => existsSync(join(cwd, f)));
+	if (!hasLock && workspace?.isMonorepo) {
+		hasLock = workspace.packages.some((p) => lockfiles.some((f) => existsSync(join(cwd, p.path, f))));
+	}
 	if (hasLock) {
 		found.push("lockfile");
 	} else {

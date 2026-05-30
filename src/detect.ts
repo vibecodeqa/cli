@@ -16,11 +16,18 @@ export function detectStack(cwd: string, workspace?: WorkspaceInfo): StackInfo {
 	};
 
 	// ── Dart/Flutter detection ──
-	const pubspec = read("pubspec.yaml");
+	// Check root pubspec, OR workspace packages (melos monorepos have pubspec in packages, not root)
+	let pubspec = read("pubspec.yaml");
+	if (!pubspec && workspace?.tool === "melos") {
+		for (const wp of workspace.packages) {
+			const ps = read(join(wp.path, "pubspec.yaml"));
+			if (ps) { pubspec = ps; break; }
+		}
+	}
 	if (pubspec || has("pubspec.lock")) {
 		const isFlutter = pubspec.includes("flutter:") || pubspec.includes("flutter_test:");
 		const hasTest = pubspec.includes("test:") || pubspec.includes("flutter_test:");
-		const hasAnalysis = has("analysis_options.yaml");
+		const hasAnalysis = has("analysis_options.yaml") || workspace?.packages.some((p) => existsSync(join(cwd, p.path, "analysis_options.yaml")));
 		return {
 			language: "dart",
 			framework: isFlutter ? "flutter" : "none",
@@ -200,6 +207,23 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 	const packages: WorkspacePackage[] = [];
 	for (const glob of globs) {
 		resolveGlob(cwd, glob, packages);
+	}
+
+	// For melos monorepos: also detect sibling directories with package.json
+	// (e.g. functions/ in a Flutter + Node.js monorepo)
+	if (tool === "melos") {
+		const knownPaths = new Set(packages.map((p) => p.path));
+		for (const entry of readdirSync(cwd)) {
+			if (knownPaths.has(entry)) continue;
+			if (entry === "node_modules" || entry === ".git" || entry === "dist" || entry === "build" || entry.startsWith(".")) continue;
+			const full = join(cwd, entry);
+			try {
+				if (!statSync(full).isDirectory()) continue;
+			} catch { continue; }
+			if (existsSync(join(full, "package.json"))) {
+				addPackage(entry, full, packages);
+			}
+		}
 	}
 
 	const srcRoots = buildSrcRoots(cwd, packages);
