@@ -30,7 +30,7 @@ export const GROUPS: { id: string; label: string; file: string; checks: string[]
 	{ id: "arch", label: "Architecture", file: "architecture.html", checks: ["architecture", "performance"] },
 	{ id: "security", label: "Security", file: "security.html", checks: ["secrets", "security", "dependencies"] },
 	{ id: "llm", label: "AI Readiness", file: "ai-readiness.html", checks: ["confusion", "context"] },
-	{ id: "ai", label: "AI Analysis", file: "ai-analysis.html", checks: ["doc-coherence", "code-coherence", "comment-staleness", "dead-patterns"] },
+	{ id: "ai", label: "AI Analysis", file: "ai-analysis.html", checks: ["doc-coherence", "code-coherence", "comment-staleness", "dead-patterns", "test-audit"] },
 ];
 
 export function generatePages(report: VibeReport, historyDir?: string): Map<string, string> {

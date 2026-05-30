@@ -16,6 +16,7 @@ import { runCodeCoherence } from "./runners/code-coherence.js";
 import { runCommentStaleness } from "./runners/comment-staleness.js";
 import { runComplexity } from "./runners/complexity.js";
 import { runDeadPatterns } from "./runners/dead-patterns.js";
+import { runTestAudit } from "./runners/test-audit.js";
 import { runConfusion } from "./runners/confusion.js";
 import { runContext } from "./runners/context.js";
 import { runDependencies } from "./runners/dependencies.js";
@@ -164,6 +165,7 @@ async function runChecks(
 		{ name: "code-coherence", fn: () => runCodeCoherence(cwd) },
 		{ name: "comment-staleness", fn: () => runCommentStaleness(cwd) },
 		{ name: "dead-patterns", fn: () => runDeadPatterns(cwd) },
+		{ name: "test-audit", fn: () => runTestAudit(cwd) },
 	];
 
 	const checks: CheckResult[] = [];
@@ -499,7 +501,7 @@ jobs:
 			"secrets", "security", "dependencies",
 			"architecture", "performance",
 			"confusion", "context",
-			"doc-coherence", "code-coherence", "comment-staleness", "dead-patterns",
+			"doc-coherence", "code-coherence", "comment-staleness", "dead-patterns", "test-audit",
 		];
 		const checksConfig: Record<string, Record<string, unknown>> = {};
 		for (const name of allCheckNames) {

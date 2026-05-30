@@ -27,9 +27,10 @@ describe("CHECK_META", () => {
 		"code-coherence",
 		"comment-staleness",
 		"dead-patterns",
+		"test-audit",
 	];
 
-	it("has metadata for all 24 checks", () => {
+	it("has metadata for all 25 checks", () => {
 		for (const name of allChecks) {
 			expect(CHECK_META[name]).toBeDefined();
 			expect(CHECK_META[name].label).toBeTruthy();

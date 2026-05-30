@@ -41,6 +41,7 @@ import { runDocCoherence } from "./runners/doc-coherence.js";
 import { runCodeCoherence } from "./runners/code-coherence.js";
 import { runCommentStaleness } from "./runners/comment-staleness.js";
 import { runDeadPatterns } from "./runners/dead-patterns.js";
+import { runTestAudit } from "./runners/test-audit.js";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8")).version;
 
@@ -173,6 +174,7 @@ async function runScan(
 		{ name: "code-coherence", fn: () => runCodeCoherence(cwd) },
 		{ name: "comment-staleness", fn: () => runCommentStaleness(cwd) },
 		{ name: "dead-patterns", fn: () => runDeadPatterns(cwd) },
+		{ name: "test-audit", fn: () => runTestAudit(cwd) },
 	];
 
 	const checks: CheckResult[] = [];

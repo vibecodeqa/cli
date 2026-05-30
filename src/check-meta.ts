@@ -320,6 +320,19 @@ export const CHECK_META: Record<string, CheckMeta> = {
 			"Enable dead-patterns with a VibeCode QA Pro subscription. The LLM analyzes code clusters to find refactor leftovers that static analysis cannot detect — parallel implementations, dead fallbacks, and orphaned abstractions.",
 		premium: true,
 	},
+	"test-audit": {
+		name: "test-audit",
+		label: "Test Audit",
+		category: "AI Analysis",
+		priority: "high",
+		weight: 0,
+		description:
+			"Detects fake, shallow, and misleading tests — the 'test theater' that inflates coverage without verifying behavior. Finds empty test bodies, trivial assertions (expect(true).toBe(true)), weak-only checks (.toBeDefined), mock-heavy tests, skipped tests, and tests whose names don't match what they actually verify.",
+		risk: "AI-generated tests often look real but test nothing. An empty test body always passes. expect(true).toBe(true) is a tautology. Tests with more mocks than assertions test the mock setup, not your code. This creates a false sense of safety — your coverage number goes up while your actual protection stays zero. Refactors break real behavior but all tests still pass because they never tested real behavior.",
+		recommendation:
+			"Enable test-audit with a VibeCode QA Pro subscription. The LLM analyzes each test to determine if its assertions actually verify the behavior described in its name.",
+		premium: true,
+	},
 };
 
 export function getCheckMeta(name: string): CheckMeta {
