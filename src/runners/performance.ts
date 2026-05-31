@@ -191,6 +191,38 @@ export function runPerformance(cwd: string): CheckResult {
 		}
 	}
 
+	// ── 7. PWA readiness (web projects only) ──
+	const isWebProject = !!(deps.react || deps.vue || deps.svelte || deps["@sveltejs/kit"] || deps.next || deps.nuxt);
+	if (isWebProject) {
+		const manifestPaths = ["public/manifest.json", "public/manifest.webmanifest", "manifest.json", "web/manifest.json"];
+		const hasManifest = manifestPaths.some((p) => existsSync(join(cwd, p)));
+		if (!hasManifest) {
+			issues.push({ severity: "info", message: "No web app manifest — can't install as PWA or add to home screen", rule: "no-manifest" });
+		}
+		const swPaths = ["public/sw.js", "public/service-worker.js", "src/service-worker.ts", "src/sw.ts"];
+		const hasSW = swPaths.some((p) => existsSync(join(cwd, p))) || !!(deps["workbox-webpack-plugin"] || deps["vite-plugin-pwa"] || deps["next-pwa"]);
+		if (!hasSW) {
+			issues.push({ severity: "info", message: "No service worker — app won't work offline", rule: "no-service-worker" });
+		}
+	}
+
+	// ── 8. CSS best practices ──
+	const cssFiles = getProductionFiles(cwd).filter((f) => f.ext === ".css");
+	for (const f of cssFiles) {
+		const lines = f.content.split("\n");
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i];
+			// !important overuse
+			if (/!important/.test(line)) {
+				issues.push({ severity: "info", message: "!important — specificity escape hatch, usually a sign of CSS architecture issues", file: f.path, line: i + 1, rule: "css-important" });
+			}
+		}
+		// No media queries in CSS with fixed layouts
+		if (f.content.length > 500 && !/@media/.test(f.content) && /width:\s*\d{3,}px/.test(f.content)) {
+			issues.push({ severity: "info", message: "CSS with fixed widths but no @media queries — likely not responsive", file: f.path, rule: "no-media-queries" });
+		}
+	}
+
 	// Score — proportional to codebase, capped per category
 	const totalFiles = sourceFiles.length || 1;
 	const barrelPenalty = Math.min(15, (barrelImports / totalFiles) * 200);

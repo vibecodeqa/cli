@@ -137,8 +137,8 @@ export function runAccessibility(cwd: string): CheckResult {
 		}
 	}
 
-	// 7. Check for html lang attribute in index.html
-	const htmlPaths = ["index.html", "web/index.html", "public/index.html"];
+	// 7. Check for html lang attribute + viewport + mobile meta in index.html
+	const htmlPaths = ["index.html", "web/index.html", "public/index.html", "src/index.html"];
 	for (const h of htmlPaths) {
 		const full = join(cwd, h);
 		if (!existsSync(full)) continue;
@@ -146,6 +146,43 @@ export function runAccessibility(cwd: string): CheckResult {
 		if (/<html\b/.test(content) && !/<html[^>]*lang=/.test(content)) {
 			missingLang++;
 			issues.push({ severity: "warning", message: "<html> missing lang attribute", file: h, rule: "html-lang" });
+		}
+		// Mobile viewport
+		if (!/<meta[^>]*name=["']viewport["']/.test(content)) {
+			issues.push({ severity: "error", message: "Missing <meta name=\"viewport\"> — page won't scale on mobile", file: h, rule: "missing-viewport" });
+		}
+		// charset
+		if (!/<meta[^>]*charset=/i.test(content)) {
+			issues.push({ severity: "warning", message: "Missing <meta charset> — may cause encoding issues", file: h, rule: "missing-charset" });
+		}
+		// Touch icon for mobile bookmarks
+		if (!/<link[^>]*apple-touch-icon/.test(content) && !/<link[^>]*icon/.test(content)) {
+			issues.push({ severity: "info", message: "No favicon or apple-touch-icon — poor mobile bookmark experience", file: h, rule: "missing-icon" });
+		}
+	}
+
+	// 8. Mobile-unfriendly patterns in components
+	for (const f of files) {
+		const source = f.rawContent || f.content;
+		const lines = source.split("\n");
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i];
+			// Fixed pixel widths that break on mobile
+			if (/style=.*width:\s*\d{4,}px/.test(line)) {
+				issues.push({ severity: "info", message: "Fixed width ≥1000px — likely breaks on mobile", file: f.path, line: i + 1, rule: "fixed-width" });
+			}
+			// Horizontal scroll containers without overflow handling
+			if (/overflow-x:\s*(?:scroll|auto)/.test(line) && !/\btouch\b/.test(line) && !/-webkit-overflow-scrolling/.test(line)) {
+				issues.push({ severity: "info", message: "Horizontal scroll without touch-action — poor mobile scroll UX", file: f.path, line: i + 1, rule: "touch-scroll" });
+			}
+			// Hover-only interactions (no touch fallback)
+			if (/onMouseEnter=|@mouseenter|on:mouseenter/.test(line) && !/onClick=|@click|on:click|onTouchStart|@touchstart/.test(line)) {
+				issues.push({ severity: "info", message: "Hover-only interaction — unreachable on touch devices", file: f.path, line: i + 1, rule: "hover-only" });
+			}
+			// Tiny touch targets
+			if (/(?:width|height):\s*(?:1[0-9]|[1-9])px/.test(line) && /(?:onClick|@click|on:click|button|<a )/.test(line)) {
+				issues.push({ severity: "info", message: "Touch target likely <44px — hard to tap on mobile (WCAG 2.5.8)", file: f.path, line: i + 1, rule: "small-touch-target" });
+			}
 		}
 	}
 
