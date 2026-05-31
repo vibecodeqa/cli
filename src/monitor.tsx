@@ -580,10 +580,9 @@ function IssueDetail({ issue, checkName, cwd, height, copied }: {
 
 // ── Git Changes View ──
 
-function GitChangesView({ cwd, checks, height, cursor }: {
-	cwd: string; checks: CheckResult[]; height: number; cursor: number;
+function GitChangesView({ changes, checks, height, cursor }: {
+	changes: GitChange[]; checks: CheckResult[]; height: number; cursor: number;
 }) {
-	const changes = useMemo(() => getGitChanges(cwd), [cwd]);
 
 	// Cross-reference with issues
 	const issuesByFile = useMemo(() => {
@@ -743,6 +742,18 @@ function MonitorApp({ cwd }: { cwd: string }) {
 			}),
 		[state.checks]);
 	const currentList = panel === "checks" ? activeChecks : allIssues;
+
+	// Derived data for file views (memoized, used by both render + keyboard)
+	const filesWithIssues = useMemo(() => {
+		const map = new Map<string, number>();
+		for (const c of state.checks) {
+			for (const iss of c.issues) {
+				if (iss.file && typeof iss.file === "string") map.set(iss.file, (map.get(iss.file) || 0) + 1);
+			}
+		}
+		return [...map.keys()].sort((a, b) => (map.get(b) || 0) - (map.get(a) || 0));
+	}, [state.checks]);
+	const gitChanges = useMemo(() => getGitChanges(cwd), [cwd, state.scanCount]);
 
 	// Clamp cursor when data changes
 	useEffect(() => {
@@ -935,25 +946,20 @@ function MonitorApp({ cwd }: { cwd: string }) {
 
 		// ── All files: ↑↓ navigate, Enter drill into file issues ──
 		if (mode.view === "all-files") {
-			const fileMap = state.checks
-				.flatMap((c) => c.issues.filter((i) => i.file && typeof i.file === "string").map((i) => i.file!))
-				.reduce((map, f) => { map.set(f, (map.get(f) || 0) + 1); return map; }, new Map<string, number>());
-			const files = [...fileMap.keys()].sort((a, b) => (fileMap.get(b) || 0) - (fileMap.get(a) || 0));
 			if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
-			if (key.downArrow) setCursor((c) => Math.min(files.length - 1, c + 1));
-			if (key.return && files[cursor]) {
-				setMode({ view: "file-issues", file: files[cursor] });
+			if (key.downArrow) setCursor((c) => Math.min(filesWithIssues.length - 1, c + 1));
+			if (key.return && filesWithIssues[cursor]) {
+				setMode({ view: "file-issues", file: filesWithIssues[cursor] });
 				setCursor(0);
 			}
 		}
 
 		// ── Git changes: ↑↓ navigate, Enter drill into file issues ──
 		if (mode.view === "git-changes") {
-			const changes = getGitChanges(cwd);
 			if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
-			if (key.downArrow) setCursor((c) => Math.min(changes.length - 1, c + 1));
-			if (key.return && changes[cursor]) {
-				setMode({ view: "file-issues", file: changes[cursor].file });
+			if (key.downArrow) setCursor((c) => Math.min(gitChanges.length - 1, c + 1));
+			if (key.return && gitChanges[cursor]) {
+				setMode({ view: "file-issues", file: gitChanges[cursor].file });
 				setCursor(0);
 			}
 		}
@@ -1006,7 +1012,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		return (
 			<Box flexDirection="column" height={rows}>
 				<Header proj={proj} stack={stack} workspace={workspace} state={state} />
-				<GitChangesView cwd={cwd} checks={state.checks} height={rows - 3} cursor={cursor} />
+				<GitChangesView changes={gitChanges} checks={state.checks} height={rows - 3} cursor={cursor} />
 				<Box paddingX={1}>
 					<Text dimColor>Esc back · ↑↓ select · Enter view file issues · q quit</Text>
 				</Box>
