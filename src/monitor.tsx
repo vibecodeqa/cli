@@ -1,6 +1,7 @@
 /** vcqa monitor — real-time quality control panel.
  *
  * Full-screen TUI that watches your codebase and re-scans on changes.
+ * Scan runs in a child process so the UI never freezes.
  * Press 'c' to open settings: thresholds, panel toggles, scan options.
  * Config persists to .vibe-check/monitor.json.
  */
@@ -9,41 +10,14 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { render, Box, Text, useApp, useInput, useStdout } from "ink";
 import { resolve, join, basename } from "node:path";
 import { watch, existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import { detectStack, detectWorkspace } from "./detect.js";
-import { setGlobalSrcRoots, setGlobalIgnore } from "./fs-utils.js";
-import { loadConfig, isCheckEnabled, type VcqaConfig } from "./config.js";
-import { computeScore } from "./score.js";
-import { gradeFromScore } from "./types.js";
-import type { CheckResult, WorkspaceInfo } from "./types.js";
-
-import { runStructure } from "./runners/structure.js";
-import { runLint } from "./runners/lint.js";
-import { runTypeCheck } from "./runners/types-check.js";
-import { runTypeSafety } from "./runners/type-safety.js";
-import { runStandards } from "./runners/standards.js";
-import { runComplexity } from "./runners/complexity.js";
-import { runDuplication } from "./runners/duplication.js";
-import { runErrorHandling } from "./runners/error-handling.js";
-import { runReact } from "./runners/react.js";
-import { runAccessibility } from "./runners/accessibility.js";
-import { runDocs } from "./runners/docs.js";
-import { runBestPractices } from "./runners/best-practices.js";
-import { runTesting } from "./runners/testing.js";
-import { runSecrets } from "./runners/secrets.js";
-import { runSecurity } from "./runners/security.js";
-import { runDependencies } from "./runners/dependencies.js";
-import { runArchitecture } from "./runners/architecture.js";
-import { runPerformance } from "./runners/performance.js";
-import { runConfusion } from "./runners/confusion.js";
-import { runContext } from "./runners/context.js";
-import { runDocCoherence } from "./runners/doc-coherence.js";
-import { runCodeCoherence } from "./runners/code-coherence.js";
-import { runCommentStaleness } from "./runners/comment-staleness.js";
-import { runDeadPatterns } from "./runners/dead-patterns.js";
-import { runTestAudit } from "./runners/test-audit.js";
+import type { CheckResult } from "./types.js";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8")).version;
+const CLI_PATH = fileURLToPath(new URL("./cli.js", import.meta.url));
 
 // ── Config ──
 
@@ -56,16 +30,11 @@ interface MonitorConfig {
 }
 
 const DEFAULTS: MonitorConfig = {
-	alertBelow: 60,
-	alertDrop: 5,
-	debounceMs: 800,
-	skipTests: true,
+	alertBelow: 60, alertDrop: 5, debounceMs: 800, skipTests: true,
 	panels: { score: true, checks: true, activity: true, issues: true },
 };
 
-function configPath(cwd: string): string {
-	return join(cwd, ".vibe-check", "monitor.json");
-}
+function configPath(cwd: string): string { return join(cwd, ".vibe-check", "monitor.json"); }
 
 function loadMonitorConfig(cwd: string): MonitorConfig {
 	try {
@@ -137,62 +106,41 @@ function bar(score: number, width: number): string {
 	return "█".repeat(filled) + "░".repeat(width - filled);
 }
 
-// ── Scan engine ──
+// ── Scan via child process — UI never freezes ──
 
-async function runScan(
+function runScanProcess(
 	cwd: string,
-	stack: ReturnType<typeof detectStack>,
-	workspace: WorkspaceInfo,
-	isDart: boolean,
 	skipTests: boolean,
-	config?: VcqaConfig,
-): Promise<{ checks: CheckResult[]; score: number; grade: string; duration: number }> {
-	const start = Date.now();
-	const srcRoots = workspace.isMonorepo ? workspace.srcRoots : undefined;
-	const runners: { name: string; fn: () => CheckResult | Promise<CheckResult> }[] = [
-		{ name: "structure", fn: () => runStructure(cwd, stack, workspace) },
-		{ name: "lint", fn: () => runLint(cwd, stack, workspace) },
-		{ name: "types", fn: () => runTypeCheck(cwd, isDart, workspace) },
-		{ name: "type-safety", fn: () => runTypeSafety(cwd, isDart) },
-		{ name: "standards", fn: () => runStandards(cwd, stack) },
-		{ name: "complexity", fn: () => runComplexity(cwd) },
-		{ name: "duplication", fn: () => runDuplication(cwd) },
-		{ name: "error-handling", fn: () => runErrorHandling(cwd, stack) },
-		{ name: "react", fn: () => runReact(cwd, stack) },
-		{ name: "accessibility", fn: () => runAccessibility(cwd) },
-		{ name: "docs", fn: () => runDocs(cwd) },
-		{ name: "best-practices", fn: () => runBestPractices(cwd, workspace) },
-		{ name: "testing", fn: () => runTesting(cwd, stack, skipTests, srcRoots) },
-		{ name: "secrets", fn: () => runSecrets(cwd) },
-		{ name: "security", fn: () => runSecurity(cwd) },
-		{ name: "dependencies", fn: () => runDependencies(cwd, stack) },
-		{ name: "architecture", fn: () => runArchitecture(cwd, workspace) },
-		{ name: "performance", fn: () => runPerformance(cwd) },
-		{ name: "confusion", fn: () => runConfusion(cwd) },
-		{ name: "context", fn: () => runContext(cwd) },
-		{ name: "doc-coherence", fn: () => runDocCoherence(cwd) },
-		{ name: "code-coherence", fn: () => runCodeCoherence(cwd) },
-		{ name: "comment-staleness", fn: () => runCommentStaleness(cwd) },
-		{ name: "dead-patterns", fn: () => runDeadPatterns(cwd) },
-		{ name: "test-audit", fn: () => runTestAudit(cwd) },
-	];
+): Promise<{ checks: CheckResult[]; score: number; grade: string; duration: number; totalIssues: number }> {
+	return new Promise((resolve) => {
+		const args = ["--json", cwd];
+		if (skipTests) args.unshift("--skip-tests");
 
-	const checks: CheckResult[] = [];
-	for (const runner of runners) {
-		if (config && !isCheckEnabled(config, runner.name)) {
-			checks.push({ name: runner.name, score: 0, grade: "F", details: { skipped: true }, issues: [], duration: 0 });
-			continue;
-		}
-		try {
-			const r = runner.fn();
-			checks.push(r instanceof Promise ? await r : r);
-		} catch {
-			checks.push({ name: runner.name, score: 0, grade: "F", details: { skipped: true, reason: "error" }, issues: [], duration: 0 });
-		}
-	}
-
-	const score = computeScore(checks);
-	return { checks, score, grade: gradeFromScore(score), duration: Date.now() - start };
+		execFile(process.execPath, [CLI_PATH, ...args], {
+			timeout: 120_000,
+			maxBuffer: 10 * 1024 * 1024,
+			env: { ...process.env, VCQA_NO_UPDATE_CHECK: "1" },
+		}, (err, stdout) => {
+			if (err || !stdout) {
+				resolve({ checks: [], score: 0, grade: "?", duration: 0, totalIssues: 0 });
+				return;
+			}
+			try {
+				const report = JSON.parse(stdout);
+				const checks: CheckResult[] = report.checks || [];
+				const totalIssues = checks.reduce((s: number, c: CheckResult) => s + c.issues.length, 0);
+				resolve({
+					checks,
+					score: report.score ?? 0,
+					grade: report.grade ?? "?",
+					duration: report.meta?.duration ?? 0,
+					totalIssues,
+				});
+			} catch {
+				resolve({ checks: [], score: 0, grade: "?", duration: 0, totalIssues: 0 });
+			}
+		});
+	});
 }
 
 // ── Panels ──
@@ -218,10 +166,11 @@ function ScorePanel({ state, height }: { state: ScanState; height: number }) {
 function ChecksPanel({ checks, height }: { checks: CheckResult[]; height: number }) {
 	const active = checks.filter((c) => !(c.details as Record<string, unknown>).skipped && !(c.details as Record<string, unknown>).comingSoon);
 	const pro = checks.filter((c) => (c.details as Record<string, unknown>).comingSoon);
+	const visibleLines = Math.max(1, height - 3);
 	return (
 		<Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} width={24} height={height} overflowY="hidden">
 			<Text bold color="magenta"> ◈ Checks</Text>
-			{active.map((c) => (
+			{active.slice(0, visibleLines).map((c) => (
 				<Text key={c.name}>
 					<Text color={gc(c.grade)}> {c.grade === "A" ? "●" : c.grade === "B" ? "◐" : "○"} </Text>
 					<Text>{c.name.slice(0, 13).padEnd(13)}</Text>
@@ -229,6 +178,7 @@ function ChecksPanel({ checks, height }: { checks: CheckResult[]; height: number
 					<Text color={gc(c.grade)}>{String(c.score).padStart(3)}</Text>
 				</Text>
 			))}
+			{active.length > visibleLines && <Text dimColor> +{active.length - visibleLines} more</Text>}
 			{pro.length > 0 && <Text color="magenta"> ◆ {pro.length} Pro</Text>}
 		</Box>
 	);
@@ -239,7 +189,7 @@ function ActivityPanel({ log, height }: { log: LogEntry[]; height: number }) {
 		info: "gray", scan: "cyan", change: "yellow",
 		improve: "green", regress: "red", error: "red", alert: "magenta",
 	};
-	const visibleLines = Math.max(1, height - 3); // border + header
+	const visibleLines = Math.max(1, height - 3);
 	return (
 		<Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} height={height} overflowY="hidden">
 			<Text bold color="magenta"> ◈ Activity</Text>
@@ -262,8 +212,8 @@ function IssuesPanel({ checks, height }: { checks: CheckResult[]; height: number
 		});
 	const errors = issues.filter((i) => i.severity === "error").length;
 	const warnings = issues.filter((i) => i.severity === "warning").length;
-
 	const visibleLines = Math.max(1, height - 3);
+
 	return (
 		<Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} height={height} overflowY="hidden">
 			<Text bold color="magenta">
@@ -295,9 +245,7 @@ interface ConfigOption {
 }
 
 function ConfigScreen({
-	monCfg,
-	onSave,
-	onClose,
+	monCfg, onSave, onClose,
 }: {
 	monCfg: MonitorConfig;
 	onSave: (cfg: MonitorConfig) => void;
@@ -318,10 +266,7 @@ function ConfigScreen({
 	];
 
 	useInput((input, key) => {
-		if (key.escape || input === "c") {
-			onClose();
-			return;
-		}
+		if (key.escape || input === "c") { onClose(); return; }
 		if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
 		if (key.downArrow) setCursor((c) => Math.min(options.length - 1, c + 1));
 
@@ -350,10 +295,7 @@ function ConfigScreen({
 			}
 		}
 
-		if (input === "s") {
-			onSave(cfg);
-			onClose();
-		}
+		if (input === "s") { onSave(cfg); onClose(); }
 	});
 
 	return (
@@ -409,10 +351,8 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		setLog((prev) => [...prev.slice(-50), { time: ts(), text, type }]);
 	}, []);
 
-	const config = loadConfig(cwd);
 	const workspace = detectWorkspace(cwd);
 	const stack = detectStack(cwd, workspace);
-	const isDart = stack.language === "dart";
 
 	const doScan = useCallback(async () => {
 		if (scanningRef.current) return;
@@ -420,44 +360,37 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		setState((s) => ({ ...s, scanning: true }));
 		addLog("Scanning...", "scan");
 
-		try {
-			setGlobalSrcRoots(workspace.isMonorepo ? workspace.srcRoots : undefined);
-			setGlobalIgnore(config.ignore);
-			const result = await runScan(cwd, stack, workspace, isDart, monCfg.skipTests, config);
-			const totalIssues = result.checks.reduce((s, c) => s + c.issues.length, 0);
-			const prev = prevScoreRef.current;
+		const result = await runScanProcess(cwd, monCfg.skipTests);
+		const prev = prevScoreRef.current;
 
-			setState((s) => ({
-				...result, totalIssues, scanning: false,
-				scanCount: s.scanCount + 1,
-				scores: [...s.scores.slice(-19), result.score],
-			}));
+		setState((s) => ({
+			...result, scanning: false,
+			scanCount: s.scanCount + 1,
+			scores: [...s.scores.slice(-19), result.score],
+		}));
 
-			if (prev !== null) {
-				const delta = result.score - prev;
-				if (delta > 0) addLog(`Score: ${prev} → ${result.score} (+${delta})`, "improve");
-				else if (delta < 0) addLog(`Score: ${prev} → ${result.score} (${delta})`, "regress");
-				else addLog(`Score: ${result.score} (no change)`, "scan");
+		if (result.score === 0 && result.checks.length === 0) {
+			addLog("Scan failed — check project path", "error");
+		} else if (prev !== null) {
+			const delta = result.score - prev;
+			if (delta > 0) addLog(`Score: ${prev} → ${result.score} (+${delta})`, "improve");
+			else if (delta < 0) addLog(`Score: ${prev} → ${result.score} (${delta})`, "regress");
+			else addLog(`Score: ${result.score} (no change)`, "scan");
 
-				// Threshold alerts
-				if (delta < 0 && Math.abs(delta) >= monCfg.alertDrop) {
-					addLog(`⚠ ALERT: Score dropped ${Math.abs(delta)} pts (threshold: ${monCfg.alertDrop})`, "alert");
-				}
-			} else {
-				addLog(`Score: ${result.grade} ${result.score}/100 — ${totalIssues} issues — ${result.duration}ms`, "scan");
+			if (delta < 0 && Math.abs(delta) >= monCfg.alertDrop) {
+				addLog(`⚠ ALERT: Score dropped ${Math.abs(delta)} pts (threshold: ${monCfg.alertDrop})`, "alert");
 			}
-
-			if (result.score < monCfg.alertBelow && (prev === null || prev >= monCfg.alertBelow)) {
-				addLog(`⚠ ALERT: Score ${result.score} below threshold ${monCfg.alertBelow}`, "alert");
-			}
-
-			prevScoreRef.current = result.score;
-		} catch (err) {
-			setState((s) => ({ ...s, scanning: false }));
-			addLog(`Scan error: ${err instanceof Error ? err.message : "unknown"}`, "error");
+		} else {
+			addLog(`Score: ${result.grade} ${result.score}/100 — ${result.totalIssues} issues — ${result.duration}ms`, "scan");
 		}
+
+		if (result.score > 0 && result.score < monCfg.alertBelow && (prev === null || prev >= monCfg.alertBelow)) {
+			addLog(`⚠ ALERT: Score ${result.score} below threshold ${monCfg.alertBelow}`, "alert");
+		}
+
+		prevScoreRef.current = result.score;
 		scanningRef.current = false;
-	}, [cwd, stack, workspace, isDart, config, monCfg, addLog]);
+	}, [cwd, monCfg, addLog]);
 
 	// Initial scan
 	useEffect(() => { doScan(); }, [doScan]);
@@ -493,7 +426,6 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		if (mode !== "monitor") return;
 		if (input === "r") doScan();
 		if (input === "c") setMode("config");
-		// All other keys silently ignored — no echo
 	});
 
 	const proj = basename(cwd);
@@ -514,7 +446,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 	// Fixed panel heights — no reflow on content changes
 	const sidebarVisible = p.score || p.checks;
 	const mainVisible = p.activity || p.issues;
-	const bodyRows = rows - 4; // header + metrics + footer + border
+	const bodyRows = rows - 4;
 	const scoreH = p.score ? 8 : 0;
 	const checksH = p.checks ? Math.max(6, bodyRows - scoreH) : 0;
 	const activityH = p.activity && p.issues ? Math.floor(bodyRows / 2) : p.activity ? bodyRows : 0;
@@ -537,9 +469,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 					<Text dimColor> {stack.language}/{stack.framework}{workspace.isMonorepo ? ` · ${workspace.tool}` : ""}</Text>
 				</Text>
 				<Text>
-					{state.score > 0 && (
-						<Text color={gc(state.grade)} bold>{state.grade} {state.score} </Text>
-					)}
+					{state.score > 0 && <Text color={gc(state.grade)} bold>{state.grade} {state.score} </Text>}
 					<Text dimColor>{state.scanning ? "⟳ scanning" : "● watching"}</Text>
 				</Text>
 			</Box>

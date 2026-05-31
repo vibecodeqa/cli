@@ -940,7 +940,7 @@ async function main() {
 	}
 
 	// Non-blocking update check (don't slow down the scan)
-	if (!jsonOnly && !ciMode && !watchMode) {
+	if (!jsonOnly && !ciMode && !watchMode && !process.env.VCQA_NO_UPDATE_CHECK) {
 		checkForUpdate(VERSION).catch(() => {});
 	}
 
