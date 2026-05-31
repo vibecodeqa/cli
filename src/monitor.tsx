@@ -14,6 +14,7 @@ import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { detectStack, detectWorkspace } from "./detect.js";
+import { loadHistory } from "./history.js";
 import type { CheckResult } from "./types.js";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8")).version;
@@ -328,6 +329,99 @@ function ConfigScreen({
 	);
 }
 
+// ── Trends Screen ──
+
+function sparkFull(values: number[], width: number): string {
+	if (values.length < 2) return "";
+	const bars = " ▁▂▃▄▅▆▇█";
+	const min = Math.min(...values);
+	const max = Math.max(...values);
+	const range = max - min || 1;
+	// Resample to fit width
+	const sampled: number[] = [];
+	for (let i = 0; i < width; i++) {
+		const idx = Math.round((i / (width - 1)) * (values.length - 1));
+		sampled.push(values[idx]);
+	}
+	return sampled.map((v) => bars[Math.round(((v - min) / range) * 8)]!).join("");
+}
+
+function TrendsScreen({ cwd, height, onClose }: { cwd: string; height: number; onClose: () => void }) {
+	const historyDir = join(cwd, ".vibe-check", "history");
+	const history = loadHistory(historyDir);
+
+	useInput((input, key) => {
+		if (key.escape || input === "t") onClose();
+	});
+
+	if (history.length < 2) {
+		return (
+			<Box flexDirection="column" height={height} paddingX={1}>
+				<Text bold color="magenta"> ◈ Trends</Text>
+				<Text dimColor> Need at least 2 scans. Run the scanner a few more times.</Text>
+				<Text dimColor> Esc to go back</Text>
+			</Box>
+		);
+	}
+
+	const latest = history[history.length - 1];
+	const first = history[0];
+	const overallDelta = latest.score - first.score;
+	const scores = history.map((h) => h.score);
+	const chartWidth = 40;
+
+	// Get all check names from latest
+	const checkNames = [...latest.checkScores.keys()];
+
+	// Build per-check trends
+	const checkTrends = checkNames
+		.map((name) => {
+			const values = history.map((h) => h.checkScores.get(name) ?? 0).filter((v) => v > 0);
+			if (values.length < 2) return null;
+			const current = values[values.length - 1];
+			const prev = values[0];
+			const delta = current - prev;
+			return { name, current, delta, spark: sparkFull(values, 20) };
+		})
+		.filter(Boolean)
+		.sort((a, b) => a!.delta - b!.delta) as { name: string; current: number; delta: number; spark: string }[];
+
+	const visibleChecks = Math.max(1, height - 10);
+
+	return (
+		<Box flexDirection="column" height={height} paddingX={1}>
+			<Text bold color="magenta"> ◈ Trends — {history.length} scans</Text>
+			<Text dimColor> {first.timestamp.split("T")[0]} → {latest.timestamp.split("T")[0]}</Text>
+			<Text> </Text>
+
+			{/* Overall score */}
+			<Text bold> Overall Score</Text>
+			<Text>
+				<Text color="cyan"> {sparkFull(scores, chartWidth)} </Text>
+				<Text color={gc(latest.score >= 90 ? "A" : latest.score >= 75 ? "B" : "C")} bold> {latest.score}</Text>
+				<Text color={overallDelta >= 0 ? "green" : "red"}> {overallDelta >= 0 ? "+" : ""}{overallDelta}</Text>
+			</Text>
+			<Text> </Text>
+
+			{/* Per-check trends */}
+			<Text bold> Per-Check (first → latest)</Text>
+			{checkTrends.slice(0, visibleChecks).map((t) => (
+				<Text key={t.name}>
+					<Text> {t.name.slice(0, 14).padEnd(14)} </Text>
+					<Text color="cyan">{t.spark} </Text>
+					<Text color={gc(t.current >= 90 ? "A" : t.current >= 75 ? "B" : "C")}>{String(t.current).padStart(3)} </Text>
+					<Text color={t.delta >= 0 ? "green" : "red"}>{t.delta >= 0 ? "+" : ""}{t.delta}</Text>
+				</Text>
+			))}
+			{checkTrends.length > visibleChecks && <Text dimColor> +{checkTrends.length - visibleChecks} more</Text>}
+
+			<Box marginTop={1}>
+				<Text dimColor> Esc back to dashboard</Text>
+			</Box>
+		</Box>
+	);
+}
+
 // ── Main App ──
 
 /** Load last scan from .vibe-check/report.json for instant display on startup. */
@@ -360,7 +454,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 
 	const cached = loadCachedScan(cwd);
 	const [monCfg, setMonCfg] = useState<MonitorConfig>(() => loadMonitorConfig(cwd));
-	const [mode, setMode] = useState<"monitor" | "config">("monitor");
+	const [mode, setMode] = useState<"monitor" | "config" | "trends">("monitor");
 	const [state, setState] = useState<ScanState>(cached ?? {
 		checks: [], score: 0, grade: "?", duration: 0,
 		totalIssues: 0, scanning: true, scanCount: 0, scores: [],
@@ -442,7 +536,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 	// Keyboard — all input handled, nothing echoed
 	useInput((input, key) => {
 		if (key.escape) {
-			if (mode === "config") { setMode("monitor"); return; }
+			if (mode !== "monitor") { setMode("monitor"); return; }
 			exit();
 			return;
 		}
@@ -450,10 +544,19 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		if (mode !== "monitor") return;
 		if (input === "r") doScan();
 		if (input === "c") setMode("config");
+		if (input === "t") setMode("trends");
 	});
 
 	const proj = basename(cwd);
 	const p = monCfg.panels;
+
+	if (mode === "trends") {
+		return (
+			<Box flexDirection="column" height={rows}>
+				<TrendsScreen cwd={cwd} height={rows} onClose={() => setMode("monitor")} />
+			</Box>
+		);
+	}
 
 	if (mode === "config") {
 		return (
@@ -534,7 +637,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 
 			{/* Footer */}
 			<Box paddingX={1} justifyContent="space-between">
-				<Text dimColor>q/Esc quit · r rescan · c settings</Text>
+				<Text dimColor>q/Esc quit · r rescan · t trends · c settings</Text>
 				{monCfg.alertBelow > 0 && (
 					<Text dimColor>alert &lt;{monCfg.alertBelow} · drop ≥{monCfg.alertDrop}</Text>
 				)}
