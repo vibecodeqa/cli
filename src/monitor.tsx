@@ -631,6 +631,61 @@ function GitChangesView({ cwd, checks, height, cursor }: {
 	);
 }
 
+// ── All Files View ──
+
+function AllFilesView({ checks, height, cursor }: { checks: CheckResult[]; height: number; cursor: number }) {
+	// Build file list from all issues, sorted by issue count descending
+	const fileMap = useMemo(() => {
+		const map = new Map<string, { errors: number; warnings: number; infos: number }>();
+		for (const c of checks) {
+			for (const iss of c.issues) {
+				if (!iss.file || typeof iss.file !== "string") continue;
+				const entry = map.get(iss.file) || { errors: 0, warnings: 0, infos: 0 };
+				if (iss.severity === "error") entry.errors++;
+				else if (iss.severity === "warning") entry.warnings++;
+				else entry.infos++;
+				map.set(iss.file, entry);
+			}
+		}
+		return [...map.entries()]
+			.map(([file, counts]) => ({ file, total: counts.errors + counts.warnings + counts.infos, ...counts }))
+			.sort((a, b) => b.total - a.total);
+	}, [checks]);
+
+	const visibleLines = Math.max(1, height - 5);
+	// Scroll window
+	const scrollStart = Math.max(0, Math.min(cursor - Math.floor(visibleLines / 2), fileMap.length - visibleLines));
+	const visible = fileMap.slice(scrollStart, scrollStart + visibleLines);
+
+	return (
+		<Box flexDirection="column" height={height} paddingX={1} overflowY="hidden">
+			<Text bold color="magenta"> ◈ Files with Issues ({fileMap.length})</Text>
+			<Text dimColor> sorted by issue count · Enter to drill in</Text>
+			<Text> </Text>
+			{fileMap.length === 0 ? (
+				<Text color="green"> No issues in any file.</Text>
+			) : (
+				<>
+					{visible.map((f, i) => {
+						const idx = scrollStart + i;
+						const sel = idx === cursor;
+						return (
+							<Text key={f.file} wrap="truncate">
+								<Text color={sel ? "white" : "gray"}>{sel ? "▸" : " "}</Text>
+								{f.errors > 0 ? <Text color="red" bold>{String(f.errors).padStart(2)}E </Text> : <Text dimColor>   </Text>}
+								{f.warnings > 0 ? <Text color="yellow">{String(f.warnings).padStart(2)}W </Text> : <Text dimColor>   </Text>}
+								{f.infos > 0 ? <Text dimColor>{String(f.infos).padStart(2)}I </Text> : <Text dimColor>   </Text>}
+								<Text color={sel ? "white" : "cyan"}>{f.file}</Text>
+							</Text>
+						);
+					})}
+					{fileMap.length > scrollStart + visibleLines && <Text dimColor> +{fileMap.length - scrollStart - visibleLines} more (↓)</Text>}
+				</>
+			)}
+		</Box>
+	);
+}
+
 // ── Main App ──
 
 type Panel = "checks" | "issues";
@@ -639,6 +694,7 @@ type Mode =
 	| { view: "check-detail"; checkName: string }
 	| { view: "issue-detail"; checkName: string; issueIdx: number }
 	| { view: "git-changes" }
+	| { view: "all-files" }
 	| { view: "file-issues"; file: string }
 	| { view: "trends" }
 	| { view: "config" };
@@ -776,7 +832,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		if (key.escape) {
 			if (mode.view === "config") { setPendingCfg(null); setMode({ view: "dashboard" }); setCursor(0); return; }
 			if (mode.view === "issue-detail") { setMode({ view: "check-detail", checkName: mode.checkName }); setCursor(mode.issueIdx); return; }
-			if (mode.view === "file-issues") { setMode({ view: "git-changes" }); setCursor(0); return; }
+			if (mode.view === "file-issues") { setMode({ view: "dashboard" }); setCursor(0); return; }
 			if (mode.view !== "dashboard") { setMode({ view: "dashboard" }); setCursor(0); return; }
 			exit();
 			return;
@@ -823,6 +879,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		// View switching (not from config — handled above)
 		if (input === "t") { setMode({ view: "trends" }); setCursor(0); return; }
 		if (input === "g") { setMode({ view: "git-changes" }); setCursor(0); return; }
+		if (input === "f") { setMode({ view: "all-files" }); setCursor(0); return; }
 		if (input === "c") { setMode({ view: "config" }); setConfigCursor(0); setPendingCfg({ ...monCfg, panels: { ...monCfg.panels } }); return; }
 
 		// ── Dashboard navigation ──
@@ -876,6 +933,20 @@ function MonitorApp({ cwd }: { cwd: string }) {
 			}
 		}
 
+		// ── All files: ↑↓ navigate, Enter drill into file issues ──
+		if (mode.view === "all-files") {
+			const fileMap = state.checks
+				.flatMap((c) => c.issues.filter((i) => i.file && typeof i.file === "string").map((i) => i.file!))
+				.reduce((map, f) => { map.set(f, (map.get(f) || 0) + 1); return map; }, new Map<string, number>());
+			const files = [...fileMap.keys()].sort((a, b) => (fileMap.get(b) || 0) - (fileMap.get(a) || 0));
+			if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
+			if (key.downArrow) setCursor((c) => Math.min(files.length - 1, c + 1));
+			if (key.return && files[cursor]) {
+				setMode({ view: "file-issues", file: files[cursor] });
+				setCursor(0);
+			}
+		}
+
 		// ── Git changes: ↑↓ navigate, Enter drill into file issues ──
 		if (mode.view === "git-changes") {
 			const changes = getGitChanges(cwd);
@@ -918,6 +989,18 @@ function MonitorApp({ cwd }: { cwd: string }) {
 	const p = monCfg.panels;
 
 	// ── Render views ──
+
+	if (mode.view === "all-files") {
+		return (
+			<Box flexDirection="column" height={rows}>
+				<Header proj={proj} stack={stack} workspace={workspace} state={state} />
+				<AllFilesView checks={state.checks} height={rows - 3} cursor={cursor} />
+				<Box paddingX={1}>
+					<Text dimColor>Esc back · ↑↓ select · Enter view file issues · q quit</Text>
+				</Box>
+			</Box>
+		);
+	}
 
 	if (mode.view === "git-changes") {
 		return (
@@ -1104,7 +1187,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 
 			{/* Footer */}
 			<Box paddingX={1} justifyContent="space-between">
-				<Text dimColor>Tab panel · ↑↓ Enter Esc · r scan · g git · t trends · c config · q quit</Text>
+				<Text dimColor>Tab panel · ↑↓ Enter Esc · r scan · f files · g git · t trends · c config · q</Text>
 			</Box>
 		</Box>
 	);
