@@ -102,11 +102,6 @@ function ts(): string {
 	return new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function bar(score: number, width: number): string {
-	const filled = Math.round((score / 100) * width);
-	return "█".repeat(filled) + "░".repeat(width - filled);
-}
-
 // ── Scan via child process — UI never freezes ──
 
 function runScanProcess(
@@ -164,27 +159,6 @@ function ScorePanel({ state, height }: { state: ScanState; height: number }) {
 	);
 }
 
-function ChecksPanel({ checks, height }: { checks: CheckResult[]; height: number }) {
-	const active = checks.filter((c) => !(c.details as Record<string, unknown>).skipped && !(c.details as Record<string, unknown>).comingSoon);
-	const pro = checks.filter((c) => (c.details as Record<string, unknown>).comingSoon);
-	const visibleLines = Math.max(1, height - 3);
-	return (
-		<Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} width={24} height={height} overflowY="hidden">
-			<Text bold color="magenta"> ◈ Checks</Text>
-			{active.slice(0, visibleLines).map((c) => (
-				<Text key={c.name}>
-					<Text color={gc(c.grade)}> {c.grade === "A" ? "●" : c.grade === "B" ? "◐" : "○"} </Text>
-					<Text>{c.name.slice(0, 13).padEnd(13)}</Text>
-					<Text dimColor> {bar(c.score, 4)} </Text>
-					<Text color={gc(c.grade)}>{String(c.score).padStart(3)}</Text>
-				</Text>
-			))}
-			{active.length > visibleLines && <Text dimColor> +{active.length - visibleLines} more</Text>}
-			{pro.length > 0 && <Text color="magenta"> ◆ {pro.length} Pro</Text>}
-		</Box>
-	);
-}
-
 function ActivityPanel({ log, height }: { log: LogEntry[]; height: number }) {
 	const colors: Record<string, string> = {
 		info: "gray", scan: "cyan", change: "yellow",
@@ -200,37 +174,6 @@ function ActivityPanel({ log, height }: { log: LogEntry[]; height: number }) {
 					<Text color={colors[entry.type]}>{entry.text}</Text>
 				</Text>
 			))}
-		</Box>
-	);
-}
-
-function IssuesPanel({ checks, height }: { checks: CheckResult[]; height: number }) {
-	const issues = checks
-		.flatMap((c) => c.issues.map((i) => ({ check: c.name, ...i })))
-		.sort((a, b) => {
-			const o: Record<string, number> = { error: 0, warning: 1, info: 2 };
-			return (o[a.severity] ?? 2) - (o[b.severity] ?? 2);
-		});
-	const errors = issues.filter((i) => i.severity === "error").length;
-	const warnings = issues.filter((i) => i.severity === "warning").length;
-	const visibleLines = Math.max(1, height - 3);
-
-	return (
-		<Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} height={height} overflowY="hidden">
-			<Text bold color="magenta">
-				{" "}◈ Issues ({issues.length})
-				{errors > 0 && <Text color="red"> {errors}E</Text>}
-				{warnings > 0 && <Text color="yellow"> {warnings}W</Text>}
-			</Text>
-			{issues.slice(0, visibleLines).map((iss, i) => (
-				<Text key={i} wrap="truncate">
-					<Text color={sc(iss.severity)} bold>{iss.severity[0]!.toUpperCase()} </Text>
-					<Text dimColor>{(iss.check || "").slice(0, 11).padEnd(11)} </Text>
-					{iss.file && <Text color="cyan">{basename(String(iss.file)).slice(0, 18).padEnd(18)} </Text>}
-					<Text>{iss.message.slice(0, 45)}</Text>
-				</Text>
-			))}
-			{issues.length > visibleLines && <Text dimColor> +{issues.length - visibleLines} more</Text>}
 		</Box>
 	);
 }
@@ -447,6 +390,48 @@ function loadCachedScan(cwd: string): ScanState | null {
 	}
 }
 
+// ── Check Detail View ──
+
+function CheckDetail({ check, height }: { check: CheckResult; height: number }) {
+	const meta = { name: check.name, score: check.score, grade: check.grade };
+	const visibleIssues = Math.max(1, height - 6);
+	return (
+		<Box flexDirection="column" height={height} paddingX={1}>
+			<Text bold color="magenta"> ◈ {check.name}</Text>
+			<Text>
+				<Text color={gc(meta.grade)} bold> {meta.grade} {meta.score}/100</Text>
+				<Text dimColor> · {check.issues.length} issues · {check.duration}ms</Text>
+			</Text>
+			<Text> </Text>
+			{check.issues.length === 0 ? (
+				<Text color="green"> No issues found.</Text>
+			) : (
+				<>
+					{check.issues.slice(0, visibleIssues).map((iss, i) => (
+						<Text key={i} wrap="truncate">
+							<Text color={sc(iss.severity)} bold> {iss.severity[0]!.toUpperCase()} </Text>
+							{iss.file && <Text color="cyan">{String(iss.file).slice(0, 30).padEnd(30)} </Text>}
+							{iss.line && <Text dimColor>{String(iss.line).padEnd(5)}</Text>}
+							<Text>{iss.message.slice(0, 60)}</Text>
+							{iss.rule && <Text dimColor> ({iss.rule})</Text>}
+						</Text>
+					))}
+					{check.issues.length > visibleIssues && <Text dimColor> +{check.issues.length - visibleIssues} more</Text>}
+				</>
+			)}
+		</Box>
+	);
+}
+
+// ── Main App ──
+
+type Panel = "checks" | "issues";
+type Mode =
+	| { view: "dashboard" }
+	| { view: "check-detail"; checkName: string }
+	| { view: "trends" }
+	| { view: "config" };
+
 function MonitorApp({ cwd }: { cwd: string }) {
 	const { exit } = useApp();
 	const { stdout } = useStdout();
@@ -454,7 +439,9 @@ function MonitorApp({ cwd }: { cwd: string }) {
 
 	const cached = loadCachedScan(cwd);
 	const [monCfg, setMonCfg] = useState<MonitorConfig>(() => loadMonitorConfig(cwd));
-	const [mode, setMode] = useState<"monitor" | "config" | "trends">("monitor");
+	const [mode, setMode] = useState<Mode>({ view: "dashboard" });
+	const [panel, setPanel] = useState<Panel>("checks");
+	const [cursor, setCursor] = useState(0);
 	const [state, setState] = useState<ScanState>(cached ?? {
 		checks: [], score: 0, grade: "?", duration: 0,
 		totalIssues: 0, scanning: true, scanCount: 0, scores: [],
@@ -471,6 +458,16 @@ function MonitorApp({ cwd }: { cwd: string }) {
 
 	const workspace = detectWorkspace(cwd);
 	const stack = detectStack(cwd, workspace);
+
+	// Derived lists for navigation
+	const activeChecks = state.checks.filter((c) => !(c.details as Record<string, unknown>).skipped && !(c.details as Record<string, unknown>).comingSoon);
+	const allIssues = state.checks
+		.flatMap((c) => c.issues.map((i) => ({ check: c.name, ...i })))
+		.sort((a, b) => {
+			const o: Record<string, number> = { error: 0, warning: 1, info: 2 };
+			return (o[a.severity] ?? 2) - (o[b.severity] ?? 2);
+		});
+	const currentList = panel === "checks" ? activeChecks : allIssues;
 
 	const doScan = useCallback(async () => {
 		if (scanningRef.current) return;
@@ -510,7 +507,6 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		scanningRef.current = false;
 	}, [cwd, monCfg, addLog]);
 
-	// Initial scan
 	useEffect(() => { doScan(); }, [doScan]);
 
 	// File watcher
@@ -533,44 +529,105 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		return () => { for (const w of watchers) w.close(); };
 	}, [cwd, workspace, doScan, addLog, monCfg.debounceMs]);
 
-	// Keyboard — all input handled, nothing echoed
+	// ── Keyboard — unified navigation ──
 	useInput((input, key) => {
+		// Quit from anywhere
+		if (input === "q" || (key.ctrl && input === "c")) { exit(); return; }
+
+		// Esc: drill up or quit
 		if (key.escape) {
-			if (mode !== "monitor") { setMode("monitor"); return; }
+			if (mode.view !== "dashboard") { setMode({ view: "dashboard" }); setCursor(0); return; }
 			exit();
 			return;
 		}
-		if (input === "q" || (key.ctrl && input === "c")) { exit(); return; }
-		if (mode !== "monitor") return;
-		if (input === "r") doScan();
-		if (input === "c") setMode("config");
-		if (input === "t") setMode("trends");
+
+		// Global shortcuts
+		if (input === "r" && mode.view === "dashboard") { doScan(); return; }
+
+		// View switching
+		if (input === "t") { setMode({ view: "trends" }); setCursor(0); return; }
+		if (input === "c" && mode.view !== "config") { setMode({ view: "config" }); return; }
+
+		// Dashboard navigation
+		if (mode.view === "dashboard") {
+			// Tab switches focused panel
+			if (key.tab) {
+				setPanel((p) => p === "checks" ? "issues" : "checks");
+				setCursor(0);
+				return;
+			}
+			// ↑↓ navigate within panel
+			if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
+			if (key.downArrow) setCursor((c) => Math.min(currentList.length - 1, c + 1));
+			// Enter: drill into selected check
+			if (key.return && panel === "checks" && activeChecks[cursor]) {
+				setMode({ view: "check-detail", checkName: activeChecks[cursor].name });
+				setCursor(0);
+				return;
+			}
+			// Enter on issue: drill into that check
+			if (key.return && panel === "issues" && allIssues[cursor]) {
+				setMode({ view: "check-detail", checkName: allIssues[cursor].check });
+				setCursor(0);
+				return;
+			}
+		}
+
+		// Check detail: ↑↓ scroll issues
+		if (mode.view === "check-detail") {
+			const check = state.checks.find((c) => c.name === mode.checkName);
+			if (check) {
+				if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
+				if (key.downArrow) setCursor((c) => Math.min(check.issues.length - 1, c + 1));
+			}
+		}
+
+		// Trends: ↑↓ scroll
+		if (mode.view === "trends") {
+			if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
+			if (key.downArrow) setCursor((c) => c + 1);
+		}
 	});
 
 	const proj = basename(cwd);
 	const p = monCfg.panels;
 
-	if (mode === "trends") {
+	// ── Render views ──
+
+	if (mode.view === "check-detail") {
+		const check = state.checks.find((c) => c.name === mode.checkName);
 		return (
 			<Box flexDirection="column" height={rows}>
-				<TrendsScreen cwd={cwd} height={rows} onClose={() => setMode("monitor")} />
+				<Header proj={proj} stack={stack} workspace={workspace} state={state} />
+				{check ? <CheckDetail check={check} height={rows - 3} /> : <Text dimColor> Check not found</Text>}
+				<Box paddingX={1}>
+					<Text dimColor>Esc back · ↑↓ scroll · q quit</Text>
+				</Box>
 			</Box>
 		);
 	}
 
-	if (mode === "config") {
+	if (mode.view === "trends") {
+		return (
+			<Box flexDirection="column" height={rows}>
+				<TrendsScreen cwd={cwd} height={rows} onClose={() => setMode({ view: "dashboard" })} />
+			</Box>
+		);
+	}
+
+	if (mode.view === "config") {
 		return (
 			<Box flexDirection="column" height={rows} justifyContent="center" alignItems="center">
 				<ConfigScreen
 					monCfg={monCfg}
 					onSave={(cfg) => { setMonCfg(cfg); saveMonitorConfig(cwd, cfg); addLog("Settings saved", "info"); }}
-					onClose={() => setMode("monitor")}
+					onClose={() => setMode({ view: "dashboard" })}
 				/>
 			</Box>
 		);
 	}
 
-	// Fixed panel heights — no reflow on content changes
+	// ── Dashboard ──
 	const sidebarVisible = p.score || p.checks;
 	const mainVisible = p.activity || p.issues;
 	const bodyRows = rows - 4;
@@ -581,25 +638,10 @@ function MonitorApp({ cwd }: { cwd: string }) {
 
 	const errorCount = state.checks.reduce((s, c) => s + c.issues.filter((i) => i.severity === "error").length, 0);
 	const warnCount = state.checks.reduce((s, c) => s + c.issues.filter((i) => i.severity === "warning").length, 0);
-	const activeCount = state.checks.filter((c) => !(c.details as Record<string, unknown>).skipped && !(c.details as Record<string, unknown>).comingSoon).length;
 
 	return (
 		<Box flexDirection="column" height={rows}>
-			{/* Header */}
-			<Box paddingX={1} justifyContent="space-between">
-				<Text>
-					<Text color="magenta" bold>vcqa monitor</Text>
-					<Text dimColor> v{VERSION}</Text>
-				</Text>
-				<Text>
-					<Text bold>{proj}</Text>
-					<Text dimColor> {stack.language}/{stack.framework}{workspace.isMonorepo ? ` · ${workspace.tool}` : ""}</Text>
-				</Text>
-				<Text>
-					{state.score > 0 && <Text color={gc(state.grade)} bold>{state.grade} {state.score} </Text>}
-					<Text dimColor>{state.scanning ? "⟳ scanning" : "● watching"}</Text>
-				</Text>
-			</Box>
+			<Header proj={proj} stack={stack} workspace={workspace} state={state} />
 
 			{/* Metrics bar */}
 			<Box paddingX={1} gap={2} height={1}>
@@ -607,25 +649,58 @@ function MonitorApp({ cwd }: { cwd: string }) {
 					<>
 						<Text><Text dimColor>E </Text><Text color="red" bold>{errorCount}</Text></Text>
 						<Text><Text dimColor>W </Text><Text color="yellow" bold>{warnCount}</Text></Text>
-						<Text><Text dimColor>checks </Text><Text bold>{activeCount}</Text></Text>
+						<Text><Text dimColor>checks </Text><Text bold>{activeChecks.length}</Text></Text>
 						<Text><Text dimColor>scan </Text><Text>{state.duration}ms</Text></Text>
 						{state.scores.length >= 2 && <Text color="cyan">{spark(state.scores)}</Text>}
 					</>
 				)}
 			</Box>
 
-			{/* Body — fixed heights, no reflow */}
+			{/* Body */}
 			<Box height={bodyRows}>
 				{sidebarVisible && (
 					<Box flexDirection="column" width={26}>
 						{p.score && <ScorePanel state={state} height={scoreH} />}
-						{p.checks && <ChecksPanel checks={state.checks} height={checksH} />}
+						{p.checks && (
+							<Box flexDirection="column" borderStyle="round" borderColor={panel === "checks" ? "magenta" : "gray"} paddingX={1} width={24} height={checksH} overflowY="hidden">
+								<Text bold color="magenta"> ◈ Checks {panel === "checks" && <Text dimColor>◄</Text>}</Text>
+								{activeChecks.slice(0, checksH - 3).map((c, i) => {
+									const sel = panel === "checks" && i === cursor;
+									return (
+										<Text key={c.name}>
+											<Text color={sel ? "white" : gc(c.grade)}>{sel ? "▸" : " "}{c.grade === "A" ? "●" : c.grade === "B" ? "◐" : "○"} </Text>
+											<Text bold={sel}>{c.name.slice(0, 13).padEnd(13)}</Text>
+											<Text color={gc(c.grade)}>{String(c.score).padStart(3)}</Text>
+										</Text>
+									);
+								})}
+							</Box>
+						)}
 					</Box>
 				)}
 				{mainVisible && (
 					<Box flexDirection="column" flexGrow={1}>
 						{p.activity && <ActivityPanel log={log} height={activityH} />}
-						{p.issues && <IssuesPanel checks={state.checks} height={issuesH} />}
+						{p.issues && (
+							<Box flexDirection="column" borderStyle="round" borderColor={panel === "issues" ? "magenta" : "gray"} paddingX={1} height={issuesH} overflowY="hidden">
+								<Text bold color="magenta">
+									{" "}◈ Issues ({allIssues.length}) {panel === "issues" && <Text dimColor>◄</Text>}
+								</Text>
+								{allIssues.slice(0, issuesH - 3).map((iss, i) => {
+									const sel = panel === "issues" && i === cursor;
+									return (
+										<Text key={i} wrap="truncate">
+											<Text color={sel ? "white" : "gray"}>{sel ? "▸" : " "}</Text>
+											<Text color={sc(iss.severity)} bold>{iss.severity[0]!.toUpperCase()} </Text>
+											<Text dimColor>{(iss.check || "").slice(0, 11).padEnd(11)} </Text>
+											{iss.file && <Text color="cyan">{basename(String(iss.file)).slice(0, 18).padEnd(18)} </Text>}
+											<Text>{iss.message.slice(0, 40)}</Text>
+										</Text>
+									);
+								})}
+								{allIssues.length > issuesH - 3 && <Text dimColor> +{allIssues.length - (issuesH - 3)} more</Text>}
+							</Box>
+						)}
 					</Box>
 				)}
 				{!sidebarVisible && !mainVisible && (
@@ -637,11 +712,32 @@ function MonitorApp({ cwd }: { cwd: string }) {
 
 			{/* Footer */}
 			<Box paddingX={1} justifyContent="space-between">
-				<Text dimColor>q/Esc quit · r rescan · t trends · c settings</Text>
-				{monCfg.alertBelow > 0 && (
-					<Text dimColor>alert &lt;{monCfg.alertBelow} · drop ≥{monCfg.alertDrop}</Text>
-				)}
+				<Text dimColor>Tab panel · ↑↓ select · Enter drill · Esc back · r scan · t trends · c config · q quit</Text>
 			</Box>
+		</Box>
+	);
+}
+
+function Header({ proj, stack, workspace, state }: {
+	proj: string;
+	stack: ReturnType<typeof detectStack>;
+	workspace: ReturnType<typeof detectWorkspace>;
+	state: ScanState;
+}) {
+	return (
+		<Box paddingX={1} justifyContent="space-between">
+			<Text>
+				<Text color="magenta" bold>vcqa monitor</Text>
+				<Text dimColor> v{VERSION}</Text>
+			</Text>
+			<Text>
+				<Text bold>{proj}</Text>
+				<Text dimColor> {stack.language}/{stack.framework}{workspace.isMonorepo ? ` · ${workspace.tool}` : ""}</Text>
+			</Text>
+			<Text>
+				{state.score > 0 && <Text color={gc(state.grade)} bold>{state.grade} {state.score} </Text>}
+				<Text dimColor>{state.scanning ? "⟳ scanning" : "● watching"}</Text>
+			</Text>
 		</Box>
 	);
 }
