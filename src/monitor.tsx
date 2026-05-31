@@ -408,13 +408,45 @@ function loadCachedScan(cwd: string): ScanState | null {
 // ── Check Detail View ──
 
 function CheckDetail({ check, height, cursor, copied }: { check: CheckResult; height: number; cursor: number; copied: boolean }) {
-	const visibleIssues = Math.max(1, height - 6);
-	// Scroll window: keep cursor visible
-	const scrollStart = Math.max(0, Math.min(cursor - Math.floor(visibleIssues / 2), check.issues.length - visibleIssues));
-	const visibleSlice = check.issues.slice(scrollStart, scrollStart + visibleIssues);
+	const bodyHeight = height - 5; // header + score + blank + footer margin
+
+	// Each issue takes 2-3 lines: header line + message (wraps if long)
+	// Estimate lines per issue for scroll calculation
+	const issueHeights = check.issues.map((iss) => {
+		const msgLen = iss.message.length;
+		return msgLen > 80 ? 3 : 2; // 2 lines base, 3 if message wraps
+	});
+
+	// Find scroll window that keeps cursor visible
+	let scrollStart = 0;
+	let linesUsed = 0;
+	// First, find how many items fit
+	const fits: number[] = [];
+	for (let i = 0; i < check.issues.length; i++) {
+		if (linesUsed + issueHeights[i] > bodyHeight) break;
+		fits.push(i);
+		linesUsed += issueHeights[i];
+	}
+	const maxVisible = fits.length || 1;
+
+	// Adjust scroll so cursor is visible
+	if (cursor >= scrollStart + maxVisible) scrollStart = cursor - maxVisible + 1;
+	if (cursor < scrollStart) scrollStart = cursor;
+	scrollStart = Math.max(0, Math.min(scrollStart, check.issues.length - maxVisible));
+
+	// Collect visible items within height budget
+	const visible: { issue: typeof check.issues[0]; idx: number }[] = [];
+	let usedLines = 0;
+	for (let i = scrollStart; i < check.issues.length; i++) {
+		if (usedLines + issueHeights[i] > bodyHeight) break;
+		visible.push({ issue: check.issues[i], idx: i });
+		usedLines += issueHeights[i];
+	}
+
+	const remaining = check.issues.length - (scrollStart + visible.length);
 
 	return (
-		<Box flexDirection="column" height={height} paddingX={1}>
+		<Box flexDirection="column" height={height} paddingX={1} overflowY="hidden">
 			<Text bold color="magenta"> ◈ {check.name}</Text>
 			<Text>
 				<Text color={gc(check.grade)} bold> {check.grade} {check.score}/100</Text>
@@ -426,21 +458,24 @@ function CheckDetail({ check, height, cursor, copied }: { check: CheckResult; he
 				<Text color="green"> No issues found.</Text>
 			) : (
 				<>
-					{visibleSlice.map((iss, i) => {
-						const idx = scrollStart + i;
+					{visible.map(({ issue: iss, idx }) => {
 						const sel = idx === cursor;
 						return (
-							<Text key={idx} wrap="truncate">
-								<Text color={sel ? "white" : "gray"}>{sel ? "▸" : " "}</Text>
-								<Text color={sc(iss.severity)} bold>{iss.severity[0]!.toUpperCase()} </Text>
-								{iss.file && <Text color="cyan">{String(iss.file).slice(0, 28).padEnd(28)} </Text>}
-								{iss.line && <Text dimColor>{String(iss.line).padEnd(5)}</Text>}
-								<Text>{iss.message.slice(0, 55)}</Text>
-								{iss.rule && <Text dimColor> ({iss.rule})</Text>}
-							</Text>
+							<Box key={idx} flexDirection="column" marginBottom={0}>
+								<Text>
+									<Text color={sel ? "white" : "gray"}>{sel ? "▸" : " "}</Text>
+									<Text color={sc(iss.severity)} bold>{iss.severity[0]!.toUpperCase()} </Text>
+									{iss.file && <Text color="cyan">{String(iss.file)}{iss.line ? `:${iss.line}` : ""} </Text>}
+									{iss.rule && <Text dimColor>({iss.rule})</Text>}
+								</Text>
+								<Text wrap="wrap">
+									<Text color={sel ? "white" : "gray"}>  </Text>
+									<Text color={sel ? "white" : undefined}>{iss.message}</Text>
+								</Text>
+							</Box>
 						);
 					})}
-					{check.issues.length > scrollStart + visibleIssues && <Text dimColor> +{check.issues.length - scrollStart - visibleIssues} more</Text>}
+					{remaining > 0 && <Text dimColor> +{remaining} more (↓ to scroll)</Text>}
 				</>
 			)}
 		</Box>
