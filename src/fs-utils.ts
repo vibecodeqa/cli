@@ -132,26 +132,34 @@ function shouldIgnore(relPath: string): boolean {
 }
 
 function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>): void {
-	for (const entry of readdirSync(dir)) {
+	let entries: string[];
+	try {
+		entries = readdirSync(dir);
+	} catch {
+		return; // directory doesn't exist, permission denied, or broken symlink
+	}
+	for (const entry of entries) {
 		if (SKIP_DIRS.has(entry)) continue;
 		const full = join(dir, entry);
 		const relPath = full.replace(`${cwd}/`, "");
 		if (shouldIgnore(relPath)) continue;
-		// Skip symlinks to prevent traversal attacks (H3)
-		if (lstatSync(full).isSymbolicLink()) continue;
-		if (statSync(full).isDirectory()) {
-			walk(full, cwd, out, exts);
-		} else {
+		try {
+			// Skip symlinks to prevent traversal attacks (H3)
+			if (lstatSync(full).isSymbolicLink()) continue;
+			const stat = statSync(full);
+			if (stat.isDirectory()) {
+				walk(full, cwd, out, exts);
+				continue;
+			}
 			const ext = extname(entry);
 			if (!exts.has(ext)) continue;
 			// Skip files over 1MB to prevent memory issues (M1)
-			if (statSync(full).size > 1_000_000) continue;
+			if (stat.size > 1_000_000) continue;
 			const fileContent = readFileSync(full, "utf-8");
 			const isSFC = ext === ".vue" || ext === ".svelte";
 			// For SFCs, extract <script> block for logic analysis; keep raw for template checks
 			const content = isSFC ? extractScript(fileContent) : fileContent;
 			const rawContent = isSFC ? fileContent : undefined;
-			const relPath = full.replace(`${cwd}/`, "");
 			const isTest =
 				entry.includes(".test.") ||
 				entry.includes(".spec.") ||
@@ -171,6 +179,8 @@ function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>): v
 				lines: content.split("\n").length,
 				isTest,
 			});
+		} catch {
+			continue; // broken symlink, deleted file, or permission denied
 		}
 	}
 }
