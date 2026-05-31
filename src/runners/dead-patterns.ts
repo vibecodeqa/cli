@@ -131,8 +131,10 @@ export async function runDeadPatterns(cwd: string): Promise<CheckResult> {
 				let started = false;
 				for (let j = i; j < Math.min(i + 20, lines.length); j++) {
 					const l = lines[j];
-					braceDepth += (l.match(/\{/g) || []).length;
-					braceDepth -= (l.match(/\}/g) || []).length;
+					// For "} catch (e) {" on one line, only count braces after "catch"
+					const braceText = j === i && l.includes("catch") ? l.slice(l.indexOf("catch")) : l;
+					braceDepth += (braceText.match(/\{/g) || []).length;
+					braceDepth -= (braceText.match(/\}/g) || []).length;
 					if (braceDepth > 0) started = true;
 					if (started && j > i) {
 						catchBodyLines++;
