@@ -10,7 +10,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { render, Box, Text, useApp, useInput, useStdout } from "ink";
 import { resolve, join, basename } from "node:path";
 import { watch, existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { execFile } from "node:child_process";
+import { execFile, execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { detectStack, detectWorkspace } from "./detect.js";
@@ -100,6 +100,21 @@ function spark(values: number[]): string {
 
 function ts(): string {
 	return new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function copyToClipboard(text: string): boolean {
+	try {
+		const cmd = process.platform === "darwin" ? "pbcopy" : process.platform === "win32" ? "clip" : "xclip -selection clipboard";
+		execSync(cmd, { input: text, stdio: ["pipe", "pipe", "pipe"] });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function buildFixPrompt(checkName: string, issue: { severity: string; message: string; file?: string; line?: number; rule?: string }): string {
+	const loc = issue.file ? `${issue.file}${issue.line ? `:${issue.line}` : ""}` : "";
+	return `Fix this ${issue.severity} in ${loc || "the project"}:\n${issue.message}${issue.rule ? ` (${issue.rule})` : ""}\nCheck: ${checkName}\n\nAnalyze the code, explain the issue, and provide the fix.`;
 }
 
 // ── Scan via child process — UI never freezes ──
@@ -392,31 +407,40 @@ function loadCachedScan(cwd: string): ScanState | null {
 
 // ── Check Detail View ──
 
-function CheckDetail({ check, height }: { check: CheckResult; height: number }) {
-	const meta = { name: check.name, score: check.score, grade: check.grade };
+function CheckDetail({ check, height, cursor, copied }: { check: CheckResult; height: number; cursor: number; copied: boolean }) {
 	const visibleIssues = Math.max(1, height - 6);
+	// Scroll window: keep cursor visible
+	const scrollStart = Math.max(0, Math.min(cursor - Math.floor(visibleIssues / 2), check.issues.length - visibleIssues));
+	const visibleSlice = check.issues.slice(scrollStart, scrollStart + visibleIssues);
+
 	return (
 		<Box flexDirection="column" height={height} paddingX={1}>
 			<Text bold color="magenta"> ◈ {check.name}</Text>
 			<Text>
-				<Text color={gc(meta.grade)} bold> {meta.grade} {meta.score}/100</Text>
+				<Text color={gc(check.grade)} bold> {check.grade} {check.score}/100</Text>
 				<Text dimColor> · {check.issues.length} issues · {check.duration}ms</Text>
+				{copied && <Text color="green" bold> ✓ Copied!</Text>}
 			</Text>
 			<Text> </Text>
 			{check.issues.length === 0 ? (
 				<Text color="green"> No issues found.</Text>
 			) : (
 				<>
-					{check.issues.slice(0, visibleIssues).map((iss, i) => (
-						<Text key={i} wrap="truncate">
-							<Text color={sc(iss.severity)} bold> {iss.severity[0]!.toUpperCase()} </Text>
-							{iss.file && <Text color="cyan">{String(iss.file).slice(0, 30).padEnd(30)} </Text>}
-							{iss.line && <Text dimColor>{String(iss.line).padEnd(5)}</Text>}
-							<Text>{iss.message.slice(0, 60)}</Text>
-							{iss.rule && <Text dimColor> ({iss.rule})</Text>}
-						</Text>
-					))}
-					{check.issues.length > visibleIssues && <Text dimColor> +{check.issues.length - visibleIssues} more</Text>}
+					{visibleSlice.map((iss, i) => {
+						const idx = scrollStart + i;
+						const sel = idx === cursor;
+						return (
+							<Text key={idx} wrap="truncate">
+								<Text color={sel ? "white" : "gray"}>{sel ? "▸" : " "}</Text>
+								<Text color={sc(iss.severity)} bold>{iss.severity[0]!.toUpperCase()} </Text>
+								{iss.file && <Text color="cyan">{String(iss.file).slice(0, 28).padEnd(28)} </Text>}
+								{iss.line && <Text dimColor>{String(iss.line).padEnd(5)}</Text>}
+								<Text>{iss.message.slice(0, 55)}</Text>
+								{iss.rule && <Text dimColor> ({iss.rule})</Text>}
+							</Text>
+						);
+					})}
+					{check.issues.length > scrollStart + visibleIssues && <Text dimColor> +{check.issues.length - scrollStart - visibleIssues} more</Text>}
 				</>
 			)}
 		</Box>
@@ -449,6 +473,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 	const [log, setLog] = useState<LogEntry[]>([
 		{ time: ts(), text: cached ? `Loaded cached scan: ${cached.grade} ${cached.score}/100` : `Monitoring ${basename(cwd)}...`, type: cached ? "scan" : "info" },
 	]);
+	const [copied, setCopied] = useState(false);
 	const scanningRef = useRef(false);
 	const prevScoreRef = useRef<number | null>(cached ? cached.score : null);
 
@@ -573,12 +598,20 @@ function MonitorApp({ cwd }: { cwd: string }) {
 			}
 		}
 
-		// Check detail: ↑↓ scroll issues
+		// Check detail: ↑↓ scroll, Enter copies fix prompt
 		if (mode.view === "check-detail") {
 			const check = state.checks.find((c) => c.name === mode.checkName);
 			if (check) {
 				if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
 				if (key.downArrow) setCursor((c) => Math.min(check.issues.length - 1, c + 1));
+				if (key.return && check.issues[cursor]) {
+					const prompt = buildFixPrompt(check.name, check.issues[cursor]);
+					if (copyToClipboard(prompt)) {
+						setCopied(true);
+						addLog(`Copied fix prompt for ${check.name}:${check.issues[cursor].file || ""}`, "info");
+						setTimeout(() => setCopied(false), 2000);
+					}
+				}
 			}
 		}
 
@@ -599,9 +632,9 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		return (
 			<Box flexDirection="column" height={rows}>
 				<Header proj={proj} stack={stack} workspace={workspace} state={state} />
-				{check ? <CheckDetail check={check} height={rows - 3} /> : <Text dimColor> Check not found</Text>}
+				{check ? <CheckDetail check={check} height={rows - 3} cursor={cursor} copied={copied} /> : <Text dimColor> Check not found</Text>}
 				<Box paddingX={1}>
-					<Text dimColor>Esc back · ↑↓ scroll · q quit</Text>
+					<Text dimColor>Esc back · ↑↓ select · Enter copy fix prompt · q quit</Text>
 				</Box>
 			</Box>
 		);
