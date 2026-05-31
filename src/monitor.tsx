@@ -6,7 +6,7 @@
  * Config persists to .vibe-check/monitor.json.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { render, Box, Text, useApp, useInput, useStdout } from "ink";
 import { resolve, join, basename } from "node:path";
 import { watch, existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
@@ -203,59 +203,7 @@ interface ConfigOption {
 	path: string[];
 }
 
-function ConfigScreen({
-	monCfg, onSave, onClose,
-}: {
-	monCfg: MonitorConfig;
-	onSave: (cfg: MonitorConfig) => void;
-	onClose: () => void;
-}) {
-	const [cursor, setCursor] = useState(0);
-	const [cfg, setCfg] = useState<MonitorConfig>(JSON.parse(JSON.stringify(monCfg)));
-
-	const options: ConfigOption[] = [
-		{ key: "alertBelow", label: "Alert when score below", type: "number", value: cfg.alertBelow, path: ["alertBelow"] },
-		{ key: "alertDrop", label: "Alert on score drop ≥", type: "number", value: cfg.alertDrop, path: ["alertDrop"] },
-		{ key: "debounceMs", label: "Scan debounce (ms)", type: "number", value: cfg.debounceMs, path: ["debounceMs"] },
-		{ key: "skipTests", label: "Skip test execution", type: "toggle", value: cfg.skipTests, path: ["skipTests"] },
-		{ key: "p-score", label: "Panel: Score", type: "toggle", value: cfg.panels.score, path: ["panels", "score"] },
-		{ key: "p-checks", label: "Panel: Checks", type: "toggle", value: cfg.panels.checks, path: ["panels", "checks"] },
-		{ key: "p-activity", label: "Panel: Activity", type: "toggle", value: cfg.panels.activity, path: ["panels", "activity"] },
-		{ key: "p-issues", label: "Panel: Issues", type: "toggle", value: cfg.panels.issues, path: ["panels", "issues"] },
-	];
-
-	useInput((input, key) => {
-		if (key.escape || input === "c") { onClose(); return; }
-		if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
-		if (key.downArrow) setCursor((c) => Math.min(options.length - 1, c + 1));
-
-		const opt = options[cursor];
-		if (!opt) return;
-
-		if (opt.type === "toggle" && (input === " " || key.return)) {
-			const next = { ...cfg };
-			if (opt.path.length === 1) {
-				(next as Record<string, unknown>)[opt.path[0]] = !opt.value;
-			} else {
-				(next.panels as Record<string, boolean>)[opt.path[1]] = !(opt.value as boolean);
-			}
-			setCfg(next);
-		}
-
-		if (opt.type === "number") {
-			const step = key.shift ? 10 : 1;
-			let v = opt.value as number;
-			if (key.rightArrow) v += step;
-			if (key.leftArrow) v = Math.max(0, v - step);
-			if (v !== opt.value) {
-				const next = { ...cfg };
-				(next as Record<string, unknown>)[opt.path[0]] = v;
-				setCfg(next);
-			}
-		}
-
-		if (input === "s") { onSave(cfg); onClose(); }
-	});
+function ConfigScreen({ cursor, options }: { cursor: number; options: ConfigOption[] }) {
 
 	return (
 		<Box flexDirection="column" borderStyle="double" borderColor="magenta" paddingX={2} paddingY={1}>
@@ -304,13 +252,9 @@ function sparkFull(values: number[], width: number): string {
 	return sampled.map((v) => bars[Math.round(((v - min) / range) * 8)]!).join("");
 }
 
-function TrendsScreen({ cwd, height, onClose }: { cwd: string; height: number; onClose: () => void }) {
+function TrendsScreen({ cwd, height }: { cwd: string; height: number }) {
 	const historyDir = join(cwd, ".vibe-check", "history");
 	const history = loadHistory(historyDir);
-
-	useInput((input, key) => {
-		if (key.escape || input === "t") onClose();
-	});
 
 	if (history.length < 2) {
 		return (
@@ -496,11 +440,17 @@ function MonitorApp({ cwd }: { cwd: string }) {
 	const { stdout } = useStdout();
 	const rows = stdout?.rows ?? 30;
 
-	const cached = loadCachedScan(cwd);
+	// Memoize filesystem I/O — only run once
+	const cached = useMemo(() => loadCachedScan(cwd), [cwd]);
+	const workspace = useMemo(() => detectWorkspace(cwd), [cwd]);
+	const stack = useMemo(() => detectStack(cwd, workspace), [cwd, workspace]);
+
 	const [monCfg, setMonCfg] = useState<MonitorConfig>(() => loadMonitorConfig(cwd));
 	const [mode, setMode] = useState<Mode>({ view: "dashboard" });
 	const [panel, setPanel] = useState<Panel>("checks");
 	const [cursor, setCursor] = useState(0);
+	const [configCursor, setConfigCursor] = useState(0);
+	const [pendingCfg, setPendingCfg] = useState<MonitorConfig | null>(null);
 	const [state, setState] = useState<ScanState>(cached ?? {
 		checks: [], score: 0, grade: "?", duration: 0,
 		totalIssues: 0, scanning: true, scanCount: 0, scores: [],
@@ -516,18 +466,24 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		setLog((prev) => [...prev.slice(-50), { time: ts(), text, type }]);
 	}, []);
 
-	const workspace = detectWorkspace(cwd);
-	const stack = detectStack(cwd, workspace);
-
-	// Derived lists for navigation
-	const activeChecks = state.checks.filter((c) => !(c.details as Record<string, unknown>).skipped && !(c.details as Record<string, unknown>).comingSoon);
-	const allIssues = state.checks
-		.flatMap((c) => c.issues.map((i) => ({ check: c.name, ...i })))
-		.sort((a, b) => {
-			const o: Record<string, number> = { error: 0, warning: 1, info: 2 };
-			return (o[a.severity] ?? 2) - (o[b.severity] ?? 2);
-		});
+	// Memoize derived lists
+	const activeChecks = useMemo(() =>
+		state.checks.filter((c) => !(c.details as Record<string, unknown>).skipped && !(c.details as Record<string, unknown>).comingSoon),
+		[state.checks]);
+	const allIssues = useMemo(() =>
+		state.checks
+			.flatMap((c) => c.issues.map((i) => ({ check: c.name, ...i })))
+			.sort((a, b) => {
+				const o: Record<string, number> = { error: 0, warning: 1, info: 2 };
+				return (o[a.severity] ?? 2) - (o[b.severity] ?? 2);
+			}),
+		[state.checks]);
 	const currentList = panel === "checks" ? activeChecks : allIssues;
+
+	// Clamp cursor when data changes
+	useEffect(() => {
+		setCursor((c) => Math.min(c, Math.max(0, currentList.length - 1)));
+	}, [currentList.length]);
 
 	const doScan = useCallback(async () => {
 		if (scanningRef.current) return;
@@ -589,43 +545,85 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		return () => { for (const w of watchers) w.close(); };
 	}, [cwd, workspace, doScan, addLog, monCfg.debounceMs]);
 
-	// ── Keyboard — unified navigation ──
+	const configOptions = useMemo(() => {
+		const cfg = pendingCfg ?? monCfg;
+		return [
+			{ key: "alertBelow", label: "Alert when score below", type: "number" as const, value: cfg.alertBelow, path: ["alertBelow"] },
+			{ key: "alertDrop", label: "Alert on score drop ≥", type: "number" as const, value: cfg.alertDrop, path: ["alertDrop"] },
+			{ key: "debounceMs", label: "Scan debounce (ms)", type: "number" as const, value: cfg.debounceMs, path: ["debounceMs"] },
+			{ key: "skipTests", label: "Skip test execution", type: "toggle" as const, value: cfg.skipTests, path: ["skipTests"] },
+			{ key: "p-score", label: "Panel: Score", type: "toggle" as const, value: cfg.panels.score, path: ["panels", "score"] },
+			{ key: "p-checks", label: "Panel: Checks", type: "toggle" as const, value: cfg.panels.checks, path: ["panels", "checks"] },
+			{ key: "p-activity", label: "Panel: Activity", type: "toggle" as const, value: cfg.panels.activity, path: ["panels", "activity"] },
+			{ key: "p-issues", label: "Panel: Issues", type: "toggle" as const, value: cfg.panels.issues, path: ["panels", "issues"] },
+		];
+	}, [pendingCfg, monCfg]);
+
+	// ── Keyboard — single handler for all views ──
 	useInput((input, key) => {
 		// Quit from anywhere
 		if (input === "q" || (key.ctrl && input === "c")) { exit(); return; }
 
 		// Esc: drill up or quit
 		if (key.escape) {
+			if (mode.view === "config") { setPendingCfg(null); }
 			if (mode.view !== "dashboard") { setMode({ view: "dashboard" }); setCursor(0); return; }
 			exit();
 			return;
 		}
 
-		// Global shortcuts
-		if (input === "r" && mode.view === "dashboard") { doScan(); return; }
+		// Rescan from dashboard or check-detail
+		if (input === "r" && (mode.view === "dashboard" || mode.view === "check-detail")) { doScan(); return; }
 
-		// View switching
-		if (input === "t") { setMode({ view: "trends" }); setCursor(0); return; }
-		if (input === "c" && mode.view !== "config") { setMode({ view: "config" }); return; }
-
-		// Dashboard navigation
-		if (mode.view === "dashboard") {
-			// Tab switches focused panel
-			if (key.tab) {
-				setPanel((p) => p === "checks" ? "issues" : "checks");
-				setCursor(0);
-				return;
+		// ── Config view ──
+		if (mode.view === "config") {
+			const cfg = pendingCfg ?? { ...monCfg };
+			if (key.upArrow) { setConfigCursor((c) => Math.max(0, c - 1)); return; }
+			if (key.downArrow) { setConfigCursor((c) => Math.min(configOptions.length - 1, c + 1)); return; }
+			const opt = configOptions[configCursor];
+			if (!opt) return;
+			if (opt.type === "toggle" && (input === " " || key.return)) {
+				const next = { ...cfg, panels: { ...cfg.panels } };
+				if (opt.path.length === 1) (next as Record<string, unknown>)[opt.path[0]] = !opt.value;
+				else (next.panels as Record<string, boolean>)[opt.path[1]] = !(opt.value as boolean);
+				setPendingCfg(next);
 			}
-			// ↑↓ navigate within panel
+			if (opt.type === "number") {
+				const step = key.shift ? 10 : 1;
+				let v = opt.value as number;
+				if (key.rightArrow) v += step;
+				if (key.leftArrow) v = Math.max(0, v - step);
+				if (v !== opt.value) {
+					const next = { ...cfg, panels: { ...cfg.panels } };
+					(next as Record<string, unknown>)[opt.path[0]] = v;
+					setPendingCfg(next);
+				}
+			}
+			if (input === "s" && pendingCfg) {
+				setMonCfg(pendingCfg);
+				saveMonitorConfig(cwd, pendingCfg);
+				addLog("Settings saved", "info");
+				setPendingCfg(null);
+				setMode({ view: "dashboard" });
+				setCursor(0);
+			}
+			return;
+		}
+
+		// View switching (not from config — handled above)
+		if (input === "t") { setMode({ view: "trends" }); setCursor(0); return; }
+		if (input === "c") { setMode({ view: "config" }); setConfigCursor(0); setPendingCfg({ ...monCfg, panels: { ...monCfg.panels } }); return; }
+
+		// ── Dashboard navigation ──
+		if (mode.view === "dashboard") {
+			if (key.tab) { setPanel((p) => p === "checks" ? "issues" : "checks"); setCursor(0); return; }
 			if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
 			if (key.downArrow) setCursor((c) => Math.min(currentList.length - 1, c + 1));
-			// Enter: drill into selected check
 			if (key.return && panel === "checks" && activeChecks[cursor]) {
 				setMode({ view: "check-detail", checkName: activeChecks[cursor].name });
 				setCursor(0);
 				return;
 			}
-			// Enter on issue: drill into that check
 			if (key.return && panel === "issues" && allIssues[cursor]) {
 				setMode({ view: "check-detail", checkName: allIssues[cursor].check });
 				setCursor(0);
@@ -633,7 +631,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 			}
 		}
 
-		// Check detail: ↑↓ scroll, Enter copies fix prompt
+		// ── Check detail: ↑↓ scroll, Enter copies fix prompt ──
 		if (mode.view === "check-detail") {
 			const check = state.checks.find((c) => c.name === mode.checkName);
 			if (check) {
@@ -650,7 +648,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 			}
 		}
 
-		// Trends: ↑↓ scroll
+		// ── Trends: ↑↓ scroll ──
 		if (mode.view === "trends") {
 			if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
 			if (key.downArrow) setCursor((c) => c + 1);
@@ -678,7 +676,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 	if (mode.view === "trends") {
 		return (
 			<Box flexDirection="column" height={rows}>
-				<TrendsScreen cwd={cwd} height={rows} onClose={() => setMode({ view: "dashboard" })} />
+				<TrendsScreen cwd={cwd} height={rows} />
 			</Box>
 		);
 	}
@@ -686,11 +684,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 	if (mode.view === "config") {
 		return (
 			<Box flexDirection="column" height={rows} justifyContent="center" alignItems="center">
-				<ConfigScreen
-					monCfg={monCfg}
-					onSave={(cfg) => { setMonCfg(cfg); saveMonitorConfig(cwd, cfg); addLog("Settings saved", "info"); }}
-					onClose={() => setMode({ view: "dashboard" })}
-				/>
+				<ConfigScreen cursor={configCursor} options={configOptions} />
 			</Box>
 		);
 	}
