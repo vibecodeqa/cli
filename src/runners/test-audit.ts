@@ -140,8 +140,9 @@ export async function runTestAudit(cwd: string): Promise<CheckResult> {
 			const body = bodyLines.join("\n");
 			const bodyTrimmed = body.replace(/\s+/g, " ").trim();
 
-			// 1. Empty test body
-			if (bodyTrimmed.length < 3 || /^\s*\}\s*$/.test(body.trim())) {
+			// 1. Empty test body — only closing braces/parens, no real code
+			const bodyCode = bodyTrimmed.replace(/[});\s]/g, "");
+			if (bodyCode.length === 0) {
 				emptyTests++;
 				issues.push({
 					severity: "warning",

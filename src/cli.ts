@@ -939,8 +939,27 @@ async function main() {
 		process.exit(1);
 	}
 
+	// Non-blocking update check (don't slow down the scan)
+	if (!jsonOnly && !ciMode && !watchMode) {
+		checkForUpdate(VERSION).catch(() => {});
+	}
+
 	if (watchMode) {
 		await startWatch(cwd);
+	}
+}
+
+async function checkForUpdate(currentVersion: string): Promise<void> {
+	try {
+		const res = await fetch("https://registry.npmjs.org/@vibecodeqa/cli/latest", { signal: AbortSignal.timeout(3000) });
+		if (!res.ok) return;
+		const data = (await res.json()) as { version?: string };
+		const latest = data.version;
+		if (latest && latest !== currentVersion) {
+			console.log(`  \x1b[33mUpdate available: ${currentVersion} → ${latest}\x1b[0m  Run \x1b[1mnpx @vibecodeqa/cli@latest\x1b[0m\n`);
+		}
+	} catch {
+		/* network error — silently ignore */
 	}
 }
 
