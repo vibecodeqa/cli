@@ -955,7 +955,12 @@ async function checkForUpdate(currentVersion: string): Promise<void> {
 		if (!res.ok) return;
 		const data = (await res.json()) as { version?: string };
 		const latest = data.version;
-		if (latest && latest !== currentVersion) {
+		if (!latest || latest === currentVersion) return;
+		// Only show if npm version is actually newer (semver compare)
+		const cur = currentVersion.split(".").map(Number);
+		const lat = latest.split(".").map(Number);
+		const isNewer = lat[0] > cur[0] || (lat[0] === cur[0] && lat[1] > cur[1]) || (lat[0] === cur[0] && lat[1] === cur[1] && lat[2] > cur[2]);
+		if (isNewer) {
 			console.log(`  \x1b[33mUpdate available: ${currentVersion} → ${latest}\x1b[0m  Run \x1b[1mnpx @vibecodeqa/cli@latest\x1b[0m\n`);
 		}
 	} catch {
