@@ -140,6 +140,27 @@ function buildFixPrompt(checkName: string, issue: { severity: string; message: s
 	return prompt;
 }
 
+// ── Git changes ──
+
+interface GitChange {
+	status: "M" | "A" | "D" | "?" | "R";
+	file: string;
+}
+
+function getGitChanges(cwd: string): GitChange[] {
+	try {
+		const out = execSync("git status --porcelain", { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+		if (!out) return [];
+		return out.split("\n").map((line) => {
+			const status = (line[0] === "?" ? "?" : line.trim()[0]) as GitChange["status"];
+			const file = line.slice(3).trim();
+			return { status, file };
+		});
+	} catch {
+		return [];
+	}
+}
+
 // ── Scan via child process — UI never freezes ──
 
 function runScanProcess(
@@ -557,6 +578,59 @@ function IssueDetail({ issue, checkName, cwd, height, copied }: {
 	);
 }
 
+// ── Git Changes View ──
+
+function GitChangesView({ cwd, checks, height, cursor }: {
+	cwd: string; checks: CheckResult[]; height: number; cursor: number;
+}) {
+	const changes = useMemo(() => getGitChanges(cwd), [cwd]);
+
+	// Cross-reference with issues
+	const issuesByFile = useMemo(() => {
+		const map = new Map<string, number>();
+		for (const c of checks) {
+			for (const iss of c.issues) {
+				if (iss.file && typeof iss.file === "string") {
+					map.set(iss.file, (map.get(iss.file) || 0) + 1);
+				}
+			}
+		}
+		return map;
+	}, [checks]);
+
+	const statusColor: Record<string, string> = { M: "yellow", A: "green", D: "red", "?": "gray", R: "cyan" };
+	const visibleLines = Math.max(1, height - 5);
+
+	return (
+		<Box flexDirection="column" height={height} paddingX={1} overflowY="hidden">
+			<Text bold color="magenta"> ◈ Git Changes ({changes.length})</Text>
+			{changes.length === 0 ? (
+				<Text dimColor> Working tree clean — no uncommitted changes.</Text>
+			) : (
+				<>
+					{changes.slice(0, visibleLines).map((ch, i) => {
+						const sel = i === cursor;
+						const count = issuesByFile.get(ch.file) || 0;
+						return (
+							<Text key={ch.file} wrap="truncate">
+								<Text color={sel ? "white" : "gray"}>{sel ? "▸" : " "}</Text>
+								<Text color={statusColor[ch.status] || "gray"} bold> {ch.status} </Text>
+								<Text color={sel ? "white" : undefined}>{ch.file} </Text>
+								{count > 0 ? (
+									<Text color="yellow">{count} issue{count !== 1 ? "s" : ""}</Text>
+								) : (
+									<Text color="green">clean</Text>
+								)}
+							</Text>
+						);
+					})}
+					{changes.length > visibleLines && <Text dimColor> +{changes.length - visibleLines} more</Text>}
+				</>
+			)}
+		</Box>
+	);
+}
+
 // ── Main App ──
 
 type Panel = "checks" | "issues";
@@ -564,6 +638,8 @@ type Mode =
 	| { view: "dashboard" }
 	| { view: "check-detail"; checkName: string }
 	| { view: "issue-detail"; checkName: string; issueIdx: number }
+	| { view: "git-changes" }
+	| { view: "file-issues"; file: string }
 	| { view: "trends" }
 	| { view: "config" };
 
@@ -700,6 +776,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		if (key.escape) {
 			if (mode.view === "config") { setPendingCfg(null); setMode({ view: "dashboard" }); setCursor(0); return; }
 			if (mode.view === "issue-detail") { setMode({ view: "check-detail", checkName: mode.checkName }); setCursor(mode.issueIdx); return; }
+			if (mode.view === "file-issues") { setMode({ view: "git-changes" }); setCursor(0); return; }
 			if (mode.view !== "dashboard") { setMode({ view: "dashboard" }); setCursor(0); return; }
 			exit();
 			return;
@@ -745,6 +822,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 
 		// View switching (not from config — handled above)
 		if (input === "t") { setMode({ view: "trends" }); setCursor(0); return; }
+		if (input === "g") { setMode({ view: "git-changes" }); setCursor(0); return; }
 		if (input === "c") { setMode({ view: "config" }); setConfigCursor(0); setPendingCfg({ ...monCfg, panels: { ...monCfg.panels } }); return; }
 
 		// ── Dashboard navigation ──
@@ -798,6 +876,37 @@ function MonitorApp({ cwd }: { cwd: string }) {
 			}
 		}
 
+		// ── Git changes: ↑↓ navigate, Enter drill into file issues ──
+		if (mode.view === "git-changes") {
+			const changes = getGitChanges(cwd);
+			if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
+			if (key.downArrow) setCursor((c) => Math.min(changes.length - 1, c + 1));
+			if (key.return && changes[cursor]) {
+				setMode({ view: "file-issues", file: changes[cursor].file });
+				setCursor(0);
+			}
+		}
+
+		// ── File issues: ↑↓ navigate, Enter drill into issue detail, y copy ──
+		if (mode.view === "file-issues") {
+			const fileIssues = state.checks.flatMap((c) =>
+				c.issues.filter((i) => i.file === mode.file).map((i) => ({ check: c.name, ...i })),
+			);
+			if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
+			if (key.downArrow) setCursor((c) => Math.min(fileIssues.length - 1, c + 1));
+			if (key.return && fileIssues[cursor]) {
+				setMode({ view: "issue-detail", checkName: fileIssues[cursor].check, issueIdx: 0 });
+			}
+			if (input === "y" && fileIssues[cursor]) {
+				const prompt = buildFixPrompt(fileIssues[cursor].check, fileIssues[cursor], cwd);
+				if (copyToClipboard(prompt)) {
+					setCopied(true);
+					addLog(`Copied fix prompt`, "info");
+					setTimeout(() => setCopied(false), 2000);
+				}
+			}
+		}
+
 		// ── Trends: ↑↓ scroll ──
 		if (mode.view === "trends") {
 			if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
@@ -809,6 +918,59 @@ function MonitorApp({ cwd }: { cwd: string }) {
 	const p = monCfg.panels;
 
 	// ── Render views ──
+
+	if (mode.view === "git-changes") {
+		return (
+			<Box flexDirection="column" height={rows}>
+				<Header proj={proj} stack={stack} workspace={workspace} state={state} />
+				<GitChangesView cwd={cwd} checks={state.checks} height={rows - 3} cursor={cursor} />
+				<Box paddingX={1}>
+					<Text dimColor>Esc back · ↑↓ select · Enter view file issues · q quit</Text>
+				</Box>
+			</Box>
+		);
+	}
+
+	if (mode.view === "file-issues") {
+		const fileIssues = state.checks.flatMap((c) =>
+			c.issues.filter((i) => i.file === mode.file).map((i) => ({ check: c.name, ...i })),
+		);
+		return (
+			<Box flexDirection="column" height={rows}>
+				<Header proj={proj} stack={stack} workspace={workspace} state={state} />
+				<Box flexDirection="column" height={rows - 3} paddingX={1} overflowY="hidden">
+					<Text bold color="magenta"> ◈ {mode.file}</Text>
+					<Text dimColor> {fileIssues.length} issue{fileIssues.length !== 1 ? "s" : ""}{copied && <Text color="green" bold> ✓ Copied!</Text>}</Text>
+					<Text> </Text>
+					{fileIssues.length === 0 ? (
+						<Text color="green"> No issues in this file.</Text>
+					) : (
+						fileIssues.slice(0, rows - 8).map((iss, i) => {
+							const sel = i === cursor;
+							return (
+								<Box key={i} flexDirection="column">
+									<Text>
+										<Text color={sel ? "white" : "gray"}>{sel ? "▸" : " "}</Text>
+										<Text color={sc(iss.severity)} bold>{iss.severity[0]!.toUpperCase()} </Text>
+										{iss.line && <Text color="cyan">{String(iss.line).padEnd(5)}</Text>}
+										<Text dimColor>{iss.check.padEnd(14)}</Text>
+										{iss.rule && <Text dimColor>({iss.rule}) </Text>}
+									</Text>
+									<Text wrap="wrap">
+										<Text color={sel ? "white" : "gray"}>  </Text>
+										<Text color={sel ? "white" : undefined}>{iss.message}</Text>
+									</Text>
+								</Box>
+							);
+						})
+					)}
+				</Box>
+				<Box paddingX={1}>
+					<Text dimColor>Esc back · ↑↓ select · Enter source · y copy prompt · q quit</Text>
+				</Box>
+			</Box>
+		);
+	}
 
 	if (mode.view === "issue-detail") {
 		const check = state.checks.find((c) => c.name === mode.checkName);
@@ -942,7 +1104,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 
 			{/* Footer */}
 			<Box paddingX={1} justifyContent="space-between">
-				<Text dimColor>Tab panel · ↑↓ select · Enter drill · Esc back · r scan · t trends · c config · q quit</Text>
+				<Text dimColor>Tab panel · ↑↓ Enter Esc · r scan · g git · t trends · c config · q quit</Text>
 			</Box>
 		</Box>
 	);
