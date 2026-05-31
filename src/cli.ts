@@ -874,11 +874,12 @@ async function main() {
 		const patterns = getCheckIgnore(config, c.name);
 		if (!patterns?.length) continue;
 		c.issues = c.issues.filter((i) => {
-			if (!i.file) return true;
+			if (!i.file || typeof i.file !== "string") return true;
+			const f = i.file;
 			return !patterns.some((p) => {
-				if (p.endsWith("/**")) return i.file!.startsWith(p.slice(0, -3) + "/");
-				if (p.startsWith("*")) return i.file!.endsWith(p.slice(1));
-				return i.file!.startsWith(p);
+				if (p.endsWith("/**")) return f.startsWith(p.slice(0, -3) + "/");
+				if (p.startsWith("*")) return f.endsWith(p.slice(1));
+				return f.startsWith(p);
 			});
 		});
 	}

@@ -135,7 +135,7 @@ export function generateArchSVG(details: Record<string, unknown>): string {
 		}
 
 		if (!isLarge && (fanIn > 2 || fanOut > 5)) {
-			nodesSvg += `<text x="${pos.x + size + 5}" y="${pos.y + 13}" fill="#555" font-size="7">${fanIn}\u2190 ${fanOut}\u2192</text>`;
+			nodesSvg += `<text x="${pos.x + size + 5}" y="${pos.y + 13}" fill="#888" font-size="7">${fanIn}\u2190 ${fanOut}\u2192</text>`;
 		}
 	}
 

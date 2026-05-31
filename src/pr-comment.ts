@@ -40,8 +40,10 @@ function detectPR(cwd: string): PRInfo | null {
 			const event = JSON.parse(readFileSync(eventPath, "utf-8"));
 			const pr = event.pull_request || event.issue;
 			if (pr?.number && process.env.GITHUB_REPOSITORY) {
-				const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
-				return { owner, repo, prNumber: pr.number };
+				const parts = process.env.GITHUB_REPOSITORY.split("/");
+				if (parts.length >= 2) {
+					return { owner: parts[0], repo: parts[1], prNumber: pr.number };
+				}
 			}
 		} catch {
 			/* not a PR event */

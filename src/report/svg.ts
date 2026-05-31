@@ -4,7 +4,7 @@ export function buildRing(score: number, color: string): string {
 	const r = 42;
 	const c = 2 * Math.PI * r;
 	const off = c - (score / 100) * c;
-	return `<svg viewBox="0 0 100 100" style="width:100px;height:100px"><circle cx="50" cy="50" r="${r}" fill="none" stroke="#1e1e24" stroke-width="7"/><circle cx="50" cy="50" r="${r}" fill="none" stroke="${color}" stroke-width="7" stroke-dasharray="${c}" stroke-dashoffset="${off}" stroke-linecap="round" transform="rotate(-90 50 50)"/></svg>`;
+	return `<svg viewBox="0 0 100 100" style="width:100px;height:100px"><circle cx="50" cy="50" r="${r}" fill="none" stroke="#444" stroke-width="7"/><circle cx="50" cy="50" r="${r}" fill="none" stroke="${color}" stroke-width="7" stroke-dasharray="${c}" stroke-dashoffset="${off}" stroke-linecap="round" transform="rotate(-90 50 50)"/></svg>`;
 }
 
 export function buildRadar(items: { label: string; score: number }[]): string {
@@ -20,12 +20,12 @@ export function buildRadar(items: { label: string; score: number }[]): string {
 		const pts = items
 			.map((_, i) => `${cx + rr * Math.cos(i * step - Math.PI / 2)},${cy + rr * Math.sin(i * step - Math.PI / 2)}`)
 			.join(" ");
-		grid += `<polygon points="${pts}" fill="none" stroke="#1e1e24" stroke-width="0.7"/>`;
+		grid += `<polygon points="${pts}" fill="none" stroke="#444" stroke-width="0.7"/>`;
 	}
 	let axes = "";
 	for (let i = 0; i < n; i++) {
 		const a = i * step - Math.PI / 2;
-		axes += `<line x1="${cx}" y1="${cy}" x2="${cx + r * Math.cos(a)}" y2="${cy + r * Math.sin(a)}" stroke="#1e1e24" stroke-width="0.7"/>`;
+		axes += `<line x1="${cx}" y1="${cy}" x2="${cx + r * Math.cos(a)}" y2="${cy + r * Math.sin(a)}" stroke="#444" stroke-width="0.7"/>`;
 		const lx = cx + (r + 16) * Math.cos(a);
 		const ly = cy + (r + 16) * Math.sin(a);
 		axes += `<text x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle" fill="#6b7280" font-size="9" font-weight="600">${items[i].label}</text>`;
@@ -67,8 +67,8 @@ export function buildTimeline(entries: { score: number; timestamp: string }[], o
 	let grid = "";
 	for (const v of [25, 50, 75]) {
 		const y = yScale(v).toFixed(1);
-		grid += `<line x1="${pad.left}" y1="${y}" x2="${pad.left + w}" y2="${y}" stroke="#1e1e24" stroke-width="0.7"/>`;
-		grid += `<text x="${pad.left - 6}" y="${y}" text-anchor="end" dominant-baseline="middle" fill="#555" font-size="8">${v}</text>`;
+		grid += `<line x1="${pad.left}" y1="${y}" x2="${pad.left + w}" y2="${y}" stroke="#444" stroke-width="0.7"/>`;
+		grid += `<text x="${pad.left - 6}" y="${y}" text-anchor="end" dominant-baseline="middle" fill="#888" font-size="8">${v}</text>`;
 	}
 
 	// Score line + dots
@@ -88,7 +88,7 @@ export function buildTimeline(entries: { score: number; timestamp: string }[], o
 	const labelIndices = entries.length <= 3 ? entries.map((_, i) => i) : [0, Math.floor(entries.length / 2), entries.length - 1];
 	for (const i of labelIndices) {
 		const label = entries[i]!.timestamp.split("T")[0]!.slice(5); // MM-DD
-		xLabels += `<text x="${xScale(i).toFixed(1)}" y="${height - 4}" text-anchor="middle" fill="#555" font-size="7">${label}</text>`;
+		xLabels += `<text x="${xScale(i).toFixed(1)}" y="${height - 4}" text-anchor="middle" fill="#888" font-size="7">${label}</text>`;
 	}
 
 	// Gradient fill under the line
@@ -159,7 +159,7 @@ export function buildBadge(score: number, grade: string): string {
 <linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
 <clipPath id="r"><rect width="${totalW}" height="${h}" rx="${r}" fill="#fff"/></clipPath>
 <g clip-path="url(#r)">
-<rect width="${labelW}" height="${h}" fill="#555"/>
+<rect width="${labelW}" height="${h}" fill="#888"/>
 <rect x="${labelW}" width="${valueW}" height="${h}" fill="${color}"/>
 <rect width="${totalW}" height="${h}" fill="url(#s)"/>
 </g>
