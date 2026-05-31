@@ -330,22 +330,46 @@ function ConfigScreen({
 
 // ── Main App ──
 
+/** Load last scan from .vibe-check/report.json for instant display on startup. */
+function loadCachedScan(cwd: string): ScanState | null {
+	try {
+		const reportPath = join(cwd, ".vibe-check", "report.json");
+		if (!existsSync(reportPath)) return null;
+		const report = JSON.parse(readFileSync(reportPath, "utf-8"));
+		const checks: CheckResult[] = report.checks || [];
+		const totalIssues = checks.reduce((s: number, c: CheckResult) => s + c.issues.length, 0);
+		return {
+			checks,
+			score: report.score ?? 0,
+			grade: report.grade ?? "?",
+			duration: report.meta?.duration ?? 0,
+			totalIssues,
+			scanning: false,
+			scanCount: 0,
+			scores: [report.score ?? 0],
+		};
+	} catch {
+		return null;
+	}
+}
+
 function MonitorApp({ cwd }: { cwd: string }) {
 	const { exit } = useApp();
 	const { stdout } = useStdout();
 	const rows = stdout?.rows ?? 30;
 
+	const cached = loadCachedScan(cwd);
 	const [monCfg, setMonCfg] = useState<MonitorConfig>(() => loadMonitorConfig(cwd));
 	const [mode, setMode] = useState<"monitor" | "config">("monitor");
-	const [state, setState] = useState<ScanState>({
+	const [state, setState] = useState<ScanState>(cached ?? {
 		checks: [], score: 0, grade: "?", duration: 0,
 		totalIssues: 0, scanning: true, scanCount: 0, scores: [],
 	});
 	const [log, setLog] = useState<LogEntry[]>([
-		{ time: ts(), text: `Monitoring ${basename(cwd)}...`, type: "info" },
+		{ time: ts(), text: cached ? `Loaded cached scan: ${cached.grade} ${cached.score}/100` : `Monitoring ${basename(cwd)}...`, type: cached ? "scan" : "info" },
 	]);
 	const scanningRef = useRef(false);
-	const prevScoreRef = useRef<number | null>(null);
+	const prevScoreRef = useRef<number | null>(cached ? cached.score : null);
 
 	const addLog = useCallback((text: string, type: LogEntry["type"] = "info") => {
 		setLog((prev) => [...prev.slice(-50), { time: ts(), text, type }]);
