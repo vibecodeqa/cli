@@ -132,6 +132,12 @@ h3{font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:
 .im{flex:1;word-break:break-word}
 .iru{color:var(--dim);font-size:0.55rem}
 
+/* ── Source code snippets ── */
+.src-block{background:var(--card-alt);border:1px solid var(--border);border-radius:6px;margin:0.3rem 0 0.5rem 0.5rem;padding:0.3rem 0;font-family:"SF Mono",Menlo,monospace;font-size:0.62rem;line-height:1.6;overflow-x:auto}
+.src-ln{padding:0 0.5rem;white-space:pre}
+.src-hl{padding:0 0.5rem;white-space:pre;background:#eab30815;border-left:2px solid var(--warn)}
+.src-num{color:var(--dim);margin-right:0.5rem;user-select:none;display:inline-block;min-width:2.5rem;text-align:right}
+
 /* ── All issues table ── */
 .isf{color:var(--muted);font-size:0.75rem;margin-bottom:0.8rem}
 .it{width:100%;border-collapse:collapse;font-size:0.68rem}

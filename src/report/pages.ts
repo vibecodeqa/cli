@@ -1,5 +1,7 @@
 /** Page renderers for the HTML report. */
 
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { getCheckMeta } from "../check-meta.js";
 import { buildCoverageMapInput, generateCoverageMap } from "../diagrams/coverage.js";
 import { loadHistory } from "../history.js";
@@ -32,6 +34,29 @@ export interface FileEntry {
 }
 
 type FL = (path: string, line?: number) => string;
+
+/** Read source lines around an issue for inline display in the report. */
+function readSourceSnippet(cwd: string, file: string, line: number, radius = 4): string | null {
+	try {
+		const fullPath = join(cwd, file);
+		if (!existsSync(fullPath)) return null;
+		const content = readFileSync(fullPath, "utf-8");
+		const lines = content.split("\n");
+		const target = line - 1;
+		const start = Math.max(0, target - radius);
+		const end = Math.min(lines.length, target + radius + 1);
+		let html = "";
+		for (let i = start; i < end; i++) {
+			const num = String(i + 1).padStart(4);
+			const hl = i === target;
+			const cls = hl ? "src-hl" : "src-ln";
+			html += `<div class="${cls}"><span class="src-num">${num}</span>${e(lines[i])}</div>`;
+		}
+		return html;
+	} catch {
+		return null;
+	}
+}
 
 // ── Overview ──────────────────────────────────────────────────────────
 
@@ -166,7 +191,7 @@ ${fileHotspotsHtml}
 
 // ── Single category page ──────────────────────────────────────────
 
-export function categoryPage(cs: CatScore, fl: FL, allChecks?: CheckResult[]): string {
+export function categoryPage(cs: CatScore, fl: FL, allChecks?: CheckResult[], cwd?: string): string {
 	const checkSections = cs.checks
 		.map((c) => {
 			const meta = getCheckMeta(c.name);
@@ -201,7 +226,15 @@ export function categoryPage(cs: CatScore, fl: FL, allChecks?: CheckResult[]): s
 					const snippetBtn = iss.snippet
 						? `<button class="cp-btn" data-prompt="${e(iss.snippet)}" title="Copy snippet to search">\ud83d\udd0d</button>`
 						: "";
-					issuesHtml += `<div class="ir ${iss.severity}"><span class="is">${iss.severity[0]!.toUpperCase()}</span>${iss.line ? `<span class="il">${iss.line}</span>` : ""}<span class="im">${e(iss.message)}</span>${iss.rule ? `<span class="iru">${e(iss.rule)}</span>` : ""}${snippetBtn}<button class="cp-btn" data-prompt="${e(prompt)}" title="Copy fix prompt">\ud83d\udccb</button></div>`;
+					// Source code snippet (collapsible)
+					let srcBlock = "";
+					if (cwd && iss.line && typeof iss.file === "string") {
+						const src = readSourceSnippet(cwd, iss.file, iss.line);
+						if (src) {
+							srcBlock = `<div class="src-block">${src}</div>`;
+						}
+					}
+					issuesHtml += `<div class="ir ${iss.severity}"><span class="is">${iss.severity[0]!.toUpperCase()}</span>${iss.line ? `<span class="il">${iss.line}</span>` : ""}<span class="im">${e(iss.message)}</span>${iss.rule ? `<span class="iru">${e(iss.rule)}</span>` : ""}${snippetBtn}<button class="cp-btn" data-prompt="${e(prompt)}" title="Copy fix prompt">\ud83d\udccb</button></div>${srcBlock}`;
 				}
 				issuesHtml += `</div>`;
 			}

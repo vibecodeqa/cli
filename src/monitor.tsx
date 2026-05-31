@@ -426,12 +426,112 @@ function CheckDetail({ check, height, cursor, copied }: { check: CheckResult; he
 	);
 }
 
+// ── Issue Detail View — source code with highlighted problem ──
+
+interface SourceContext {
+	lines: { num: number; text: string; highlight: boolean }[];
+	filePath: string;
+}
+
+function readSourceContext(cwd: string, file: string | undefined, line: number | undefined, rule: string | undefined): SourceContext | null {
+	if (!file || typeof file !== "string") return null;
+	const fullPath = join(cwd, file);
+	try {
+		if (!existsSync(fullPath)) return null;
+		const content = readFileSync(fullPath, "utf-8");
+		const allLines = content.split("\n");
+		const target = (line ?? 1) - 1; // 0-indexed
+		const contextRadius = 8;
+		const start = Math.max(0, target - contextRadius);
+		const end = Math.min(allLines.length, target + contextRadius + 1);
+
+		// Determine which lines to highlight based on rule
+		const highlightSet = new Set<number>();
+		highlightSet.add(target);
+
+		// For multi-line issues, highlight the block
+		if (rule === "empty-catch" || rule === "fallback-catch" || rule === "no-assertions" || rule === "empty-test") {
+			// Highlight from target to closing brace
+			let depth = 0;
+			for (let i = target; i < Math.min(target + 15, allLines.length); i++) {
+				highlightSet.add(i);
+				depth += (allLines[i].match(/\{/g) || []).length;
+				depth -= (allLines[i].match(/\}/g) || []).length;
+				if (depth <= 0 && i > target) break;
+			}
+		} else if (rule === "duplicate-code" || rule === "commented-out-code") {
+			// Highlight a block of lines
+			for (let i = target; i < Math.min(target + 6, allLines.length); i++) {
+				highlightSet.add(i);
+			}
+		} else if (rule === "high-complexity" || rule === "long-function") {
+			// Highlight function signature + a few lines
+			for (let i = target; i < Math.min(target + 3, allLines.length); i++) {
+				highlightSet.add(i);
+			}
+		}
+
+		const lines = [];
+		for (let i = start; i < end; i++) {
+			lines.push({ num: i + 1, text: allLines[i], highlight: highlightSet.has(i) });
+		}
+		return { lines, filePath: file };
+	} catch {
+		return null;
+	}
+}
+
+function IssueDetail({ issue, checkName, cwd, height, copied }: {
+	issue: { severity: string; message: string; file?: string; line?: number; rule?: string };
+	checkName: string;
+	cwd: string;
+	height: number;
+	copied: boolean;
+}) {
+	const ctx = readSourceContext(cwd, issue.file, issue.line, issue.rule);
+	const bodyHeight = height - 8;
+
+	return (
+		<Box flexDirection="column" height={height} paddingX={1} overflowY="hidden">
+			<Text bold color="magenta"> ◈ Issue Detail</Text>
+			<Text>
+				<Text color={sc(issue.severity)} bold> {issue.severity.toUpperCase()} </Text>
+				<Text dimColor>{checkName}</Text>
+				{issue.rule && <Text dimColor> · {issue.rule}</Text>}
+				{copied && <Text color="green" bold> ✓ Copied!</Text>}
+			</Text>
+			<Text wrap="wrap"> {issue.message}</Text>
+			{issue.file && (
+				<Text color="cyan"> {issue.file}{issue.line ? `:${issue.line}` : ""}</Text>
+			)}
+			<Text> </Text>
+
+			{ctx ? (
+				<Box flexDirection="column" height={bodyHeight} overflowY="hidden">
+					<Text dimColor> ─── {ctx.filePath} ───</Text>
+					{ctx.lines.slice(0, bodyHeight - 2).map((l) => (
+						<Text key={l.num} wrap="truncate">
+							<Text color={l.highlight ? "yellow" : "gray"}>{l.highlight ? "▸" : " "}</Text>
+							<Text dimColor>{String(l.num).padStart(4)}│</Text>
+							<Text color={l.highlight ? "white" : undefined}>{l.text}</Text>
+						</Text>
+					))}
+					<Text dimColor> ───</Text>
+				</Box>
+			) : (
+				<Text dimColor> Source not available{issue.file ? ` (${issue.file})` : ""}</Text>
+			)}
+		</Box>
+	);
+}
+
 // ── Main App ──
 
 type Panel = "checks" | "issues";
 type Mode =
 	| { view: "dashboard" }
 	| { view: "check-detail"; checkName: string }
+	| { view: "issue-detail"; checkName: string; issueIdx: number }
 	| { view: "trends" }
 	| { view: "config" };
 
@@ -564,9 +664,10 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		// Quit from anywhere
 		if (input === "q" || (key.ctrl && input === "c")) { exit(); return; }
 
-		// Esc: drill up or quit
+		// Esc: drill up one level or quit
 		if (key.escape) {
-			if (mode.view === "config") { setPendingCfg(null); }
+			if (mode.view === "config") { setPendingCfg(null); setMode({ view: "dashboard" }); setCursor(0); return; }
+			if (mode.view === "issue-detail") { setMode({ view: "check-detail", checkName: mode.checkName }); setCursor(mode.issueIdx); return; }
 			if (mode.view !== "dashboard") { setMode({ view: "dashboard" }); setCursor(0); return; }
 			exit();
 			return;
@@ -631,19 +732,36 @@ function MonitorApp({ cwd }: { cwd: string }) {
 			}
 		}
 
-		// ── Check detail: ↑↓ scroll, Enter copies fix prompt ──
+		// ── Check detail: ↑↓ scroll, Enter drills into issue, y copies prompt ──
 		if (mode.view === "check-detail") {
 			const check = state.checks.find((c) => c.name === mode.checkName);
 			if (check) {
 				if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
 				if (key.downArrow) setCursor((c) => Math.min(check.issues.length - 1, c + 1));
 				if (key.return && check.issues[cursor]) {
+					setMode({ view: "issue-detail", checkName: mode.checkName, issueIdx: cursor });
+					return;
+				}
+				if (input === "y" && check.issues[cursor]) {
 					const prompt = buildFixPrompt(check.name, check.issues[cursor]);
 					if (copyToClipboard(prompt)) {
 						setCopied(true);
 						addLog(`Copied fix prompt for ${check.name}:${check.issues[cursor].file || ""}`, "info");
 						setTimeout(() => setCopied(false), 2000);
 					}
+				}
+			}
+		}
+
+		// ── Issue detail: y copies prompt ──
+		if (mode.view === "issue-detail") {
+			const check = state.checks.find((c) => c.name === mode.checkName);
+			if (check && check.issues[mode.issueIdx] && input === "y") {
+				const prompt = buildFixPrompt(check.name, check.issues[mode.issueIdx]);
+				if (copyToClipboard(prompt)) {
+					setCopied(true);
+					addLog(`Copied fix prompt`, "info");
+					setTimeout(() => setCopied(false), 2000);
 				}
 			}
 		}
@@ -660,6 +778,24 @@ function MonitorApp({ cwd }: { cwd: string }) {
 
 	// ── Render views ──
 
+	if (mode.view === "issue-detail") {
+		const check = state.checks.find((c) => c.name === mode.checkName);
+		const issue = check?.issues[mode.issueIdx];
+		return (
+			<Box flexDirection="column" height={rows}>
+				<Header proj={proj} stack={stack} workspace={workspace} state={state} />
+				{issue ? (
+					<IssueDetail issue={issue} checkName={mode.checkName} cwd={cwd} height={rows - 3} copied={copied} />
+				) : (
+					<Text dimColor> Issue not found</Text>
+				)}
+				<Box paddingX={1}>
+					<Text dimColor>Esc back · y copy fix prompt · q quit</Text>
+				</Box>
+			</Box>
+		);
+	}
+
 	if (mode.view === "check-detail") {
 		const check = state.checks.find((c) => c.name === mode.checkName);
 		return (
@@ -667,7 +803,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 				<Header proj={proj} stack={stack} workspace={workspace} state={state} />
 				{check ? <CheckDetail check={check} height={rows - 3} cursor={cursor} copied={copied} /> : <Text dimColor> Check not found</Text>}
 				<Box paddingX={1}>
-					<Text dimColor>Esc back · ↑↓ select · Enter copy fix prompt · q quit</Text>
+					<Text dimColor>Esc back · ↑↓ select · Enter view source · y copy prompt · q quit</Text>
 				</Box>
 			</Box>
 		);
