@@ -137,6 +137,9 @@ h3{font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:
 .src-ln{padding:0 0.5rem;white-space:pre}
 .src-hl{padding:0 0.5rem;white-space:pre;background:#eab30815;border-left:2px solid var(--warn)}
 .src-num{color:var(--dim);margin-right:0.5rem;user-select:none;display:inline-block;min-width:2.5rem;text-align:right}
+.src-prompt{padding:0.3rem 0.5rem;border-top:1px solid var(--border);display:flex;justify-content:flex-end}
+.src-fix-btn{background:var(--card);border:1px solid var(--border);color:var(--accent);font-size:0.62rem;padding:0.2rem 0.6rem;border-radius:4px;cursor:pointer;font-family:inherit}
+.src-fix-btn:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
 
 /* ── All issues table ── */
 .isf{color:var(--muted);font-size:0.75rem;margin-bottom:0.8rem}

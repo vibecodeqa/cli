@@ -112,9 +112,32 @@ function copyToClipboard(text: string): boolean {
 	}
 }
 
-function buildFixPrompt(checkName: string, issue: { severity: string; message: string; file?: string; line?: number; rule?: string }): string {
+function buildFixPrompt(checkName: string, issue: { severity: string; message: string; file?: string; line?: number; rule?: string }, cwd?: string): string {
 	const loc = issue.file ? `${issue.file}${issue.line ? `:${issue.line}` : ""}` : "";
-	return `Fix this ${issue.severity} in ${loc || "the project"}:\n${issue.message}${issue.rule ? ` (${issue.rule})` : ""}\nCheck: ${checkName}\n\nAnalyze the code, explain the issue, and provide the fix.`;
+	let prompt = `Fix this ${issue.severity} in ${loc || "the project"}:\n${issue.message}${issue.rule ? ` (${issue.rule})` : ""}\nCheck: ${checkName}`;
+
+	// Include source context if available
+	if (cwd && issue.file && issue.line) {
+		try {
+			const fullPath = join(cwd, issue.file);
+			if (existsSync(fullPath)) {
+				const content = readFileSync(fullPath, "utf-8");
+				const lines = content.split("\n");
+				const target = issue.line - 1;
+				const start = Math.max(0, target - 3);
+				const end = Math.min(lines.length, target + 4);
+				const snippet = lines.slice(start, end).map((l, i) => {
+					const num = start + i + 1;
+					const marker = num === issue.line ? ">>>" : "   ";
+					return `${marker} ${num}: ${l}`;
+				}).join("\n");
+				prompt += `\n\nSource:\n${snippet}`;
+			}
+		} catch { /* ignore */ }
+	}
+
+	prompt += "\n\nAnalyze the code, explain the issue, and provide the fix.";
+	return prompt;
 }
 
 // ── Scan via child process — UI never freezes ──
@@ -489,7 +512,11 @@ function IssueDetail({ issue, checkName, cwd, height, copied }: {
 	copied: boolean;
 }) {
 	const ctx = readSourceContext(cwd, issue.file, issue.line, issue.rule);
-	const bodyHeight = height - 8;
+	const prompt = buildFixPrompt(checkName, issue, cwd);
+	// Split height: source gets top half, prompt gets bottom
+	const srcHeight = ctx ? Math.min(ctx.lines.length + 2, Math.floor((height - 8) * 0.6)) : 0;
+	const promptHeight = height - 8 - srcHeight;
+	const promptLines = prompt.split("\n");
 
 	return (
 		<Box flexDirection="column" height={height} paddingX={1} overflowY="hidden">
@@ -504,12 +531,11 @@ function IssueDetail({ issue, checkName, cwd, height, copied }: {
 			{issue.file && (
 				<Text color="cyan"> {issue.file}{issue.line ? `:${issue.line}` : ""}</Text>
 			)}
-			<Text> </Text>
 
-			{ctx ? (
-				<Box flexDirection="column" height={bodyHeight} overflowY="hidden">
+			{ctx && (
+				<Box flexDirection="column" height={srcHeight} overflowY="hidden">
 					<Text dimColor> ─── {ctx.filePath} ───</Text>
-					{ctx.lines.slice(0, bodyHeight - 2).map((l) => (
+					{ctx.lines.slice(0, srcHeight - 2).map((l) => (
 						<Text key={l.num} wrap="truncate">
 							<Text color={l.highlight ? "yellow" : "gray"}>{l.highlight ? "▸" : " "}</Text>
 							<Text dimColor>{String(l.num).padStart(4)}│</Text>
@@ -518,9 +544,15 @@ function IssueDetail({ issue, checkName, cwd, height, copied }: {
 					))}
 					<Text dimColor> ───</Text>
 				</Box>
-			) : (
-				<Text dimColor> Source not available{issue.file ? ` (${issue.file})` : ""}</Text>
 			)}
+
+			{/* Fix prompt — shown below source, ready to copy with y */}
+			<Box flexDirection="column" height={Math.max(3, promptHeight)} overflowY="hidden" marginTop={ctx ? 0 : 1}>
+				<Text bold color="green"> Fix prompt <Text dimColor>(y to copy)</Text></Text>
+				{promptLines.slice(0, Math.max(1, promptHeight - 1)).map((line, i) => (
+					<Text key={i} dimColor wrap="truncate"> {line}</Text>
+				))}
+			</Box>
 		</Box>
 	);
 }
@@ -743,7 +775,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 					return;
 				}
 				if (input === "y" && check.issues[cursor]) {
-					const prompt = buildFixPrompt(check.name, check.issues[cursor]);
+					const prompt = buildFixPrompt(check.name, check.issues[cursor], cwd);
 					if (copyToClipboard(prompt)) {
 						setCopied(true);
 						addLog(`Copied fix prompt for ${check.name}:${check.issues[cursor].file || ""}`, "info");
@@ -757,7 +789,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		if (mode.view === "issue-detail") {
 			const check = state.checks.find((c) => c.name === mode.checkName);
 			if (check && check.issues[mode.issueIdx] && input === "y") {
-				const prompt = buildFixPrompt(check.name, check.issues[mode.issueIdx]);
+				const prompt = buildFixPrompt(check.name, check.issues[mode.issueIdx], cwd);
 				if (copyToClipboard(prompt)) {
 					setCopied(true);
 					addLog(`Copied fix prompt`, "info");

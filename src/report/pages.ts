@@ -231,7 +231,8 @@ export function categoryPage(cs: CatScore, fl: FL, allChecks?: CheckResult[], cw
 					if (cwd && iss.line && typeof iss.file === "string") {
 						const src = readSourceSnippet(cwd, iss.file, iss.line);
 						if (src) {
-							srcBlock = `<div class="src-block">${src}</div>`;
+							const fixPrompt = `Fix this ${iss.severity} in ${iss.file}:${iss.line}\n${iss.message}${iss.rule ? ` (${iss.rule})` : ""}\nCheck: ${c.name}\n\nAnalyze the code, explain the issue, and provide the fix.`;
+							srcBlock = `<div class="src-block">${src}<div class="src-prompt"><button class="cp-btn src-fix-btn" data-prompt="${e(fixPrompt)}" title="Copy fix prompt with source context">Copy fix prompt</button></div></div>`;
 						}
 					}
 					issuesHtml += `<div class="ir ${iss.severity}"><span class="is">${iss.severity[0]!.toUpperCase()}</span>${iss.line ? `<span class="il">${iss.line}</span>` : ""}<span class="im">${e(iss.message)}</span>${iss.rule ? `<span class="iru">${e(iss.rule)}</span>` : ""}${snippetBtn}<button class="cp-btn" data-prompt="${e(prompt)}" title="Copy fix prompt">\ud83d\udccb</button></div>${srcBlock}`;
