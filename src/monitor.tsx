@@ -228,7 +228,7 @@ function ActivityPanel({ log, height }: { log: LogEntry[]; height: number }) {
 		<Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} height={height} overflowY="hidden">
 			<Text bold color="magenta"> ◈ Activity</Text>
 			{log.slice(-visibleLines).map((entry, i) => (
-				<Text key={i} wrap="truncate">
+				<Text key={`${entry.time}-${i}`} wrap="truncate">
 					<Text dimColor>{entry.time} </Text>
 					<Text color={colors[entry.type]}>{entry.text}</Text>
 				</Text>
@@ -571,7 +571,7 @@ function IssueDetail({ issue, checkName, cwd, height, copied }: {
 			<Box flexDirection="column" height={Math.max(3, promptHeight)} overflowY="hidden" marginTop={ctx ? 0 : 1}>
 				<Text bold color="green"> Fix prompt <Text dimColor>(y to copy)</Text></Text>
 				{promptLines.slice(0, Math.max(1, promptHeight - 1)).map((line, i) => (
-					<Text key={i} dimColor wrap="truncate"> {line}</Text>
+					<Text key={`p-${i}`} dimColor wrap="truncate"> {line}</Text>
 				))}
 			</Box>
 		</Box>
@@ -1037,7 +1037,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 						fileIssues.slice(0, rows - 8).map((iss, i) => {
 							const sel = i === cursor;
 							return (
-								<Box key={i} flexDirection="column">
+								<Box key={`${iss.check}-${iss.line || i}`} flexDirection="column">
 									<Text>
 										<Text color={sel ? "white" : "gray"}>{sel ? "▸" : " "}</Text>
 										<Text color={sc(iss.severity)} bold>{iss.severity[0]!.toUpperCase()} </Text>
@@ -1170,7 +1170,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 								{allIssues.slice(0, issuesH - 3).map((iss, i) => {
 									const sel = panel === "issues" && i === cursor;
 									return (
-										<Text key={i} wrap="truncate">
+										<Text key={`${iss.check}-${iss.file || ""}-${iss.line || i}`} wrap="truncate">
 											<Text color={sel ? "white" : "gray"}>{sel ? "▸" : " "}</Text>
 											<Text color={sc(iss.severity)} bold>{iss.severity[0]!.toUpperCase()} </Text>
 											<Text dimColor>{(iss.check || "").slice(0, 11).padEnd(11)} </Text>
