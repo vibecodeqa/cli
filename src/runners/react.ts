@@ -6,6 +6,27 @@ import { getProductionFiles, readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue, StackInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
+/** True when the `.map()` callback starting at line `i` actually returns JSX.
+ *  `after` is the line text from `.map(` onward, right-trimmed. Distinguishes JSX
+ *  returns from data maps (`=> ({...})`, `=> fn(...)`), TS generics, and comparisons. */
+function mapCallbackReturnsJsx(after: string, lines: string[], i: number): boolean {
+	if (/=>\s*<[A-Za-z]/.test(after)) return true; // inline: => <Tag
+	if (/=>\s*\($/.test(after)) {
+		// multiline arrow body: => (   followed by JSX on the next non-empty line
+		return /^<[A-Za-z]/.test((lines[i + 1] || "").trim());
+	}
+	if (/=>\s*\{$/.test(after)) {
+		// block body: JSX iff it returns `<Tag` or `(` then `<Tag`
+		for (let j = i; j < Math.min(i + 12, lines.length); j++) {
+			const lt = (lines[j] || "").trim();
+			if (/return\s*<[A-Za-z]/.test(lt)) return true;
+			if (/return\s*\($/.test(lt)) return /^<[A-Za-z]/.test((lines[j + 1] || "").trim());
+			if (j > i && /^return\b/.test(lt)) return false; // returns a non-JSX value
+		}
+	}
+	return false;
+}
+
 export function runReact(cwd: string, stack: StackInfo): CheckResult {
 	const start = Date.now();
 
@@ -79,11 +100,13 @@ export function runReact(cwd: string, stack: StackInfo): CheckResult {
 				});
 			}
 
-			// 2. Missing key in .map() returning JSX
-			if (/\.map\s*\(/.test(trimmed)) {
-				// Look ahead for JSX return without key
-				const mapBlock = lines.slice(i, Math.min(i + 10, lines.length)).join("\n");
-				if (/<\w/.test(mapBlock) && !mapBlock.includes("key=") && !mapBlock.includes("key:")) {
+			// 2. Missing key in .map() returning JSX. Only flag genuine JSX returns —
+			// not data maps, TS generics, or comparisons (see mapCallbackReturnsJsx).
+			const mapIdx = trimmed.indexOf(".map(");
+			if (mapIdx !== -1 && mapCallbackReturnsJsx(trimmed.slice(mapIdx).trimEnd(), lines, i)) {
+				// Inspect just the JSX head for a key — enough to cover the opening element.
+				const head = lines.slice(i, Math.min(i + 8, lines.length)).join("\n");
+				if (!head.includes("key=") && !head.includes("key:")) {
 					missingKeys++;
 					issues.push({ severity: "error", message: "JSX in .map() without key prop", file: f.path, line: i + 1, rule: "missing-key" });
 				}

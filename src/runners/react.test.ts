@@ -76,4 +76,59 @@ export function App() {
 		expect(result.score).toBe(100);
 		rmSync(dir, { recursive: true });
 	});
+
+	// Regression: missing-key must NOT fire on .map() that doesn't return JSX.
+	// The old /<\w/ heuristic mis-matched TS generics (Record<…>), comparisons, and
+	// unrelated JSX further down the file.
+	it("does not flag data maps that return values/objects", () => {
+		const dir = makeProject({
+			"data.tsx": `import { join } from "node:path";
+type Rec = Record<string, number>;
+export const paths = ["a", "b"].map((d) => join("/x", d));
+export const objs = [{ name: "a" }].map((i) => ({ check: i.name }));
+export const chars = [1, 2, 3].map((v) => \`#\${v}\`).join("");
+export const cmp = [1, 2].map((v) => (v < 2 ? "lo" : "hi"));`,
+		});
+		const result = runReact(dir, reactStack);
+		expect(result.issues.some((i) => i.rule === "missing-key")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("does not flag a non-JSX map even when JSX appears later in the file", () => {
+		const dir = makeProject({
+			"mixed.tsx": `export function widths(roots: string[]) {
+  return roots.map((d) => d.length);
+}
+export function View({ items }: { items: string[] }) {
+  return <ul>{items.map((x) => <li key={x}>{x}</li>)}</ul>;
+}`,
+		});
+		const result = runReact(dir, reactStack);
+		expect(result.issues.some((i) => i.rule === "missing-key")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("does not flag inline JSX map that has a key", () => {
+		const dir = makeProject({
+			"good.tsx": `export const L = (items: string[]) => <ul>{items.map((x) => <li key={x}>{x}</li>)}</ul>;`,
+		});
+		const result = runReact(dir, reactStack);
+		expect(result.issues.some((i) => i.rule === "missing-key")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("flags a block-body JSX map without a key", () => {
+		const dir = makeProject({
+			"block.tsx": `export const B = (rows: string[]) => (
+  <table>
+    {rows.map((r) => {
+      return <tr><td>{r}</td></tr>;
+    })}
+  </table>
+);`,
+		});
+		const result = runReact(dir, reactStack);
+		expect(result.issues.some((i) => i.rule === "missing-key")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
 });
