@@ -7,7 +7,7 @@ Code health scanner for the AI coding era. Zero runtime deps, pure TypeScript.
 ```bash
 pnpm install        # install dev deps
 pnpm build          # tsc → dist/
-pnpm test           # vitest run (297 tests across 30 files)
+pnpm test           # vitest run (348 tests across 35 files)
 pnpm lint           # biome check src/
 node dist/cli.js    # self-scan
 node dist/cli.js init               # set up CI workflow + configs
@@ -99,9 +99,14 @@ Tries dedicated tools first, falls back to built-in:
 
 ## CLI commands
 
-- `vcqa [path]` — scan and generate report
+- `vcqa [path]` — scan and generate report. In an interactive terminal it also shows
+  the top issues, a "weakest areas → `vcqa explain <check>`" footer, and a post-scan
+  prompt (`[m]` monitor · `[o]` open report · `enter` quit). Piped/CI runs stay quiet.
 - `vcqa init [path]` — create CI workflow + biome.json + .gitignore
 - `vcqa fix [path]` — auto-fix (biome/eslint) + 30+ fix suggestions
+- `vcqa explain [check]` — deep-dive what/risk/fix for a check
+- `vcqa monitor [path]` — live TUI (re-scans on change). Keys: ↑↓/Enter/Esc navigate,
+  `/` search issues, `y` copy fix-prompt, `r` scan, `f`/`g`/`t`/`c` views, `?` help, `q` quit
 
 ## Flags
 
@@ -110,7 +115,7 @@ Tries dedicated tools first, falls back to built-in:
 ## Testing
 
 ```bash
-pnpm test                    # 297 tests across 30 files
+pnpm test                    # 348 tests across 35 files
 pnpm test -- --reporter=verbose  # see all test names
 ```
 

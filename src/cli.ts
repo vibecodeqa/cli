@@ -264,8 +264,9 @@ async function writeOutputs(report: VibeReport, outputDir: string, flags: Pick<P
 async function printResults(
 	report: VibeReport,
 	trend: ReturnType<typeof computeTrend>,
-	flags: Pick<ParsedFlags, "jsonOnly" | "badgeMode" | "sarifMode" | "topN">,
+	flags: Pick<ParsedFlags, "jsonOnly" | "badgeMode" | "sarifMode" | "topN" | "ciMode">,
 	outputDir: string,
+	interactive: boolean,
 ): Promise<void> {
 	const { score, grade, checks } = report;
 	const totalIssues = checks.reduce((s, c) => s + c.issues.length, 0);
@@ -288,14 +289,11 @@ async function printResults(
 			console.log(formatTrend(trend, scores));
 		}
 		console.log("");
-		console.log(`  \x1b[2mReport: ${join(outputDir, "report/index.html")}\x1b[0m`);
-		console.log(`  \x1b[2mJSON:   ${join(outputDir, "report.json")}\x1b[0m`);
-		if (flags.badgeMode) console.log(`  \x1b[2mBadge:  ${join(outputDir, "badge.svg")}\x1b[0m`);
-		if (flags.sarifMode) console.log(`  \x1b[2mSARIF:  ${join(outputDir, "report.sarif")}\x1b[0m`);
-		console.log("");
 
-		// Top actionable issues
-		if (flags.topN > 0) {
+		// Top actionable issues. Explicit --top wins; otherwise show a few by default
+		// in an interactive terminal so the scan never dead-ends at a file path.
+		const effectiveTopN = flags.topN > 0 ? flags.topN : interactive ? 3 : 0;
+		if (effectiveTopN > 0) {
 			const allIssues = checks.flatMap((c) => c.issues.map((iss) => ({ check: c.name, weight: getCheckMeta(c.name).weight, ...iss })));
 			// Sort by: errors first, then by check weight (highest-impact first)
 			allIssues.sort((a, b) => {
@@ -304,9 +302,11 @@ async function printResults(
 				if (sevDiff !== 0) return sevDiff;
 				return b.weight - a.weight;
 			});
-			const top = allIssues.slice(0, flags.topN);
+			const top = allIssues.slice(0, effectiveTopN);
 			if (top.length > 0) {
-				console.log(`  \x1b[1mTop ${top.length} issues to fix:\x1b[0m`);
+				const more = allIssues.length - top.length;
+				const moreStr = more > 0 ? ` \x1b[2m(+${more} more)\x1b[0m` : "";
+				console.log(`  \x1b[1mTop ${top.length} issues to fix:\x1b[0m${moreStr}`);
 				for (const iss of top) {
 					const sevColor = iss.severity === "error" ? "\x1b[31m" : iss.severity === "warning" ? "\x1b[33m" : "\x1b[2m";
 					const sevChar = iss.severity[0]!.toUpperCase();
@@ -316,6 +316,39 @@ async function printResults(
 				console.log("");
 			}
 		}
+
+		// Next steps: surface the weakest scored dimensions and how to dig into each.
+		// Skipped in CI (clean machine-readable-ish output) — interactive runs get the on-ramp.
+		if (!flags.ciMode) {
+			const weakest = checks
+				.filter((c) => {
+					const det = c.details as Record<string, unknown>;
+					return !det.skipped && !det.comingSoon && c.score < 70;
+				})
+				.sort((a, b) => a.score - b.score)
+				.slice(0, 3);
+			if (weakest.length > 0) {
+				console.log("  \x1b[1mWeakest areas:\x1b[0m");
+				for (const c of weakest) {
+					const gc = color(c.grade);
+					const label = getCheckMeta(c.name).label || c.name;
+					console.log(
+						`  ${gc}${c.grade}\x1b[0m \x1b[2m${String(c.score).padStart(3)}\x1b[0m  ${label.padEnd(18)}\x1b[2m→ vcqa explain ${c.name}\x1b[0m`,
+					);
+				}
+				console.log("");
+			}
+		}
+
+		// Report paths + the interactive on-ramp.
+		console.log(`  \x1b[2mReport: ${join(outputDir, "report/index.html")}\x1b[0m`);
+		console.log(`  \x1b[2mJSON:   ${join(outputDir, "report.json")}\x1b[0m`);
+		if (flags.badgeMode) console.log(`  \x1b[2mBadge:  ${join(outputDir, "badge.svg")}\x1b[0m`);
+		if (flags.sarifMode) console.log(`  \x1b[2mSARIF:  ${join(outputDir, "report.sarif")}\x1b[0m`);
+		if (!interactive && !flags.ciMode) {
+			console.log(`  \x1b[2mExplore: \x1b[0m\x1b[1mvcqa monitor\x1b[0m\x1b[2m — live TUI to drill into issues & copy fix-prompts\x1b[0m`);
+		}
+		console.log("");
 	}
 }
 
@@ -911,10 +944,14 @@ async function main() {
 
 	await writeOutputs(report, outputDir, flags);
 
+	// Interactive = a real terminal session (not piped, CI, JSON, or watch). Gates the
+	// post-scan prompt and the default top-issues view.
+	const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY) && !quietMode && !ciMode && !watchMode;
+
 	if (flags.markdownMode) {
 		console.log(generateMarkdown(report, trend));
 	} else {
-		await printResults(report, trend, flags, outputDir);
+		await printResults(report, trend, flags, outputDir, interactive);
 	}
 
 	if (flags.annotations) {
@@ -947,7 +984,65 @@ async function main() {
 
 	if (watchMode) {
 		await startWatch(cwd);
+		return;
 	}
+
+	// Interactive on-ramp: offer to open the live monitor or the HTML report.
+	if (interactive && !flags.uploadMode && !flags.prComment) {
+		await promptNextAction(cwd, outputDir);
+	}
+}
+
+/** Read a single keypress from a TTY, restoring stdin state afterward. */
+function readKey(): Promise<string> {
+	return new Promise((resolve) => {
+		const stdin = process.stdin;
+		const wasRaw = stdin.isRaw;
+		stdin.setRawMode?.(true);
+		stdin.resume();
+		stdin.once("data", (buf) => {
+			stdin.setRawMode?.(wasRaw ?? false);
+			stdin.pause();
+			resolve(buf.toString("utf-8"));
+		});
+	});
+}
+
+/** Open a file/URL with the OS default handler (detached). */
+function openPath(target: string): void {
+	const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+	import("node:child_process").then(({ spawn }) => {
+		try {
+			spawn(cmd, [target], { detached: true, stdio: "ignore", shell: process.platform === "win32" }).unref();
+		} catch {
+			/* opening is best-effort */
+		}
+	});
+}
+
+/** Post-scan prompt: [m] monitor · [o] open report · anything else quits. */
+async function promptNextAction(cwd: string, outputDir: string): Promise<void> {
+	process.stdout.write(
+		"  \x1b[1m[m]\x1b[0m\x1b[2m monitor\x1b[0m   \x1b[1m[o]\x1b[0m\x1b[2m open report\x1b[0m   \x1b[1m[enter]\x1b[0m\x1b[2m quit\x1b[0m  ",
+	);
+	let key: string;
+	try {
+		key = await readKey();
+	} catch {
+		process.stdout.write("\n");
+		return;
+	}
+	process.stdout.write("\n");
+	const k = key.toLowerCase();
+	if (k === "m") {
+		const { startMonitor } = await import("./monitor.js");
+		await startMonitor(cwd);
+	} else if (k === "o") {
+		const reportPath = join(outputDir, "report/index.html");
+		openPath(reportPath);
+		console.log(`  \x1b[2mOpening ${reportPath}\x1b[0m`);
+	}
+	// any other key (enter, q, ctrl-c, …) → quit
 }
 
 async function checkForUpdate(currentVersion: string): Promise<void> {

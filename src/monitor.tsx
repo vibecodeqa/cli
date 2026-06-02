@@ -722,6 +722,9 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		{ time: ts(), text: cached ? `Loaded cached scan: ${cached.grade} ${cached.score}/100` : `Monitoring ${basename(cwd)}...`, type: cached ? "scan" : "info" },
 	]);
 	const [copied, setCopied] = useState(false);
+	const [showHelp, setShowHelp] = useState(false);
+	const [search, setSearch] = useState("");
+	const [searchActive, setSearchActive] = useState(false);
 	const scanningRef = useRef(false);
 	const prevScoreRef = useRef<number | null>(cached ? cached.score : null);
 
@@ -741,7 +744,18 @@ function MonitorApp({ cwd }: { cwd: string }) {
 				return (o[a.severity] ?? 2) - (o[b.severity] ?? 2);
 			}),
 		[state.checks]);
-	const currentList = panel === "checks" ? activeChecks : allIssues;
+	// Issues filtered by the dashboard search query (matches message / check / file).
+	const displayIssues = useMemo(() => {
+		if (!search) return allIssues;
+		const q = search.toLowerCase();
+		return allIssues.filter(
+			(i) =>
+				i.message.toLowerCase().includes(q) ||
+				i.check.toLowerCase().includes(q) ||
+				(typeof i.file === "string" && i.file.toLowerCase().includes(q)),
+		);
+	}, [allIssues, search]);
+	const currentList = panel === "checks" ? activeChecks : displayIssues;
 
 	// Derived data for file views (memoized, used by both render + keyboard)
 	const filesWithIssues = useMemo(() => {
@@ -836,11 +850,36 @@ function MonitorApp({ cwd }: { cwd: string }) {
 
 	// ── Keyboard — single handler for all views ──
 	useInput((input, key) => {
+		// Ctrl-C always quits, even mid-search
+		if (key.ctrl && input === "c") { exit(); return; }
+
+		// Help overlay swallows all input until dismissed
+		if (showHelp) {
+			if (input === "?" || input === "q" || key.escape || key.return) setShowHelp(false);
+			return;
+		}
+
+		// Search input mode (filters the dashboard Issues panel)
+		if (searchActive) {
+			if (key.escape) { setSearch(""); setSearchActive(false); setCursor(0); return; }
+			if (key.return) { setSearchActive(false); return; }
+			if (key.backspace || key.delete) { setSearch((s) => s.slice(0, -1)); setCursor(0); return; }
+			if (input && input.length === 1 && input >= " " && !key.ctrl && !key.meta) {
+				setSearch((s) => s + input);
+				setCursor(0);
+			}
+			return;
+		}
+
 		// Quit from anywhere
-		if (input === "q" || (key.ctrl && input === "c")) { exit(); return; }
+		if (input === "q") { exit(); return; }
+
+		// Help overlay: ? opens from any view
+		if (input === "?") { setShowHelp(true); return; }
 
 		// Esc: drill up one level or quit
 		if (key.escape) {
+			if (mode.view === "dashboard" && search) { setSearch(""); setCursor(0); return; }
 			if (mode.view === "config") { setPendingCfg(null); setMode({ view: "dashboard" }); setCursor(0); return; }
 			if (mode.view === "issue-detail") { setMode({ view: "check-detail", checkName: mode.checkName }); setCursor(mode.issueIdx); return; }
 			if (mode.view === "file-issues") { setMode({ view: "dashboard" }); setCursor(0); return; }
@@ -895,6 +934,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 
 		// ── Dashboard navigation ──
 		if (mode.view === "dashboard") {
+			if (input === "/") { setSearchActive(true); setPanel("issues"); setCursor(0); return; }
 			if (key.tab) { setPanel((p) => p === "checks" ? "issues" : "checks"); setCursor(0); return; }
 			if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
 			if (key.downArrow) setCursor((c) => Math.min(currentList.length - 1, c + 1));
@@ -903,8 +943,8 @@ function MonitorApp({ cwd }: { cwd: string }) {
 				setCursor(0);
 				return;
 			}
-			if (key.return && panel === "issues" && allIssues[cursor]) {
-				setMode({ view: "check-detail", checkName: allIssues[cursor].check });
+			if (key.return && panel === "issues" && displayIssues[cursor]) {
+				setMode({ view: "check-detail", checkName: displayIssues[cursor].check });
 				setCursor(0);
 				return;
 			}
@@ -995,6 +1035,18 @@ function MonitorApp({ cwd }: { cwd: string }) {
 	const p = monCfg.panels;
 
 	// ── Render views ──
+
+	if (showHelp) {
+		return (
+			<Box flexDirection="column" height={rows}>
+				<Header proj={proj} stack={stack} workspace={workspace} state={state} />
+				<HelpOverlay height={rows - 3} />
+				<Box paddingX={1}>
+					<Text dimColor>? or Esc to close</Text>
+				</Box>
+			</Box>
+		);
+	}
 
 	if (mode.view === "all-files") {
 		return (
@@ -1165,9 +1217,21 @@ function MonitorApp({ cwd }: { cwd: string }) {
 						{p.issues && (
 							<Box flexDirection="column" borderStyle="round" borderColor={panel === "issues" ? "magenta" : "gray"} paddingX={1} height={issuesH} overflowY="hidden">
 								<Text bold color="magenta">
-									{" "}◈ Issues ({allIssues.length}) {panel === "issues" && <Text dimColor>◄</Text>}
+									{" "}◈ Issues ({displayIssues.length}{search ? `/${allIssues.length}` : ""}) {panel === "issues" && <Text dimColor>◄</Text>}
 								</Text>
-								{allIssues.slice(0, issuesH - 3).map((iss, i) => {
+									{(searchActive || search) && (
+										<Text>
+											{" "}<Text dimColor>/</Text>
+											<Text color={searchActive ? "white" : "cyan"}>{search}</Text>
+											{searchActive && <Text color="white">▌</Text>}
+										</Text>
+									)}
+								{displayIssues.length === 0 && (
+									<Text color={search ? "yellow" : "green"}>
+										{" "}{search ? "No issues match." : state.scanCount > 0 ? "✓ No issues — clean scan!" : "Scanning…"}
+									</Text>
+								)}
+								{displayIssues.slice(0, issuesH - 3).map((iss, i) => {
 									const sel = panel === "issues" && i === cursor;
 									return (
 										<Text key={`${iss.check}-${iss.file || ""}-${iss.line || i}`} wrap="truncate">
@@ -1179,7 +1243,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 										</Text>
 									);
 								})}
-								{allIssues.length > issuesH - 3 && <Text dimColor> +{allIssues.length - (issuesH - 3)} more</Text>}
+								{displayIssues.length > issuesH - 3 && <Text dimColor> +{displayIssues.length - (issuesH - 3)} more</Text>}
 							</Box>
 						)}
 					</Box>
@@ -1193,8 +1257,57 @@ function MonitorApp({ cwd }: { cwd: string }) {
 
 			{/* Footer */}
 			<Box paddingX={1} justifyContent="space-between">
-				<Text dimColor>Tab panel · ↑↓ Enter Esc · r scan · f files · g git · t trends · c config · q</Text>
+				<Text dimColor>Tab · ↑↓ Enter Esc · / search · r scan · f files · g git · t trends · c config · ? help · q</Text>
 			</Box>
+		</Box>
+	);
+}
+
+function HelpOverlay({ height }: { height: number }) {
+	const groups: { title: string; keys: [string, string][] }[] = [
+		{
+			title: "Navigate",
+			keys: [
+				["↑ ↓", "move selection"],
+				["Enter", "drill in (check → issue → source)"],
+				["Tab", "switch Checks / Issues panel"],
+				["Esc", "back up one level (or clear search)"],
+				["q · Ctrl-C", "quit"],
+			],
+		},
+		{
+			title: "Views",
+			keys: [
+				["r", "re-scan now"],
+				["f", "all files by issue count"],
+				["g", "git-changed files"],
+				["t", "score trends"],
+				["c", "config (thresholds, panels)"],
+			],
+		},
+		{
+			title: "Issues",
+			keys: [
+				["/", "search / filter issues"],
+				["y", "copy an AI fix-prompt to clipboard"],
+			],
+		},
+	];
+	return (
+		<Box flexDirection="column" height={height} paddingX={2} paddingY={1} overflowY="hidden">
+			<Text bold color="magenta">◈ Keyboard shortcuts</Text>
+			<Text> </Text>
+			{groups.map((g) => (
+				<Box key={g.title} flexDirection="column" marginBottom={1}>
+					<Text bold color="cyan">{g.title}</Text>
+					{g.keys.map(([k, desc]) => (
+						<Text key={k}>
+							<Text color="white" bold>{`  ${k}`.padEnd(16)}</Text>
+							<Text dimColor>{desc}</Text>
+						</Text>
+					))}
+				</Box>
+			))}
 		</Box>
 	);
 }

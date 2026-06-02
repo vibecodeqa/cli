@@ -107,6 +107,43 @@ describe("CLI flags", () => {
 	}, 30_000);
 });
 
+describe("scan output on-ramp", () => {
+	// run() uses execSync (no TTY), so the interactive prompt + default top-issues
+	// view are suppressed — exactly the non-interactive path we want to assert here.
+	it("shows the weakest-areas footer with explain commands", () => {
+		const out = run("--skip-tests .");
+		expect(out).toContain("Weakest areas:");
+		expect(out).toContain("vcqa explain");
+	}, 30_000);
+
+	it("shows the monitor explore hint when piped", () => {
+		const out = run("--skip-tests .");
+		expect(out).toContain("vcqa monitor");
+	}, 30_000);
+
+	it("does not emit the interactive [m]/[o] prompt when piped", () => {
+		const out = run("--skip-tests .");
+		expect(out).not.toContain("open report");
+		expect(out).not.toMatch(/\[m]/);
+	}, 30_000);
+
+	it("--ci suppresses the footer and monitor hint", () => {
+		const out = run("--skip-tests --ci .");
+		expect(out).not.toContain("Weakest areas:");
+		expect(out).not.toContain("vcqa monitor");
+	}, 30_000);
+
+	it("surfaces a planted error-handling defect in the report", () => {
+		// Fixture strategy: plant a known defect, assert the scanner reports exactly it.
+		writeFileSync(join(TMP, "src", "bad.ts"), "export function f() { try { risky() } catch {} }\n");
+		const out = run("--skip-tests --json .");
+		const report = JSON.parse(out);
+		const eh = report.checks.find((c: { name: string }) => c.name === "error-handling");
+		expect(eh.issues.length).toBeGreaterThan(0);
+		expect(JSON.stringify(eh.issues)).toContain("Empty catch block");
+	}, 30_000);
+});
+
 describe("explain command", () => {
 	it("lists all checks when no argument given", () => {
 		const out = run("explain");
