@@ -1,13 +1,14 @@
 # VibeCode QA — CLI
 
-Code health scanner for the AI coding era. Zero runtime deps, pure TypeScript.
+Code health scanner for the AI coding era. Pure TypeScript, lean runtime deps:
+ink/react (the `monitor` TUI) and @jscpd/core (duplication engine, ~100 KB).
 
 ## Quick reference
 
 ```bash
 pnpm install        # install dev deps
 pnpm build          # tsc → dist/
-pnpm test           # vitest run (348 tests across 35 files)
+pnpm test           # vitest run (360 tests across 35 files)
 pnpm lint           # biome check src/
 node dist/cli.js    # self-scan
 node dist/cli.js init               # set up CI workflow + configs
@@ -38,14 +39,14 @@ src/
 │   ├── react.ts        # Hooks rules, missing keys (skips when eslint plugin installed)
 │   ├── accessibility.ts   # img alt, click handlers, v-for key (Vue/Svelte SFC aware)
 │   ├── complexity.ts   # Cognitive complexity per function
-│   ├── duplication.ts  # Delegates to jscpd (opt-in), falls back to line-hash
+│   ├── duplication.ts  # jscpd CLI (opt-in) → @jscpd/core engine over our own tokenizer (maximal clones)
 │   ├── docs.ts         # README quality, JSDoc coverage, CHANGELOG
 │   ├── best-practices.ts  # CI/CD, supply chain, repo hygiene
 │   ├── testing.ts      # Pyramid, execution, coverage (.ts/.dart aware)
 │   ├── secrets.ts      # Delegates to gitleaks, falls back to 14 regex + .env audit
 │   ├── security.ts     # 36 CWE patterns + data storage audit + eslint-plugin-security delegation
 │   ├── dependencies.ts # npm audit / dart pub outdated
-│   ├── architecture.ts # Import graph, cycles, god modules (Vue/Svelte import resolution)
+│   ├── architecture.ts # Import graph, cycles, god modules — dependency-cruiser engine (TS/JS), built-in resolver for SFC/monorepo
 │   ├── confusion.ts    # Naming ambiguity (Levenshtein, cross-package aware)
 │   ├── context.ts      # Token density, import depth, circular dep impact
 │   ├── performance.ts  # Barrel imports, heavy deps, dead code (Knip)
@@ -92,7 +93,7 @@ Weights sum to 100 (Pro checks have weight 0).
 
 Tries dedicated tools first, falls back to built-in:
 - **Secrets**: gitleaks → 14 regex patterns
-- **Duplication**: jscpd (if in devDeps) → line-hash
+- **Duplication**: jscpd CLI (if in devDeps) → @jscpd/core's Rabin-Karp engine fed by our lightweight tokenizer (Type-1/2 maximal clones, 50 tokens/6 lines). Our tokenizer keeps the heavy @jscpd/tokenizer (2.5MB language grammars) out of the install.
 - **Dead code**: Knip (if available)
 - **React hooks**: eslint-plugin-react-hooks (if installed, skips built-in)
 - **Accessibility**: eslint-plugin-jsx-a11y (if installed, skips built-in)
@@ -115,7 +116,7 @@ Tries dedicated tools first, falls back to built-in:
 ## Testing
 
 ```bash
-pnpm test                    # 348 tests across 35 files
+pnpm test                    # 360 tests across 35 files
 pnpm test -- --reporter=verbose  # see all test names
 ```
 

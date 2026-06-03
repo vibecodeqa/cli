@@ -1,6 +1,6 @@
 {
 	"name": "@vibecodeqa/cli",
-	"version": "0.38.1",
+	"version": "0.39.0",
 	"description": "Code health scanner for the AI coding era. 25 checks, zero config, full report.",
 	"type": "module",
 	"bin": {
@@ -53,6 +53,8 @@
 		"vitest": "^4.1.6"
 	},
 	"dependencies": {
+		"@jscpd/core": "^4.2.4",
+		"dependency-cruiser": "^17.4.3",
 		"ink": "^5.2.1",
 		"react": "^18.3.1"
 	}

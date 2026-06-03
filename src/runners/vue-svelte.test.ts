@@ -93,13 +93,13 @@ describe("Svelte support", () => {
 });
 
 describe("Vue/Svelte import resolution in architecture", () => {
-	it("resolves .vue imports in architecture graph", () => {
+	it("resolves .vue imports in architecture graph", async () => {
 		writeFileSync(
 			join(TMP, "src", "App.vue"),
 			`<template><Child /></template>\n<script setup>\nimport Child from './Child.vue'\n</script>`,
 		);
 		writeFileSync(join(TMP, "src", "Child.vue"), `<template><div>hi</div></template>\n<script setup>\nconst x = 1\n</script>`);
-		const result = runArchitecture(TMP);
+		const result = await runArchitecture(TMP);
 		const graph = result.details.graph as Record<string, { imports: string[] }>;
 		expect(graph).toBeDefined();
 		const appImports = graph["src/App.vue"]?.imports || [];

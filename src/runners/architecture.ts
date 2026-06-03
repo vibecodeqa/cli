@@ -10,7 +10,9 @@
  *   7. SVG architecture diagram
  */
 
+import { existsSync } from "node:fs";
 import { basename, dirname, extname } from "node:path";
+import { cruise } from "dependency-cruiser";
 import { getProductionFiles, type SourceFile } from "../fs-utils.js";
 import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -31,7 +33,7 @@ export interface ArchGraph {
 	orphans: string[];
 }
 
-export function runArchitecture(cwd: string, workspace?: WorkspaceInfo): CheckResult {
+export async function runArchitecture(cwd: string, workspace?: WorkspaceInfo): Promise<CheckResult> {
 	const start = Date.now();
 	const issues: Issue[] = [];
 	const files = getProductionFiles(cwd);
@@ -47,7 +49,12 @@ export function runArchitecture(cwd: string, workspace?: WorkspaceInfo): CheckRe
 		};
 	}
 
-	const graph = buildGraph(files);
+	// Prefer dependency-cruiser (real module resolution incl. tsconfig paths) and
+	// fall back to the built-in resolver when it can't cover the project (e.g. SFC-
+	// heavy or monorepos where cross-package imports use bare specifiers).
+	const cruised = await buildGraphViaCruise(cwd, files);
+	const graph = cruised ?? buildGraph(files);
+	const tool = cruised ? "dependency-cruiser" : "built-in";
 
 	// ── Circular dependencies ──
 	const cycles = findCycles(graph.nodes);
@@ -171,6 +178,7 @@ export function runArchitecture(cwd: string, workspace?: WorkspaceInfo): CheckRe
 			graph: graphData,
 			containerSvg: generateContainerDiagram(cwd),
 			assessment,
+			tool,
 		},
 		issues,
 		duration: Date.now() - start,
@@ -178,6 +186,65 @@ export function runArchitecture(cwd: string, workspace?: WorkspaceInfo): CheckRe
 }
 
 // ── Graph building ──
+
+/** Build the import graph with dependency-cruiser (real module resolution,
+ *  tsconfig path aliases, transitive TS deps). Returns null — so the caller
+ *  falls back to the built-in resolver — if it errors or covers too little of
+ *  the project (e.g. .vue/.svelte SFCs it can't resolve, or monorepo bare imports). */
+async function buildGraphViaCruise(cwd: string, files: SourceFile[]): Promise<{ nodes: Map<string, ModuleNode> } | null> {
+	// .vue/.svelte single-file components need our SFC-aware resolver; dependency-cruiser
+	// doesn't resolve them without a bundler plugin, so hand those projects to the built-in.
+	if (files.some((f) => f.ext === ".vue" || f.ext === ".svelte")) return null;
+
+	const fileSet = new Set(files.map((f) => f.path));
+	const roots = [...new Set(files.map((f) => f.path.split("/")[0]).filter(Boolean))];
+	if (roots.length === 0) return null;
+
+	const prevCwd = process.cwd();
+	try {
+		process.chdir(cwd); // dependency-cruiser resolves relative to process.cwd()
+		const options: Parameters<typeof cruise>[1] = {
+			doNotFollow: { path: "node_modules" },
+			exclude: { path: "(\\.test\\.|\\.spec\\.|/node_modules/|/dist/|/\\.vibe-check/)" },
+			tsPreCompilationDeps: true,
+		};
+		if (existsSync("tsconfig.json")) options.tsConfig = { fileName: "tsconfig.json" };
+
+		const result = await cruise(roots, options);
+		const output = result.output;
+		if (typeof output === "string") return null;
+		const modules = output.modules ?? [];
+
+		const nodes = new Map<string, ModuleNode>();
+		for (const m of modules) {
+			if (fileSet.has(m.source)) {
+				nodes.set(m.source, { path: m.source, imports: [], importedBy: [], dir: dirname(m.source), exports: 0 });
+			}
+		}
+		for (const m of modules) {
+			const node = nodes.get(m.source);
+			if (!node) continue;
+			const seen = new Set<string>();
+			for (const d of m.dependencies ?? []) {
+				if (d.coreModule || !d.resolved || d.resolved === m.source) continue;
+				if (!fileSet.has(d.resolved) || seen.has(d.resolved)) continue;
+				seen.add(d.resolved);
+				node.imports.push(d.resolved);
+			}
+		}
+		for (const [path, node] of nodes) {
+			for (const imp of node.imports) nodes.get(imp)?.importedBy.push(path);
+		}
+
+		// Too little coverage → the built-in resolver is a better bet for this project.
+		if (nodes.size < files.length * 0.5) return null;
+		return { nodes };
+	} catch {
+		return null;
+	} finally {
+		process.chdir(prevCwd);
+	}
+}
 
 function buildGraph(files: SourceFile[]): { nodes: Map<string, ModuleNode> } {
 	const filePaths = new Set(files.map((f) => f.path));

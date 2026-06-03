@@ -17,40 +17,40 @@ function makeProject(files: Record<string, string>): string {
 }
 
 describe("runArchitecture", () => {
-	it("skips when fewer than 2 source files", () => {
+	it("skips when fewer than 2 source files", async () => {
 		const dir = makeProject({ "index.ts": `export const x = 1;` });
-		const result = runArchitecture(dir);
+		const result = await runArchitecture(dir);
 		expect((result.details as any).skipped).toBe(true);
 		rmSync(dir, { recursive: true });
 	});
 
-	it("detects circular dependencies", () => {
+	it("detects circular dependencies", async () => {
 		const dir = makeProject({
 			"a.ts": `import { b } from "./b.js";\nexport const a = b;`,
 			"b.ts": `import { a } from "./a.js";\nexport const b = a;`,
 		});
-		const result = runArchitecture(dir);
+		const result = await runArchitecture(dir);
 		expect(result.issues.some((i) => i.rule === "circular-dep")).toBe(true);
 		rmSync(dir, { recursive: true });
 	});
 
-	it("detects orphan modules", () => {
+	it("detects orphan modules", async () => {
 		const dir = makeProject({
 			"main.ts": `import { x } from "./util.js";\nconsole.log(x);`,
 			"util.ts": `export const x = 1;`,
 			"orphan.ts": `export const lonely = true;`,
 		});
-		const result = runArchitecture(dir);
+		const result = await runArchitecture(dir);
 		expect(result.issues.some((i) => i.rule === "orphan-module")).toBe(true);
 		rmSync(dir, { recursive: true });
 	});
 
-	it("scores 100 for clean architecture", () => {
+	it("scores 100 for clean architecture", async () => {
 		const dir = makeProject({
 			"index.ts": `import { greet } from "./greet.js";\nconsole.log(greet());`,
 			"greet.ts": `export function greet() { return "hi"; }`,
 		});
-		const result = runArchitecture(dir);
+		const result = await runArchitecture(dir);
 		expect(result.score).toBe(100);
 		rmSync(dir, { recursive: true });
 	});
