@@ -20,55 +20,55 @@ function cleanup() {
 }
 
 describe("runSecrets", () => {
-	it("gives A for clean code", () => {
+	it("gives A for clean code", async () => {
 		setup({ "src/clean.ts": 'const API_URL = "https://api.example.com";\nexport const config = { url: API_URL };' });
-		const result = runSecrets(TMP);
+		const result = await runSecrets(TMP);
 		expect(result.grade).toBe("A");
 		expect(result.score).toBe(100);
 		cleanup();
 	});
 
-	it("detects GitHub PAT", () => {
+	it("detects GitHub PAT", async () => {
 		setup({ "src/bad.ts": 'const token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";' });
-		const result = runSecrets(TMP);
+		const result = await runSecrets(TMP);
 		expect(result.issues.length).toBeGreaterThan(0);
 		expect(result.issues[0].message).toContain("GitHub");
 		expect(result.score).toBeLessThan(100);
 		cleanup();
 	});
 
-	it("detects AWS access key", () => {
+	it("detects AWS access key", async () => {
 		setup({ "src/aws.ts": 'const key = "AKIAIOSFODNN7EXAMPLE";' });
-		const result = runSecrets(TMP);
+		const result = await runSecrets(TMP);
 		expect(result.issues.some((i) => i.message.includes("AWS"))).toBe(true);
 		cleanup();
 	});
 
-	it("detects private key", () => {
+	it("detects private key", async () => {
 		setup({ "src/key.ts": 'const pk = "-----BEGIN RSA PRIVATE KEY-----\\nMII...";' });
-		const result = runSecrets(TMP);
+		const result = await runSecrets(TMP);
 		expect(result.issues.some((i) => i.message.includes("Private Key"))).toBe(true);
 		cleanup();
 	});
 
-	it("ignores test files", () => {
+	it("ignores test files", async () => {
 		setup({ "src/auth.test.ts": 'const token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";' });
-		const result = runSecrets(TMP);
+		const result = await runSecrets(TMP);
 		expect(result.issues).toHaveLength(0);
 		cleanup();
 	});
 
-	it("detects modern OpenAI API keys (sk-proj-)", () => {
+	it("detects modern OpenAI API keys (sk-proj-)", async () => {
 		setup({ "src/ai.ts": 'const key = "sk-proj-abcdefghijklmnopqrstuvwxyz123456";' });
-		const result = runSecrets(TMP);
+		const result = await runSecrets(TMP);
 		expect(result.issues.some((i) => i.message.includes("OpenAI"))).toBe(true);
 		cleanup();
 	});
 
-	it("gives A for empty project", () => {
+	it("gives A for empty project", async () => {
 		setup({});
 		// No src files to scan
-		const result = runSecrets(TMP);
+		const result = await runSecrets(TMP);
 		expect(result.score).toBe(100);
 		cleanup();
 	});

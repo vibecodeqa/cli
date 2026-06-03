@@ -1,11 +1,23 @@
-/** Secret detection — delegates to gitleaks when available, falls back to built-in regex. */
+/** Secret detection — delegates to gitleaks when available; otherwise scans with
+ *  secretlint's recommended ruleset (broad coverage) PLUS our own patterns (which
+ *  add LLM keys — OpenAI/Anthropic — that secretlint's preset doesn't cover). */
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { lintSource } from "@secretlint/core";
+import { creator as secretlintPreset } from "@secretlint/secretlint-rule-preset-recommend";
 import { collectAllFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
+
+const SECRETLINT_CONFIG = { rules: [{ id: "@secretlint/secretlint-rule-preset-recommend", rule: secretlintPreset }] };
+
+/** Human-readable kind from a secretlint message, without leaking the secret value. */
+function secretlintKind(msg: { messageId?: string; ruleId?: string }): string {
+	if (msg.messageId) return msg.messageId.replace(/_/g, " ").toLowerCase();
+	return (msg.ruleId ?? "secret").replace(/.*secretlint-rule-/, "");
+}
 
 /** Try running gitleaks for secret detection. Returns true if gitleaks ran. */
 function tryGitleaks(cwd: string, issues: Issue[]): boolean {
@@ -61,37 +73,64 @@ const SECRET_PATTERNS: { name: string; pattern: RegExp }[] = [
 	},
 ];
 
-export function runSecrets(cwd: string): CheckResult {
+type ScanFile = { path: string; content: string };
+
+function scanPatterns(files: ScanFile[], add: (iss: Issue) => void): void {
+	for (const sf of files) {
+		const lines = sf.content.split("\n");
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i];
+			if (line.trim().startsWith("//") || line.trim().startsWith("*")) continue;
+			for (const { name, pattern } of SECRET_PATTERNS) {
+				if (pattern.test(line)) add({ severity: "error", message: `Possible ${name}`, file: sf.path, line: i + 1, rule: "secret-detected" });
+			}
+		}
+	}
+}
+
+async function scanSecretlint(files: ScanFile[], add: (iss: Issue) => void): Promise<void> {
+	for (const sf of files) {
+		try {
+			const result = await lintSource({
+				source: { filePath: sf.path, content: sf.content, contentType: "text" },
+				options: { config: SECRETLINT_CONFIG },
+			});
+			for (const m of result.messages) {
+				add({ severity: "error", message: `Possible ${secretlintKind(m)} — remove and rotate`, file: sf.path, line: m.loc?.start?.line ?? 1, rule: "secret-detected" });
+			}
+		} catch {
+			/* unparseable file — skip */
+		}
+	}
+}
+
+/** Built-in fallback when gitleaks isn't installed: curated patterns first (nice
+ *  names + LLM keys, winning dedup), then secretlint's broad ruleset augments. */
+async function scanFallback(cwd: string): Promise<Issue[]> {
+	const files = collectAllFiles(cwd, { extraExts: true }).filter((sf) => !sf.isTest && !sf.path.includes("__mock"));
+	const issues: Issue[] = [];
+	const seen = new Set<string>();
+	const add = (iss: Issue) => {
+		const key = `${iss.file}:${iss.line}`;
+		if (!seen.has(key)) {
+			seen.add(key);
+			issues.push(iss);
+		}
+	};
+	scanPatterns(files, add);
+	await scanSecretlint(files, add);
+	return issues;
+}
+
+export async function runSecrets(cwd: string): Promise<CheckResult> {
 	const start = Date.now();
 	const issues: Issue[] = [];
 
 	// Try gitleaks first (industry standard, 800+ patterns)
 	const gitleaksResult = tryGitleaks(cwd, issues);
-	const tool = gitleaksResult ? "gitleaks" : "built-in";
+	const tool = gitleaksResult ? "gitleaks" : "secretlint";
 
-	if (!gitleaksResult) {
-		// Fallback: built-in regex patterns
-		const sourceFiles = collectAllFiles(cwd, { extraExts: true });
-		for (const sf of sourceFiles) {
-			if (sf.isTest || sf.path.includes("__mock")) continue;
-			const lines = sf.content.split("\n");
-			for (let i = 0; i < lines.length; i++) {
-				const line = lines[i];
-				if (line.trim().startsWith("//") || line.trim().startsWith("*")) continue;
-				for (const { name, pattern } of SECRET_PATTERNS) {
-					if (pattern.test(line)) {
-						issues.push({
-							severity: "error",
-							message: `Possible ${name}`,
-							file: sf.path,
-							line: i + 1,
-							rule: "secret-detected",
-						});
-					}
-				}
-			}
-		}
-	}
+	if (!gitleaksResult) issues.push(...(await scanFallback(cwd)));
 
 	// ── .env file audit ──
 	const envFiles = [".env", ".env.local", ".env.production", ".env.development"];

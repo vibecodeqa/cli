@@ -43,7 +43,7 @@ src/
 │   ├── docs.ts         # README quality, JSDoc coverage, CHANGELOG
 │   ├── best-practices.ts  # CI/CD, supply chain, repo hygiene
 │   ├── testing.ts      # Pyramid, execution, coverage (.ts/.dart aware)
-│   ├── secrets.ts      # Delegates to gitleaks, falls back to 14 regex + .env audit
+│   ├── secrets.ts      # Delegates to gitleaks; fallback = our patterns (LLM keys) ∪ secretlint preset + .env audit
 │   ├── security.ts     # 36 CWE patterns + data storage audit + eslint-plugin-security delegation
 │   ├── dependencies.ts # npm audit / dart pub outdated
 │   ├── architecture.ts # Import graph, cycles, god modules — dependency-cruiser engine (TS/JS), built-in resolver for SFC/monorepo
@@ -92,7 +92,7 @@ Weights sum to 100 (Pro checks have weight 0).
 ## Tool delegation
 
 Tries dedicated tools first, falls back to built-in:
-- **Secrets**: gitleaks → 14 regex patterns
+- **Secrets**: gitleaks → built-in patterns (14, incl. OpenAI/Anthropic) ∪ secretlint recommended preset
 - **Duplication**: jscpd CLI (if in devDeps) → @jscpd/core's Rabin-Karp engine fed by our lightweight tokenizer (Type-1/2 maximal clones, 50 tokens/6 lines). Our tokenizer keeps the heavy @jscpd/tokenizer (2.5MB language grammars) out of the install.
 - **Dead code**: Knip (if available)
 - **React hooks**: eslint-plugin-react-hooks (if installed, skips built-in)
