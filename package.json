@@ -7,6 +7,10 @@
 		"vcqa": "./dist/cli.js",
 		"vibe-check": "./dist/cli.js"
 	},
+	"exports": {
+		".": "./dist/cli.js",
+		"./core": "./dist/core.js"
+	},
 	"files": [
 		"dist",
 		"LICENSE",
