@@ -3,6 +3,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { aiFixIssues, collectFixableIssues } from "./ai-fix.js";
 import { getCheckMeta } from "./check-meta.js";
 import { getCheckIgnore, isCheckEnabled, loadConfig, type VcqaConfig } from "./config.js";
 import { detectRepoUrl, detectStack, detectWorkspace } from "./detect.js";
@@ -427,6 +428,9 @@ function printHelp(): void {
   \x1b[1mCommands:\x1b[0m
     init [path]       Set up CI workflow + recommended configs
     fix [path]        Auto-fix (.gitignore, strict mode, biome/eslint, suggestions)
+      --ai            Use Claude to fix remaining issues (needs ANTHROPIC_API_KEY)
+      --check NAME    Only fix issues from a specific check (e.g. --check security)
+      --dry-run       Show what AI would fix without applying changes
     explain [check]   Deep-dive explanation of a check (what/risk/fix)
     monitor [path]    Live quality control panel — re-scans on file changes
 
@@ -451,6 +455,9 @@ function printHelp(): void {
     npx @vibecodeqa/cli                     # scan current directory
     npx @vibecodeqa/cli init                # set up CI + configs
     npx @vibecodeqa/cli fix                 # auto-fix what's fixable
+    npx @vibecodeqa/cli fix --ai            # AI-powered fix (uses Claude)
+    npx @vibecodeqa/cli fix --ai --check security  # fix only security issues
+    npx @vibecodeqa/cli fix --ai --dry-run  # preview AI fixes without applying
     npx @vibecodeqa/cli --skip-tests --top  # fast scan with top issues
     npx @vibecodeqa/cli --ci --fail-under 80  # CI with quality gate
 `);
@@ -612,9 +619,9 @@ async function runExplain(checkName?: string): Promise<void> {
 
 // ── fix command ──
 
-async function runFix(cwd: string): Promise<void> {
+async function runFix(cwd: string, opts: { ai?: boolean; dryRun?: boolean; checkFilter?: string } = {}): Promise<void> {
 	console.log("");
-	console.log(`  \x1b[1m\x1b[38;5;141mvcqa fix\x1b[0m`);
+	console.log(`  \x1b[1m\x1b[38;5;141mvcqa fix${opts.ai ? " --ai" : ""}${opts.dryRun ? " --dry-run" : ""}${opts.checkFilter ? ` --check ${opts.checkFilter}` : ""}\x1b[0m`);
 	console.log(`  \x1b[2m${cwd}\x1b[0m`);
 	console.log("");
 
@@ -690,7 +697,38 @@ async function runFix(cwd: string): Promise<void> {
 	const checks = await runChecks(cwd, enrichedStack, workspace, true, isDart, true);
 	const score = computeScore(checks);
 
-	// Collect actionable issues with fix suggestions
+	// AI-powered fix mode
+	if (opts.ai) {
+		const aiIssues = collectFixableIssues(checks, suggestFix, opts.checkFilter);
+		if (aiIssues.length === 0) {
+			console.log("  \x1b[2mNo fixable issues found.\x1b[0m");
+		} else {
+			console.log(`  \x1b[1mAI fixing ${Math.min(aiIssues.length, 10)} issues${opts.dryRun ? " (dry run)" : ""}...\x1b[0m`);
+			console.log("");
+			const results = await aiFixIssues(cwd, aiIssues, { dryRun: opts.dryRun || false });
+			const applied = results.filter((r) => r.applied).length;
+
+			if (applied > 0) {
+				// Re-scan to show new score
+				console.log("");
+				console.log("  \x1b[1mRe-scanning...\x1b[0m");
+				const reChecks = await runChecks(cwd, enrichedStack, workspace, true, isDart, true);
+				const newScore = computeScore(reChecks);
+				const newGrade = gradeFromScore(newScore);
+				const delta = newScore - score;
+				console.log(`  Score: \x1b[${newScore >= 75 ? "32" : newScore >= 60 ? "33" : "31"}m${newGrade} ${newScore}/100\x1b[0m${delta > 0 ? ` \x1b[32m(+${delta})\x1b[0m` : ""}`);
+				console.log(`  \x1b[32m${applied} AI fix(es) applied.\x1b[0m Re-run \x1b[1mnpx @vibecodeqa/cli\x1b[0m for full report.`);
+			} else {
+				const grade = gradeFromScore(score);
+				console.log(`\n  Score: \x1b[${score >= 75 ? "32" : score >= 60 ? "33" : "31"}m${grade} ${score}/100\x1b[0m`);
+				if (opts.dryRun) console.log("  \x1b[2mDry run — no files modified. Remove --dry-run to apply.\x1b[0m");
+			}
+		}
+		console.log("");
+		return;
+	}
+
+	// Collect actionable issues with fix suggestions (non-AI mode)
 	const fixable: { check: string; file: string; line: number; message: string; fix: string }[] = [];
 
 	for (const c of checks) {
@@ -870,8 +908,13 @@ async function main() {
 		return;
 	}
 	if (args[0] === "fix") {
-		const path = args.slice(1).find((a) => !a.startsWith("-")) || ".";
-		await runFix(resolve(path));
+		const fixArgs = args.slice(1);
+		const path = fixArgs.find((a) => !a.startsWith("-")) || ".";
+		const aiMode = fixArgs.includes("--ai");
+		const dryRun = fixArgs.includes("--dry-run");
+		const checkIdx = fixArgs.indexOf("--check");
+		const checkFilter = checkIdx !== -1 ? fixArgs[checkIdx + 1] : undefined;
+		await runFix(resolve(path), { ai: aiMode, dryRun, checkFilter });
 		return;
 	}
 	if (args[0] === "explain") {
@@ -959,12 +1002,12 @@ async function main() {
 	}
 
 	if (flags.uploadMode) {
-		await handleUpload(report, cwd, jsonOnly);
+		await handleUpload(report, cwd, quietMode);
 	}
 
 	if (flags.prComment) {
 		const posted = await postPRComment(report, trend, cwd);
-		if (!jsonOnly) {
+		if (!quietMode) {
 			if (posted) console.log("  \x1b[32m\u2713 PR comment posted\x1b[0m");
 			else console.log("  \x1b[2mNo PR detected or no GITHUB_TOKEN — skipping PR comment\x1b[0m");
 		}
@@ -973,12 +1016,12 @@ async function main() {
 	// CI exit code: fail if score below threshold (skip in watch mode)
 	const failUnder = flags.failUnder ?? (ciMode ? 60 : (config.failUnder ?? 0));
 	if (failUnder > 0 && score < failUnder && !watchMode) {
-		if (!jsonOnly) console.log(`  \x1b[31mFailing: score ${score} < ${failUnder}\x1b[0m\n`);
+		if (!quietMode) console.log(`  \x1b[31mFailing: score ${score} < ${failUnder}\x1b[0m\n`);
 		process.exit(1);
 	}
 
 	// Non-blocking update check (don't slow down the scan)
-	if (!jsonOnly && !ciMode && !watchMode && !process.env.VCQA_NO_UPDATE_CHECK) {
+	if (!quietMode && !ciMode && !watchMode && !process.env.VCQA_NO_UPDATE_CHECK) {
 		checkForUpdate(VERSION).catch(() => {});
 	}
 

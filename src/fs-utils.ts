@@ -180,7 +180,7 @@ function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>): v
 				isTest,
 			});
 		} catch {
-			continue; // broken symlink, deleted file, or permission denied
+			/* broken symlink, deleted file, or permission denied */
 		}
 	}
 }

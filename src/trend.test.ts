@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { computeTrend, formatTrend, trendHTML } from "./trend.js";
 import type { VibeReport } from "./types.js";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
