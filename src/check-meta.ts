@@ -369,6 +369,18 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		recommendation:
 			"Always pair setInterval with clearInterval in cleanup. Remove event listeners in componentWillUnmount/useEffect return. Call .disconnect() on Observers. Avoid window.* assignments.",
 	},
+	"html-quality": {
+		name: "html-quality",
+		label: "HTML Quality",
+		category: "Quality",
+		priority: "medium",
+		weight: 0,
+		description:
+			"Checks static HTML sites for meta tags (title, description, viewport, OG), image optimization (alt, dimensions, lazy loading), broken internal links, heading hierarchy, render-blocking scripts, mixed content, SEO files (robots.txt, sitemap.xml), and accessibility (lang attribute).",
+		risk: "Missing viewport meta means the page isn't mobile-responsive. Missing alt attributes make images invisible to screen readers. Render-blocking scripts delay page load. Broken links frustrate users and hurt SEO. Missing OG tags make social sharing look unprofessional.",
+		recommendation:
+			"Add meta viewport and description to every page. Set alt on all images. Use async/defer on scripts in <head>. Add robots.txt and sitemap.xml. Ensure each page has a unique title.",
+	},
 	"frontend-health": {
 		name: "frontend-health",
 		label: "Frontend Health",
