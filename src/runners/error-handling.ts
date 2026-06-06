@@ -30,9 +30,11 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i].trim();
 			if (line.startsWith("//") || line.startsWith("*")) continue;
-			// Skip string-only lines and metadata definitions
+			// Skip string-only lines, metadata definitions, and return statements with string literals
 			if (/^\s*["'`].*["'`][,;]?\s*$/.test(lines[i])) continue;
 			if (/\b(?:message|description|risk|recommendation|name)\s*:\s*["']/.test(line)) continue;
+			if (/\breturn\s+["'`]/.test(line)) continue;
+			if (/\brule\s*===?\s*["']/.test(line)) continue;
 
 			if (/catch\s*\([^)]*\)\s*\{\s*\}/.test(line) || /catch\s*\{\s*\}/.test(line)) {
 				emptyCatch++;

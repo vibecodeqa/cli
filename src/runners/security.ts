@@ -338,9 +338,13 @@ export function runSecurity(cwd: string): CheckResult {
 			const trimmed = line.trim();
 			if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
 			// Skip pattern/config definition lines and string-heavy metadata (prevents false positives on own code)
-			if (/\bpattern\s*:|name:\s*["']|message:\s*["']|description:\s*["']|risk:\s*["']|recommendation:\s*["']/.test(trimmed)) continue;
+			if (/\bpattern\s*:|name:\s*["']|message:\s*["'`]|description:\s*["']|risk:\s*["']|recommendation:\s*["']|rule:\s*["']|severity:\s*["']/.test(trimmed)) continue;
 			// Skip lines that are primarily string content (check-meta descriptions, etc.)
 			if (/^\s*["'`].*["'`][,;]?\s*$/.test(line)) continue;
+			// Skip return statements returning string literals (e.g., fix suggestions mentioning patterns)
+			if (/\breturn\s+["'`]/.test(trimmed)) continue;
+			// Skip rule-matching conditionals (e.g., if (rule === "secret-detected") ...)
+			if (/\brule\s*===?\s*["']/.test(trimmed) || /\bcheck\s*===?\s*["']/.test(trimmed)) continue;
 
 			for (const p of PATTERNS) {
 				if (p.pattern.test(line)) {

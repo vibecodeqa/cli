@@ -1,6 +1,6 @@
 /** Code standards check — naming conventions, anti-patterns, config hygiene. */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { getProductionFiles, readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue, StackInfo } from "../types.js";
@@ -57,6 +57,16 @@ const CODE_SMELLS: PatternCheck[] = [
 export function runStandards(cwd: string, stack: StackInfo): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
+
+	// Detect CLI projects — console.log is intentional in CLI tools
+	let isCLI = false;
+	try {
+		const pkgPath = join(cwd, "package.json");
+		if (existsSync(pkgPath)) {
+			const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+			isCLI = !!pkg.bin;
+		}
+	} catch { /* ignore */ }
 
 	// Collect source files
 	const files = getProductionFiles(cwd);
@@ -128,8 +138,8 @@ export function runStandards(cwd: string, stack: StackInfo): CheckResult {
 			if (/^\s*["'`].*["'`][,;]?\s*$/.test(line)) continue;
 
 			for (const check of CODE_SMELLS) {
-				// Skip console.log in CLI entry points (intentional output)
-				if (check.name === "console.log" && (f.path.includes("cli.") || f.path.includes("bin/"))) continue;
+				// Skip console.log in CLI projects (intentional terminal output)
+				if (check.name === "console.log" && isCLI) continue;
 				if (check.pattern.test(line)) {
 					if (check.exclude?.test(line)) continue;
 					smellCount++;
