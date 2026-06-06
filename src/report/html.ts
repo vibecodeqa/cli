@@ -12,10 +12,11 @@
  */
 
 import { getCheckMeta } from "../check-meta.js";
+import { computeDelta } from "../delta.js";
 import type { CheckResult, VibeReport } from "../types.js";
 import { det, e, fileLink, gc } from "./components.js";
 import { FAVICON_SVG } from "./favicon.js";
-import { type CatScore, categoryPage, featureMapPage, filesPage, issuesPage, overviewPage, trendsPage } from "./pages.js";
+import { actionsPage, type CatScore, categoryPage, featureMapPage, filesPage, issuesPage, overviewPage, trendsPage } from "./pages.js";
 import { CSS } from "./styles.js";
 
 export const GROUPS: { id: string; label: string; file: string; checks: string[] }[] = [
@@ -33,7 +34,7 @@ export const GROUPS: { id: string; label: string; file: string; checks: string[]
 	{ id: "ai", label: "AI Analysis", file: "ai-analysis.html", checks: ["doc-coherence", "code-coherence", "comment-staleness", "dead-patterns", "test-audit"] },
 ];
 
-export function generatePages(report: VibeReport, historyDir?: string): Map<string, string> {
+export function generatePages(report: VibeReport, historyDir?: string, prevReport?: VibeReport): Map<string, string> {
 	const pages = new Map<string, string>();
 	const allChecks = report.checks;
 	const checkMap = new Map(allChecks.map((c) => [c.name, c]));
@@ -116,6 +117,9 @@ export function generatePages(report: VibeReport, historyDir?: string): Map<stri
 	const deadPatternsCheck = checkMap.get("dead-patterns");
 	pages.set("feature-map.html", w("feature-map", featureMapPage(deadPatternsCheck, fl)));
 
+	// Compute delta from previous scan
+	const scanDelta = prevReport ? computeDelta(prevReport, report) : undefined;
+	pages.set("actions.html", w("actions", actionsPage(allChecks, fl, report.meta.stack.linter, scanDelta)));
 	pages.set("issues.html", w("issues", issuesPage(allChecks, totalIssues, fl)));
 	pages.set("files.html", w("files", filesPage(topFiles, fileIssues, fl)));
 	pages.set("trends.html", w("trends", trendsPage(historyDir)));
@@ -147,6 +151,7 @@ function wrap(proj: string, currentId: string, report: VibeReport, totalIssues: 
 		{ id: "checks", label: "Checks", file: GROUPS[0].file, active: isCheckPage },
 		{ id: "feature-map", label: "Feature Map", file: "feature-map.html" },
 		{ id: "trends", label: "Trends", file: "trends.html" },
+		{ id: "actions", label: "Actions", file: "actions.html" },
 		{ id: "issues", label: `Issues (${totalIssues})`, file: "issues.html" },
 		{ id: "files", label: "Files", file: "files.html" },
 	];

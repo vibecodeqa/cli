@@ -17,7 +17,9 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 	// Determine the target path for linting
 	// Monorepos with root config: lint "." (biome/eslint will find all files)
 	// Single-package: lint "src/"
-	const lintTarget = workspace?.isMonorepo ? "." : "src/";
+	const lintTarget = workspace?.isMonorepo ? "."
+		: existsSync(join(cwd, "src")) ? "src/"
+		: ".";
 
 	if (stack.linter === "biome") {
 		const { stdout } = run(`npx biome check ${lintTarget} --reporter=json 2>/dev/null || true`, cwd);
@@ -28,6 +30,8 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 				// biome path can be string or {file: "..."} depending on version
 				const rawPath = d.location?.path;
 				const file = typeof rawPath === "string" ? rawPath : rawPath?.file || undefined;
+				// Skip generated output files
+				if (file && (file.includes(".vibe-check/") || file.includes("node_modules/"))) continue;
 				issues.push({
 					severity: d.severity === "error" ? "error" : d.severity === "warning" ? "warning" : "info",
 					message: d.description || d.message || "lint issue",

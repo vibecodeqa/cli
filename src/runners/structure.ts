@@ -75,7 +75,7 @@ export function runStructure(cwd: string, stack: StackInfo, workspace?: Workspac
 	}
 
 	// Check for lockfile — in monorepos, lockfiles may be in packages
-	const lockfiles = isDart ? ["pubspec.lock"] : ["pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lockb"];
+	const lockfiles = isDart ? ["pubspec.lock"] : ["pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lockb", "bun.lock"];
 	let hasLock = lockfiles.some((f) => existsSync(join(cwd, f)));
 	if (!hasLock && workspace?.isMonorepo) {
 		hasLock = workspace.packages.some((p) => lockfiles.some((f) => existsSync(join(cwd, p.path, f))));

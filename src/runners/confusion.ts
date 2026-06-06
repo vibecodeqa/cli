@@ -128,12 +128,9 @@ export function runConfusion(cwd: string): CheckResult {
 	const dirGroups = new Map<string, typeof files>();
 	for (const f of files) {
 		const dir = f.path.includes("/") ? f.path.replace(/\/[^/]+$/, "") : ".";
-		// Use workspace package prefix for grouping (packages/X, apps/X, etc.)
-		const pkg = f.path.match(/^(packages|apps|libs|modules|internal)\/[^/]+/)?.[0];
-		const groupKey = pkg || dir;
-		const group = dirGroups.get(groupKey) || [];
+		const group = dirGroups.get(dir) || [];
 		group.push(f);
-		dirGroups.set(groupKey, group);
+		dirGroups.set(dir, group);
 	}
 
 	// Also do a global comparison but only for files in the same top-level group
@@ -143,11 +140,12 @@ export function runConfusion(cwd: string): CheckResult {
 				const a = group[i].base;
 				const b = group[j].base;
 
-				// Near-identical (Levenshtein ≤ 2, but skip very short names where distance 1 is expected)
+				// Near-identical (Levenshtein ≤ 2, but require longer names for distance 2)
 				// Early exit: length diff > 2 means edit distance > 2
 				if (a !== b && a.length >= 3 && b.length >= 3 && Math.abs(a.length - b.length) <= 2) {
 					const dist = levenshtein(a, b);
-					if (dist <= 2) {
+					const minLen = Math.min(a.length, b.length);
+					if (dist === 1 || (dist === 2 && minLen >= 5)) {
 						fileConfusability++;
 						issues.push({
 							severity: "warning",
@@ -195,8 +193,8 @@ export function runConfusion(cwd: string): CheckResult {
 				});
 			}
 
-			// Match standalone variable assignments with generic names
-			const varMatch = line.match(/^(?:export\s+)?(?:const|let)\s+(\w+)\s*=/);
+			// Match exported variable assignments with generic names (local vars are fine)
+			const varMatch = line.match(/^export\s+(?:const|let)\s+(\w+)\s*=/);
 			if (varMatch && GENERIC_NAMES.has(varMatch[1].toLowerCase()) && varMatch[1].length <= 6) {
 				genericNames++;
 				issues.push({
@@ -210,7 +208,7 @@ export function runConfusion(cwd: string): CheckResult {
 		}
 	}
 
-	// ── 3. Export name collisions ──
+	// ── 3. Export name collisions (within same package scope) ──
 	const exportMap = new Map<string, string[]>();
 	for (const f of files) {
 		for (const exp of f.exports) {
@@ -221,13 +219,26 @@ export function runConfusion(cwd: string): CheckResult {
 	}
 	for (const [name, paths] of exportMap) {
 		if (paths.length > 1) {
-			exportCollisions++;
-			issues.push({
-				severity: "error",
-				message: `Export collision: "${name}" exported from ${paths.length} files — LLMs may reference the wrong one`,
-				file: paths.join(", "),
-				rule: "export-collision",
-			});
+			// In monorepos, only flag collisions within the same package
+			const pkgOf = (p: string) => p.match(/^(packages|apps|libs|modules|internal)\/[^/]+/)?.[0] || ".";
+			const pkgGroups = new Map<string, string[]>();
+			for (const p of paths) {
+				const pkg = pkgOf(p);
+				const arr = pkgGroups.get(pkg) || [];
+				arr.push(p);
+				pkgGroups.set(pkg, arr);
+			}
+			for (const groupPaths of pkgGroups.values()) {
+				if (groupPaths.length > 1) {
+					exportCollisions++;
+					issues.push({
+						severity: "error",
+						message: `Export collision: "${name}" exported from ${groupPaths.length} files — LLMs may reference the wrong one`,
+						file: groupPaths.join(", "),
+						rule: "export-collision",
+					});
+				}
+			}
 		}
 	}
 

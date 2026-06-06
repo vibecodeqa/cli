@@ -2,7 +2,9 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getCheckMeta } from "../check-meta.js";
+import { getCheckMeta, type CheckMeta } from "../check-meta.js";
+import { suggestFix } from "../commands/shared.js";
+import type { ScanDelta } from "../delta.js";
 import { buildCoverageMapInput, generateCoverageMap } from "../diagrams/coverage.js";
 import { loadHistory } from "../history.js";
 import {
@@ -599,4 +601,197 @@ export function featureMapPage(deadPatternsCheck: CheckResult | undefined, fl: F
 </div>
 
 <div class="fm-grid">${cards}</div>`;
+}
+
+// ── Actions page ─────────────────────────────────────────
+
+interface ActionGroup {
+	check: string;
+	meta: CheckMeta;
+	fix: string;
+	items: { file?: string; line?: number; message: string; rule?: string }[];
+}
+
+export function actionsPage(allChecks: CheckResult[], fl: FL, linter: string, delta?: ScanDelta): string {
+	// Classify issues into auto-fixable, AI-fixable, manual
+	const autoFixes: { check: string; file?: string; line?: number; message: string; rule?: string }[] = [];
+	const aiFixes: ActionGroup[] = [];
+	const manualGroups: { meta: CheckMeta; score: number; issues: { file?: string; line?: number; message: string }[] }[] = [];
+
+	// Auto-fixable: lint issues (biome/eslint can auto-fix), structure issues
+	const AUTO_RULES = new Set(["missing-file", "missing-lockfile", "ts-strict", "env-not-ignored", "no-ci"]);
+
+	// Group AI-fixable by their fix suggestion
+	const fixGroups = new Map<string, ActionGroup>();
+
+	for (const c of allChecks) {
+		if (det(c).skipped || det(c).comingSoon) continue;
+		const meta = getCheckMeta(c.name);
+		const manualIssues: { file?: string; line?: number; message: string }[] = [];
+
+		for (const iss of c.issues) {
+			const file = typeof iss.file === "string" ? iss.file : undefined;
+
+			// Auto-fixable: lint issues or known auto-fix rules
+			if (c.name === "lint" || AUTO_RULES.has(iss.rule || "")) {
+				autoFixes.push({ check: c.name, file, line: iss.line, message: iss.message, rule: iss.rule });
+				continue;
+			}
+
+			// AI-fixable: has a suggestFix mapping
+			const fix = suggestFix(c.name, iss.rule || "", iss.message);
+			if (fix) {
+				const key = `${c.name}::${fix}`;
+				const group = fixGroups.get(key) || { check: c.name, meta, fix, items: [] };
+				group.items.push({ file, line: iss.line, message: iss.message, rule: iss.rule });
+				fixGroups.set(key, group);
+				continue;
+			}
+
+			// Manual
+			manualIssues.push({ file, line: iss.line, message: iss.message });
+		}
+
+		if (manualIssues.length > 0 && c.score < 90) {
+			manualGroups.push({ meta, score: c.score, issues: manualIssues });
+		}
+	}
+
+	for (const g of fixGroups.values()) aiFixes.push(g);
+	aiFixes.sort((a, b) => b.items.length - a.items.length);
+	manualGroups.sort((a, b) => a.score - b.score);
+
+	const totalAuto = autoFixes.length;
+	const totalAI = aiFixes.reduce((s, g) => s + g.items.length, 0);
+	const totalManual = manualGroups.reduce((s, g) => s + g.issues.length, 0);
+
+	// Build auto-fix section
+	let autoSection = "";
+	if (totalAuto > 0) {
+		const linterName = linter === "biome" ? "Biome" : linter === "eslint" ? "ESLint" : "linter";
+		autoSection = `
+<div class="act-section">
+  <h3><span class="act-icon" style="background:#22c55e20;color:var(--pass)">&#9889;</span> Quick Fixes <span class="act-count">${totalAuto}</span></h3>
+  <p class="act-desc">Auto-fixable with one command. Run <code>npx @vibecodeqa/cli fix</code></p>
+  <div class="act-cmd"><code>npx @vibecodeqa/cli fix</code></div>
+  <details class="act-details"><summary>${totalAuto} issues (${linterName} formatting, missing files, config)</summary>
+  <table class="act-table"><tbody>${autoFixes
+		.slice(0, 50)
+		.map((i) => `<tr><td class="act-check">${e(i.check)}</td><td>${i.file ? fl(i.file.split(":")[0]!, i.line) : ""}</td><td>${e(i.message)}</td></tr>`)
+		.join("")}</tbody></table>
+  ${totalAuto > 50 ? `<p class="muted">+${totalAuto - 50} more</p>` : ""}
+  </details>
+</div>`;
+	}
+
+	// Build AI-fix section
+	let aiSection = "";
+	if (totalAI > 0) {
+		const groupRows = aiFixes
+			.slice(0, 20)
+			.map((g) => {
+				const topItems = g.items
+					.slice(0, 3)
+					.map((i) => `<div class="act-item">${i.file ? fl(i.file.split(":")[0]!, i.line) : ""} <span class="muted">${e(i.message)}</span></div>`)
+					.join("");
+				const more = g.items.length > 3 ? `<div class="act-item muted">+${g.items.length - 3} more</div>` : "";
+				return `<div class="act-card"><div class="act-card-head"><span class="act-check">${e(g.meta.label)}</span><span class="act-count">${g.items.length}</span></div><div class="act-fix">${e(g.fix)}</div>${topItems}${more}</div>`;
+			})
+			.join("");
+
+		aiSection = `
+<div class="act-section">
+  <h3><span class="act-icon" style="background:#6366f120;color:var(--info)">&#10024;</span> AI Fixes <span class="act-count">${totalAI}</span></h3>
+  <p class="act-desc">Fixable with AI assistance. Run <code>npx @vibecodeqa/cli fix --ai</code></p>
+  <div class="act-cmd"><code>npx @vibecodeqa/cli fix --ai</code></div>
+  <div class="act-grid">${groupRows}</div>
+</div>`;
+	}
+
+	// Build manual section
+	let manualSection = "";
+	if (manualGroups.length > 0) {
+		const groupRows = manualGroups
+			.slice(0, 15)
+			.map((g) => {
+				const clr = gc(g.score >= 90 ? "A" : g.score >= 75 ? "B" : g.score >= 60 ? "C" : g.score >= 40 ? "D" : "F");
+				const topIssues = g.issues
+					.slice(0, 3)
+					.map((i) => `<div class="act-item">${i.file ? fl(i.file.split(":")[0]!, i.line) : ""} <span class="muted">${e(i.message)}</span></div>`)
+					.join("");
+				const more = g.issues.length > 3 ? `<div class="act-item muted">+${g.issues.length - 3} more</div>` : "";
+				return `<div class="act-card"><div class="act-card-head"><span class="act-check">${e(g.meta.label)}</span><span style="color:${clr}">${g.score}/100</span></div><div class="act-rec">${e(g.meta.recommendation)}</div>${topIssues}${more}</div>`;
+			})
+			.join("");
+
+		manualSection = `
+<div class="act-section">
+  <h3><span class="act-icon" style="background:#eab30820;color:var(--warn)">&#128736;</span> Manual Actions <span class="act-count">${totalManual}</span></h3>
+  <p class="act-desc">Require code changes — grouped by check with specific recommendations.</p>
+  <div class="act-grid">${groupRows}</div>
+</div>`;
+	}
+
+	const noActions = totalAuto === 0 && totalAI === 0 && totalManual === 0;
+
+	// Delta section — shows what changed since last scan
+	let deltaSection = "";
+	if (delta) {
+		const dColor = delta.scoreDelta > 0 ? "var(--pass)" : delta.scoreDelta < 0 ? "var(--fail)" : "var(--muted)";
+		const dArrow = delta.scoreDelta > 0 ? "&#9650;" : delta.scoreDelta < 0 ? "&#9660;" : "&#9644;";
+
+		// Per-check changes
+		const changed = delta.checks.filter((c) => c.delta !== 0).sort((a, b) => b.delta - a.delta);
+		const checkDeltas = changed
+			.slice(0, 10)
+			.map((c) => {
+				const cc = c.delta > 0 ? "var(--pass)" : "var(--fail)";
+				return `<span class="delta-chip" style="color:${cc}">${c.name} ${c.delta > 0 ? "+" : ""}${c.delta}</span>`;
+			})
+			.join("");
+
+		// Fixed issues list
+		let fixedList = "";
+		if (delta.fixed.length > 0) {
+			const byCheck = new Map<string, number>();
+			for (const f of delta.fixed) byCheck.set(f.check, (byCheck.get(f.check) || 0) + 1);
+			fixedList = `<div class="delta-fixed"><strong style="color:var(--pass)">Fixed (${delta.fixed.length}):</strong> ${[...byCheck.entries()].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} (${n})`).join(", ")}</div>`;
+		}
+		let newList = "";
+		if (delta.introduced.length > 0) {
+			const byCheck = new Map<string, number>();
+			for (const f of delta.introduced) byCheck.set(f.check, (byCheck.get(f.check) || 0) + 1);
+			newList = `<div class="delta-new"><strong style="color:var(--fail)">New (${delta.introduced.length}):</strong> ${[...byCheck.entries()].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} (${n})`).join(", ")}</div>`;
+		}
+
+		deltaSection = `
+<div class="delta-banner">
+  <div class="delta-head">
+    <span class="delta-title">What Changed</span>
+    <span class="delta-score">${delta.before.grade} ${delta.before.score} &rarr; ${delta.after.grade} ${delta.after.score}</span>
+    <span class="delta-arrow" style="color:${dColor}">${dArrow} ${delta.scoreDelta > 0 ? "+" : ""}${delta.scoreDelta}</span>
+  </div>
+  <div class="delta-stats">
+    <span style="color:var(--pass)">${delta.fixed.length} fixed</span>
+    <span style="color:var(--fail)">${delta.introduced.length} new</span>
+    <span style="color:var(--muted)">${delta.after.issueCount} remaining</span>
+  </div>
+  ${checkDeltas ? `<div class="delta-checks">${checkDeltas}</div>` : ""}
+  ${fixedList}${newList}
+</div>`;
+	}
+
+	return `
+<h2>Recommended Actions</h2>
+<p class="muted" style="margin-bottom:1.5rem">${noActions ? "No actions needed — all checks passed." : `${totalAuto + totalAI + totalManual} issues across ${totalAuto > 0 ? "3" : totalAI > 0 ? "2" : "1"} fix categories.`}</p>
+
+${deltaSection}
+
+<div class="act-summary">
+  <div class="act-stat"><span class="act-stat-n" style="color:var(--pass)">${totalAuto}</span><span class="act-stat-l">Auto-fixable</span></div>
+  <div class="act-stat"><span class="act-stat-n" style="color:var(--info)">${totalAI}</span><span class="act-stat-l">AI-fixable</span></div>
+  <div class="act-stat"><span class="act-stat-n" style="color:var(--warn)">${totalManual}</span><span class="act-stat-l">Manual</span></div>
+</div>
+
+${autoSection}${aiSection}${manualSection}`;
 }

@@ -87,7 +87,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		{ name: "lint", fn: () => runLint(resolvedCwd, stack, workspace) },
 		{ name: "types", fn: () => runTypeCheck(resolvedCwd, isDart, workspace) },
 		{ name: "type-safety", fn: () => runTypeSafety(resolvedCwd, isDart) },
-		{ name: "standards", fn: () => runStandards(resolvedCwd, stack) },
+		{ name: "standards", fn: () => runStandards(resolvedCwd, stack, workspace) },
 		{ name: "complexity", fn: () => runComplexity(resolvedCwd) },
 		{ name: "duplication", fn: () => runDuplication(resolvedCwd) },
 		{ name: "error-handling", fn: () => runErrorHandling(resolvedCwd, stack) },
@@ -204,6 +204,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 
 export { CHECK_META, getCheckMeta, type CheckMeta };
 export { computeScore } from "./score.js";
+export { computeDelta, formatDeltaMarkdown, type ScanDelta } from "./delta.js";
 export { loadConfig, type VcqaConfig } from "./config.js";
 export { detectStack, detectWorkspace } from "./detect.js";
 export { gradeFromScore } from "./types.js";

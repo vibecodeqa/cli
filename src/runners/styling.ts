@@ -45,7 +45,7 @@ function tryStylelint(cwd: string): Issue[] | null {
 	}
 
 	const results = runJSON<StylelintResult[]>(
-		"npx stylelint --formatter json \"src/**/*.{css,scss}\" 2>/dev/null || true",
+		"npx stylelint --formatter json \"**/*.{css,scss}\" --ignore-pattern node_modules 2>/dev/null || true",
 		cwd,
 		30_000,
 	);

@@ -309,6 +309,13 @@ function getChangedFiles(cwd: string, base: string): Set<string> | null {
 async function writeOutputs(report: VibeReport, outputDir: string, flags: ParsedFlags): Promise<void> {
 	mkdirSync(outputDir, { recursive: true });
 
+	// Load previous report BEFORE overwriting (for delta computation)
+	let prevReport: VibeReport | undefined;
+	const prevPath = join(outputDir, "report.json");
+	if (existsSync(prevPath)) {
+		try { prevReport = JSON.parse(readFileSync(prevPath, "utf-8")); } catch { /* corrupt */ }
+	}
+
 	// Always write JSON
 	writeFileSync(join(outputDir, "report.json"), JSON.stringify(report, null, 2));
 
@@ -326,7 +333,7 @@ async function writeOutputs(report: VibeReport, outputDir: string, flags: Parsed
 		const reportDir = join(outputDir, "report");
 		mkdirSync(reportDir, { recursive: true });
 		const historyDir = join(outputDir, "history");
-		const pages = generatePages(report, historyDir);
+		const pages = generatePages(report, historyDir, prevReport);
 		for (const [filename, html] of pages) {
 			writeFileSync(join(reportDir, filename), html);
 		}

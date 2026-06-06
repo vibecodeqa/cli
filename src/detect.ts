@@ -89,7 +89,7 @@ export function detectStack(cwd: string, workspace?: WorkspaceInfo): StackInfo {
 
 	const packageManager: StackInfo["packageManager"] = has("pnpm-lock.yaml")
 		? "pnpm"
-		: has("bun.lockb")
+		: has("bun.lockb") || has("bun.lock")
 			? "bun"
 			: has("yarn.lock")
 				? "yarn"
@@ -170,7 +170,7 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 				if (parsed.workspaces) {
 					const ws = Array.isArray(parsed.workspaces) ? parsed.workspaces : parsed.workspaces.packages || [];
 					if (ws.length > 0) {
-						tool = has("bun.lockb") ? "bun" : has("yarn.lock") ? "yarn" : "npm";
+						tool = has("bun.lockb") || has("bun.lock") ? "bun" : has("yarn.lock") ? "yarn" : "npm";
 						globs = ws;
 					}
 				}

@@ -195,7 +195,7 @@ function checkSupplyChain(has: HasFn, read: ReadFn): CategoryResult {
 
 	// Lockfile committed
 	practices++;
-	const hasLockfile = has("pnpm-lock.yaml") || has("package-lock.json") || has("yarn.lock") || has("bun.lockb") || has("pubspec.lock");
+	const hasLockfile = has("pnpm-lock.yaml") || has("package-lock.json") || has("yarn.lock") || has("bun.lockb") || has("bun.lock") || has("pubspec.lock");
 	if (hasLockfile) {
 		followed++;
 	} else {

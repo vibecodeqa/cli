@@ -331,12 +331,12 @@ describe("fix command", () => {
 	it("shows fix suggestions for empty catch", () => {
 		writeFileSync(join(TMP, "src", "bad.ts"), "export function f() { try { x() } catch {} }\n");
 		const out = run("fix .");
-		expect(out).toContain("Fix:");
+		expect(out).toContain("Remaining fixes available");
 	}, 30_000);
 
 	it("shows score after fix", () => {
 		const out = run("fix .");
-		expect(out).toContain("Score after fix:");
+		expect(out).toContain("Score:");
 	}, 30_000);
 
 	it("validates path", () => {

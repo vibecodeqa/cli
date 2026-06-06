@@ -136,6 +136,23 @@ describe("runStandards", () => {
 		rmSync(d2, { recursive: true });
 	});
 
+	it("detects strict mode in workspace package tsconfig", () => {
+		const { dir, stack } = makeProject({
+			"packages/api/tsconfig.json": JSON.stringify({ compilerOptions: { strict: true } }),
+			"packages/api/src/index.ts": "export const x = 1;\n",
+		});
+		setGlobalSrcRoots(["packages/api/src"]);
+		const workspace = {
+			isMonorepo: true,
+			tool: "pnpm" as const,
+			packages: [{ name: "api", path: "packages/api", hasSrc: true, hasRootCode: false, hasTests: false, hasLinter: false }],
+			srcRoots: ["packages/api/src"],
+		};
+		const result = runStandards(dir, stack, workspace);
+		expect(result.issues.some((i) => i.rule === "ts-strict")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
 	it("no penalty for files under 300 lines", () => {
 		const lines250 = Array.from({ length: 250 }, (_, i) => `export const v${i} = ${i};`).join("\n");
 		const { dir, stack } = makeProject({ "src/a.ts": lines250 });

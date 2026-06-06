@@ -106,6 +106,18 @@ describe("runStructure", () => {
 		rmSync(dir, { recursive: true });
 	});
 
+	it("detects bun.lock (text format) as valid lockfile", () => {
+		const dir = makeProject({
+			"package.json": JSON.stringify({ scripts: { test: "vitest" } }),
+			"bun.lock": "lockfile v1\n",
+			"src/app.ts": "export const x = 1;",
+		});
+		const result = runStructure(dir, tsStack);
+		expect((result.details as any).found).toContain("lockfile");
+		expect(result.issues.some((i) => i.rule === "missing-lockfile")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
 	it("accepts tsconfig.base.json in monorepos", () => {
 		const dir = makeProject({
 			"package.json": "{}",

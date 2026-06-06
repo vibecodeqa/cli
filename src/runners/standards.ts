@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { getProductionFiles, readDeps } from "../fs-utils.js";
-import type { CheckResult, Issue, StackInfo } from "../types.js";
+import type { CheckResult, Issue, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
 interface PatternCheck {
@@ -54,7 +54,7 @@ const CODE_SMELLS: PatternCheck[] = [
 	},
 ];
 
-export function runStandards(cwd: string, stack: StackInfo): CheckResult {
+export function runStandards(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 
@@ -73,15 +73,24 @@ export function runStandards(cwd: string, stack: StackInfo): CheckResult {
 
 	// ── File naming conventions ──
 	let namingViolations = 0;
+
+	// Detect dominant convention for tsx/jsx files before flagging
+	const tsxFiles = files.filter((f) => {
+		const ext = extname(basename(f.path));
+		return ext === ".tsx" || ext === ".jsx";
+	});
+	const pascalCount = tsxFiles.filter((f) => /^[A-Z]/.test(basename(f.path).replace(extname(basename(f.path)), ""))).length;
+	const usesKebabConvention = tsxFiles.length >= 3 && pascalCount < tsxFiles.length / 2;
+
 	for (const f of files) {
 		const name = basename(f.path);
 		const ext = extname(name);
 		const base = name.replace(ext, "");
 
-		// React components should be PascalCase
+		// React components should be PascalCase — but only flag if PascalCase is the project convention
 		if ((ext === ".tsx" || ext === ".jsx") && /^[A-Z]/.test(base)) {
 			// PascalCase component file — correct
-		} else if ((ext === ".tsx" || ext === ".jsx") && /^[a-z]/.test(base) && base !== "main" && base !== "index") {
+		} else if (!usesKebabConvention && (ext === ".tsx" || ext === ".jsx") && /^[a-z]/.test(base) && base !== "main" && base !== "index") {
 			// lowercase tsx file that's not main/index — check if it exports a component
 			if (/export (default )?(function|const) [A-Z]/.test(f.content)) {
 				namingViolations++;
@@ -153,6 +162,12 @@ export function runStandards(cwd: string, stack: StackInfo): CheckResult {
 	// tsconfig maturity
 	if (stack.language === "typescript") {
 		const tsconfigPaths = ["tsconfig.json", "tsconfig.app.json", "tsconfig.base.json"];
+		// In monorepos, also check each workspace package's tsconfig
+		if (workspace?.isMonorepo) {
+			for (const pkg of workspace.packages) {
+				tsconfigPaths.push(join(pkg.path, "tsconfig.json"));
+			}
+		}
 		let strictFound = false;
 		let compilerOpts: Record<string, unknown> = {};
 		for (const p of tsconfigPaths) {

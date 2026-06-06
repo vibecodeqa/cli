@@ -295,4 +295,41 @@ h3{font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:
 .prefs-opt:hover{color:var(--text);border-color:var(--dim)}
 .prefs-opt.active{background:var(--accent);color:#fff;border-color:var(--accent)}
 [data-theme="light"] .prefs-panel{box-shadow:0 8px 30px #0002}
+
+/* ── Actions page ── */
+.act-summary{display:flex;gap:1.5rem;margin-bottom:2rem}
+.act-stat{text-align:center}
+.act-stat-n{display:block;font-size:1.8rem;font-weight:700;line-height:1.2}
+.act-stat-l{font-size:0.72rem;color:var(--muted)}
+.act-section{margin-bottom:2.5rem}
+.act-section h3{display:flex;align-items:center;gap:0.5rem;font-size:1rem;margin-bottom:0.3rem}
+.act-icon{display:inline-flex;align-items:center;justify-content:center;width:1.6rem;height:1.6rem;border-radius:8px;font-size:0.9rem}
+.act-count{font-size:0.72rem;color:var(--muted);font-weight:400}
+.act-desc{font-size:0.78rem;color:var(--muted);margin-bottom:0.8rem}
+.act-cmd{margin-bottom:1rem}
+.act-cmd code{display:inline-block;background:var(--card);border:1px solid var(--border);padding:0.3rem 0.8rem;border-radius:6px;font-size:0.78rem;color:var(--accent)}
+.act-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:0.8rem}
+.act-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:0.8rem 1rem}
+.act-card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem}
+.act-check{font-size:0.78rem;font-weight:600}
+.act-fix{font-size:0.78rem;color:var(--pass);margin-bottom:0.5rem;padding:0.3rem 0.5rem;background:var(--pass)10;border-radius:4px}
+.act-rec{font-size:0.75rem;color:var(--muted);margin-bottom:0.5rem;line-height:1.4}
+.act-item{font-size:0.72rem;color:var(--dim);padding:0.15rem 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.act-details{margin-top:0.5rem}
+.act-details summary{font-size:0.75rem;color:var(--muted);cursor:pointer}
+.act-table{width:100%;font-size:0.72rem;margin-top:0.3rem}
+.act-table td{padding:0.2rem 0.4rem;border-bottom:1px solid var(--border)}
+.act-table .act-check{color:var(--muted);white-space:nowrap}
+@media(max-width:600px){.act-summary{flex-direction:column;gap:0.8rem;align-items:center}.act-grid{grid-template-columns:1fr}}
+
+/* ── Delta banner ── */
+.delta-banner{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.2rem 1.5rem;margin-bottom:2rem}
+.delta-head{display:flex;align-items:center;gap:1rem;margin-bottom:0.5rem}
+.delta-title{font-weight:700;font-size:0.9rem}
+.delta-score{font-size:0.85rem;color:var(--muted)}
+.delta-arrow{font-weight:800;font-size:1rem}
+.delta-stats{display:flex;gap:1.2rem;font-size:0.78rem;margin-bottom:0.5rem}
+.delta-checks{display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:0.5rem}
+.delta-chip{font-size:0.7rem;padding:0.15rem 0.5rem;background:var(--card-alt);border:1px solid var(--border);border-radius:4px;white-space:nowrap}
+.delta-fixed,.delta-new{font-size:0.75rem;color:var(--muted);margin-top:0.3rem}
 `;
