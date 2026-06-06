@@ -197,7 +197,10 @@ export function runAccessibility(cwd: string): CheckResult {
 		name: "accessibility",
 		score,
 		grade: gradeFromScore(score),
-		details: { jsxFiles: files.length, missingAlt, clickDiv, missingLabel, missingLang, autofocus, positiveTabindex },
+		details: {
+			jsxFiles: files.length, missingAlt, clickDiv, missingLabel, missingLang, autofocus, positiveTabindex,
+			suggestion: !hasA11yPlugin ? "Install eslint-plugin-jsx-a11y for deeper accessibility analysis: pnpm add -D eslint-plugin-jsx-a11y" : undefined,
+		},
 		issues,
 		duration: Date.now() - start,
 	};

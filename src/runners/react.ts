@@ -217,6 +217,7 @@ export function runReact(cwd: string, stack: StackInfo): CheckResult {
 			inlineHandlers,
 			effectNoDeps,
 			domManipulation,
+			suggestion: !hasHooksPlugin ? "Install eslint-plugin-react-hooks for deeper React analysis: pnpm add -D eslint-plugin-react-hooks" : undefined,
 		},
 		issues,
 		duration: Date.now() - start,

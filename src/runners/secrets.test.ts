@@ -67,9 +67,18 @@ describe("runSecrets", () => {
 
 	it("gives A for empty project", async () => {
 		setup({});
-		// No src files to scan
 		const result = await runSecrets(TMP);
 		expect(result.score).toBe(100);
+		cleanup();
+	});
+
+	it("suggests gitleaks in details when not installed", async () => {
+		setup({ "src/app.ts": "export const x = 1;\n" });
+		const result = await runSecrets(TMP);
+		const details = result.details as Record<string, unknown>;
+		expect(details.suggestion).toContain("gitleaks");
+		// Suggestion should NOT be in issues
+		expect(result.issues.some((i) => (i as any).rule === "suggest-gitleaks")).toBe(false);
 		cleanup();
 	});
 });

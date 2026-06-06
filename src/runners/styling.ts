@@ -277,6 +277,7 @@ export function runStyling(cwd: string): CheckResult {
 			importantCount,
 			spacingValues: spacingValues.size,
 			stylelintIssues: stylelintIssues?.length ?? 0,
+			suggestion: !stylelintIssues ? "Install Stylelint for deeper CSS analysis (170+ rules): pnpm add -D stylelint stylelint-config-standard" : undefined,
 		},
 		issues,
 		duration: Date.now() - start,

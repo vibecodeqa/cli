@@ -102,4 +102,24 @@ export function Layout() {
 		const result = runStyling(dir);
 		expect(result.issues.some((i) => i.rule === "duplicate-tailwind")).toBe(true);
 	});
+
+	it("suggests Stylelint when not installed and CSS files exist", () => {
+		writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "test" }));
+		writeFileSync(join(dir, "src", "App.tsx"), 'export function App() { return <div className="app">app</div>; }');
+		writeFileSync(join(dir, "src", "styles.css"), ".app { color: red; }");
+		const result = runStyling(dir);
+		const details = result.details as Record<string, unknown>;
+		expect(details.suggestion).toContain("Stylelint");
+		expect(details.tool).toBe("built-in");
+		// Suggestion should NOT be in issues (keeps issue list clean)
+		expect(result.issues.some((i) => i.rule === "suggest-stylelint")).toBe(false);
+	});
+
+	it("does not suggest Stylelint when no CSS files", () => {
+		writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "test" }));
+		writeFileSync(join(dir, "src", "App.tsx"), 'export function App() { return <div>no css</div>; }');
+		const result = runStyling(dir);
+		const details = result.details as Record<string, unknown>;
+		expect(details.suggestion).toContain("Stylelint");
+	});
 });

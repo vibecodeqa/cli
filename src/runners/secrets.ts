@@ -130,7 +130,9 @@ export async function runSecrets(cwd: string): Promise<CheckResult> {
 	const gitleaksResult = tryGitleaks(cwd, issues);
 	const tool = gitleaksResult ? "gitleaks" : "secretlint";
 
-	if (!gitleaksResult) issues.push(...(await scanFallback(cwd)));
+	if (!gitleaksResult) {
+		issues.push(...(await scanFallback(cwd)));
+	}
 
 	// ── .env file audit ──
 	const envFiles = [".env", ".env.local", ".env.production", ".env.development"];
@@ -193,7 +195,11 @@ export async function runSecrets(cwd: string): Promise<CheckResult> {
 		name: "secrets",
 		score,
 		grade: gradeFromScore(score),
-		details: { secretsFound: issues.length, tool },
+		details: {
+			secretsFound: issues.length,
+			tool,
+			suggestion: !gitleaksResult ? "Install gitleaks for deeper secret detection (800+ patterns): brew install gitleaks" : undefined,
+		},
 		issues,
 		duration: Date.now() - start,
 	};
