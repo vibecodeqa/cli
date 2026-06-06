@@ -388,7 +388,8 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		priority: "medium",
 		weight: 1,
 		description:
-			"Detects CSS/styling antipatterns: mixed styling approaches (Tailwind + styled-components + inline), hardcoded colors instead of design tokens, magic spacing numbers (not on a 4px scale), !important abuse, duplicate Tailwind class strings, and inline style overuse.",
+			"Delegates to Stylelint for CSS/SCSS linting when installed. Adds cross-file analysis no CSS linter covers: mixed styling approaches, hardcoded colors in JSX, inconsistent spacing scale, !important abuse, duplicate Tailwind class strings, and inline style overuse.",
+		deeperTools: ["stylelint", "stylelint-config-standard"],
 		risk: "AI-generated components pile up inconsistent styles — hardcoded hex colors, random pixel values, inline styles. This creates an accidental design system where every component looks slightly different and nothing is reusable. Changing the brand color means finding 47 hex values across 30 files.",
 		recommendation:
 			"Pick one styling approach (Tailwind or CSS Modules). Define colors and spacing as design tokens (CSS variables or Tailwind theme). Extract repeated class strings into shared components. Use a 4px/8px spacing scale.",
