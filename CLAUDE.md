@@ -8,7 +8,7 @@ ink/react (the `monitor` TUI) and @jscpd/core (duplication engine, ~100 KB).
 ```bash
 pnpm install        # install dev deps
 pnpm build          # tsc → dist/
-pnpm test           # vitest run (429 tests across 41 files)
+pnpm test           # vitest run (435 tests across 42 files)
 pnpm lint           # biome check src/
 node dist/cli.js    # self-scan
 node dist/cli.js init               # set up CI workflow + configs
@@ -25,6 +25,7 @@ src/
 ├── cli.ts              # Entry: flags, init/fix commands, runner orchestration
 ├── core.ts             # Programmatic API: import { scan } from "@vibecodeqa/cli/core"
 ├── ai-fix.ts           # AI-powered code fixing (Claude API, search/replace)
+├── delta.ts            # Delta report: computeDelta(before, after), formatDeltaMarkdown
 ├── types.ts            # CheckResult, Issue, VibeReport, StackInfo, WorkspaceInfo
 ├── score.ts            # Weighted composite score from check-meta weights
 ├── check-meta.ts       # Metadata for all 34 checks (weight, description, deeperTools)

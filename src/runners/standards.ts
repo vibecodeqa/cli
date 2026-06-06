@@ -236,8 +236,8 @@ export function runStandards(cwd: string, stack: StackInfo, workspace?: Workspac
 	const totalFiles = files.length || 1;
 	const errorPenalty = Math.min(40, (errors / totalFiles) * 150);
 	const warningPenalty = Math.min(30, (warnings / totalFiles) * 80);
-	// fileSizePenalty is already exponential — normalize by file count, cap at 95
-	const largePenalty = Math.min(95, (fileSizePenalty / totalFiles) * 5);
+	// fileSizePenalty is already exponential — normalize by file count, cap at 80
+	const largePenalty = Math.min(80, (fileSizePenalty / totalFiles) * 3);
 	const score = Math.max(0, Math.min(100, Math.round(100 - errorPenalty - warningPenalty - largePenalty)));
 
 	return {

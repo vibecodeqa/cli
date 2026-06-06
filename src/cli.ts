@@ -9,6 +9,7 @@ import { runInit } from "./commands/init.js";
 import { validateCwd } from "./commands/shared.js";
 import { loadConfig } from "./config.js";
 import { scan } from "./core.js";
+import { computeDelta } from "./delta.js";
 import { detectStack, detectWorkspace } from "./detect.js";
 import { postPRComment } from "./pr-comment.js";
 import { generatePages } from "./report/html.js";
@@ -164,12 +165,30 @@ function printHeader(cwd: string, stack: ReturnType<typeof detectStack>, workspa
 	console.log("");
 }
 
-function generateMarkdown(report: VibeReport, trend: TrendDelta | null): string {
+function generateMarkdown(report: VibeReport, trend: TrendDelta | null, prevReport?: VibeReport): string {
 	const { score, grade, checks } = report;
 	const gradeEmoji = grade === "A" ? "🟢" : grade === "B" ? "🟡" : grade === "C" ? "🟠" : "🔴";
 	let md = `# ${gradeEmoji} VibeCode QA: ${grade} ${score}/100\n\n`;
 
-	if (trend) {
+	// Delta section — shows what changed with specific fixed/new issues
+	if (prevReport) {
+		const delta = computeDelta(prevReport, report);
+		const arrow = delta.scoreDelta > 0 ? "📈" : delta.scoreDelta < 0 ? "📉" : "➡️";
+		md += `${arrow} **${delta.scoreDelta > 0 ? "+" : ""}${delta.scoreDelta}** vs previous`;
+		if (delta.fixed.length > 0) md += ` · **${delta.fixed.length} fixed**`;
+		if (delta.introduced.length > 0) md += ` · ${delta.introduced.length} new`;
+		md += "\n\n";
+
+		// Per-check changes
+		const changed = delta.checks.filter((c) => c.delta !== 0).sort((a, b) => b.delta - a.delta);
+		if (changed.length > 0) {
+			for (const c of changed.slice(0, 8)) {
+				const a = c.delta > 0 ? "+" : "";
+				md += `- ${c.delta > 0 ? "✅" : "⚠️"} ${c.name}: ${c.before} → ${c.after} (${a}${c.delta})\n`;
+			}
+			md += "\n";
+		}
+	} else if (trend) {
 		const arrow = trend.scoreDelta > 0 ? "📈" : trend.scoreDelta < 0 ? "📉" : "➡️";
 		md += `${arrow} **${trend.scoreDelta > 0 ? "+" : ""}${trend.scoreDelta}** vs previous`;
 		if (trend.fixedIssues > 0) md += ` · ${trend.fixedIssues} fixed`;
@@ -306,15 +325,8 @@ function getChangedFiles(cwd: string, base: string): Set<string> | null {
 
 // ── Report output ──
 
-async function writeOutputs(report: VibeReport, outputDir: string, flags: ParsedFlags): Promise<void> {
+async function writeOutputs(report: VibeReport, outputDir: string, flags: ParsedFlags, prevReport?: VibeReport): Promise<void> {
 	mkdirSync(outputDir, { recursive: true });
-
-	// Load previous report BEFORE overwriting (for delta computation)
-	let prevReport: VibeReport | undefined;
-	const prevPath = join(outputDir, "report.json");
-	if (existsSync(prevPath)) {
-		try { prevReport = JSON.parse(readFileSync(prevPath, "utf-8")); } catch { /* corrupt */ }
-	}
 
 	// Always write JSON
 	writeFileSync(join(outputDir, "report.json"), JSON.stringify(report, null, 2));
@@ -545,12 +557,20 @@ async function main() {
 	}
 
 	const trend = computeTrend(report, outputDir);
-	await writeOutputs(report, outputDir, flags);
+
+	// Load previous report BEFORE writeOutputs overwrites it (for delta in markdown/PR)
+	let prevReport: VibeReport | undefined;
+	const prevReportPath = join(outputDir, "report.json");
+	if (existsSync(prevReportPath)) {
+		try { prevReport = JSON.parse(readFileSync(prevReportPath, "utf-8")); } catch { /* corrupt */ }
+	}
+
+	await writeOutputs(report, outputDir, flags, prevReport);
 
 	const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY) && !quietMode && !ciMode && !watchMode;
 
 	if (flags.markdownMode) {
-		console.log(generateMarkdown(report, trend));
+		console.log(generateMarkdown(report, trend, prevReport));
 	} else {
 		await printResults(report, trend, flags, outputDir, interactive);
 	}
@@ -559,7 +579,7 @@ async function main() {
 	if (flags.uploadMode) await handleUpload(report, cwd, quietMode);
 
 	if (flags.prComment) {
-		const posted = await postPRComment(report, trend, cwd);
+		const posted = await postPRComment(report, trend, cwd, prevReport);
 		if (!quietMode) {
 			if (posted) console.log("  \x1b[32m\u2713 PR comment posted\x1b[0m");
 			else console.log("  \x1b[2mNo PR detected or no GITHUB_TOKEN — skipping PR comment\x1b[0m");

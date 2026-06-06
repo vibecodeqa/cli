@@ -2,6 +2,7 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { computeDelta } from "./delta.js";
 import type { TrendDelta } from "./trend.js";
 import type { VibeReport } from "./types.js";
 
@@ -13,14 +14,14 @@ interface PRInfo {
 	prNumber: number;
 }
 
-export async function postPRComment(report: VibeReport, trend: TrendDelta | null, cwd: string): Promise<boolean> {
+export async function postPRComment(report: VibeReport, trend: TrendDelta | null, cwd: string, prevReport?: VibeReport): Promise<boolean> {
 	const pr = detectPR(cwd);
 	if (!pr) return false;
 
 	const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 	if (!token) return false;
 
-	const body = buildCommentBody(report, trend);
+	const body = buildCommentBody(report, trend, prevReport);
 
 	// Try to find existing vcqa comment to update
 	const existingId = await findExistingComment(pr, token);
@@ -73,14 +74,30 @@ function detectPR(cwd: string): PRInfo | null {
 	return null;
 }
 
-function buildCommentBody(report: VibeReport, trend: TrendDelta | null): string {
+function buildCommentBody(report: VibeReport, trend: TrendDelta | null, prevReport?: VibeReport): string {
 	const grade = report.grade;
 	const score = report.score;
 	const gradeEmoji = grade === "A" ? "🟢" : grade === "B" ? "🟡" : grade === "C" ? "🟠" : "🔴";
 
 	let body = `${MARKER}\n## ${gradeEmoji} VibeCode QA: **${grade}** ${score}/100\n\n`;
 
-	if (trend) {
+	if (prevReport) {
+		const delta = computeDelta(prevReport, report);
+		const arrow = delta.scoreDelta > 0 ? "📈" : delta.scoreDelta < 0 ? "📉" : "➡️";
+		body += `${arrow} **${delta.scoreDelta > 0 ? "+" : ""}${delta.scoreDelta}** vs previous`;
+		if (delta.fixed.length > 0) body += ` · **${delta.fixed.length} fixed**`;
+		if (delta.introduced.length > 0) body += ` · ${delta.introduced.length} new`;
+		body += "\n\n";
+
+		const changed = delta.checks.filter((c) => c.delta !== 0).sort((a, b) => b.delta - a.delta);
+		if (changed.length > 0) {
+			for (const c of changed.slice(0, 6)) {
+				const a = c.delta > 0 ? "+" : "";
+				body += `- ${c.delta > 0 ? "✅" : "⚠️"} ${c.name}: ${c.before} → ${c.after} (${a}${c.delta})\n`;
+			}
+			body += "\n";
+		}
+	} else if (trend) {
 		const arrow = trend.scoreDelta > 0 ? "📈" : trend.scoreDelta < 0 ? "📉" : "➡️";
 		body += `${arrow} **${trend.scoreDelta > 0 ? "+" : ""}${trend.scoreDelta}** vs previous`;
 		if (trend.fixedIssues > 0) body += ` · ${trend.fixedIssues} fixed`;
