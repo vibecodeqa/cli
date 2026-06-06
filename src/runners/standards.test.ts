@@ -102,9 +102,45 @@ describe("runStandards", () => {
 	it("handles empty project gracefully", () => {
 		const { dir, stack } = makeProject({});
 		const result = runStandards(dir, stack);
-		// Empty TS project gets penalized for missing strict mode but doesn't crash
 		expect(result.name).toBe("standards");
 		expect(result.score).toBeGreaterThanOrEqual(0);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("exponential penalty: 400-line file scores worse than 350-line file", () => {
+		const lines350 = Array.from({ length: 350 }, (_, i) => `export const v${i} = ${i};`).join("\n");
+		const lines400 = Array.from({ length: 400 }, (_, i) => `export const v${i} = ${i};`).join("\n");
+
+		const { dir: d1, stack: s1 } = makeProject({ "src/a.ts": lines350 });
+		const { dir: d2, stack: s2 } = makeProject({ "src/a.ts": lines400 });
+		const r1 = runStandards(d1, s1);
+		const r2 = runStandards(d2, s2);
+
+		expect(r2.score).toBeLessThan(r1.score);
+		rmSync(d1, { recursive: true });
+		rmSync(d2, { recursive: true });
+	});
+
+	it("exponential penalty: 800-line file scores much worse than 400-line file", () => {
+		const lines400 = Array.from({ length: 400 }, (_, i) => `export const v${i} = ${i};`).join("\n");
+		const lines800 = Array.from({ length: 800 }, (_, i) => `export const v${i} = ${i};`).join("\n");
+
+		const { dir: d1, stack: s1 } = makeProject({ "src/a.ts": lines400 });
+		const { dir: d2, stack: s2 } = makeProject({ "src/a.ts": lines800 });
+		const r1 = runStandards(d1, s1);
+		const r2 = runStandards(d2, s2);
+
+		// 800 lines should score at least 20 points worse than 400 lines
+		expect(r1.score - r2.score).toBeGreaterThan(20);
+		rmSync(d1, { recursive: true });
+		rmSync(d2, { recursive: true });
+	});
+
+	it("no penalty for files under 300 lines", () => {
+		const lines250 = Array.from({ length: 250 }, (_, i) => `export const v${i} = ${i};`).join("\n");
+		const { dir, stack } = makeProject({ "src/a.ts": lines250 });
+		const result = runStandards(dir, stack);
+		expect(result.issues.filter(i => i.rule === "large-file")).toHaveLength(0);
 		rmSync(dir, { recursive: true });
 	});
 });

@@ -94,15 +94,24 @@ export function runStandards(cwd: string, stack: StackInfo): CheckResult {
 		}
 	}
 
-	// ── Large files ──
+	// ── Large files (exponential penalty) ──
+	// Penalty grows with the square of excess lines. A 300-line file is a nudge.
+	// A 600-line file is a wall. A 1000-line file tanks the check.
 	let largeFiles = 0;
+	let fileSizePenalty = 0;
+	const SOFT_LIMIT = 300;
 	for (const f of files) {
 		const lines = f.content.split("\n").length;
-		if (lines > 300) {
+		if (lines > SOFT_LIMIT * 2) {
 			largeFiles++;
-			issues.push({ severity: "warning", message: `${lines} lines — consider splitting (max 300)`, file: f.path, rule: "large-file" });
-		} else if (lines > 200) {
-			issues.push({ severity: "warning", message: `${lines} lines — getting large`, file: f.path, rule: "large-file" });
+			const excess = lines - SOFT_LIMIT;
+			fileSizePenalty += (excess / 100) ** 2;
+			issues.push({ severity: "error", message: `${lines} lines — split this file (exponential penalty above ${SOFT_LIMIT})`, file: f.path, rule: "large-file" });
+		} else if (lines > SOFT_LIMIT) {
+			largeFiles++;
+			const excess = lines - SOFT_LIMIT;
+			fileSizePenalty += (excess / 100) ** 2;
+			issues.push({ severity: "warning", message: `${lines} lines — consider splitting (penalty grows exponentially above ${SOFT_LIMIT})`, file: f.path, rule: "large-file" });
 		}
 	}
 
@@ -202,7 +211,8 @@ export function runStandards(cwd: string, stack: StackInfo): CheckResult {
 	const totalFiles = files.length || 1;
 	const errorPenalty = Math.min(40, (errors / totalFiles) * 150);
 	const warningPenalty = Math.min(30, (warnings / totalFiles) * 80);
-	const largePenalty = Math.min(20, (largeFiles / totalFiles) * 100);
+	// fileSizePenalty is already exponential — normalize by file count, cap at 95
+	const largePenalty = Math.min(95, (fileSizePenalty / totalFiles) * 5);
 	const score = Math.max(0, Math.min(100, Math.round(100 - errorPenalty - warningPenalty - largePenalty)));
 
 	return {

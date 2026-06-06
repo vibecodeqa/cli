@@ -71,11 +71,11 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		name: "standards",
 		label: "Code Standards",
 		category: "Foundations",
-		priority: "medium",
+		priority: "high",
 		weight: 3,
 		description:
-			"Checks coding conventions: file naming (PascalCase for components, kebab-case for modules), file size limits (>300 lines flagged), code smells (console.log, var, ==, eval, innerHTML, TODO/FIXME), config hygiene (strict mode), and framework best practices (Tailwind vs inline styles).",
-		risk: "Large files are hard to review and test. console.log in production leaks internal data. var causes hoisting bugs. == causes type coercion surprises. eval/innerHTML are security vulnerabilities. Inconsistent naming makes the codebase harder to navigate.",
+			"Checks coding conventions: file naming (PascalCase for components, kebab-case for modules), file size limits (>250 lines warning, >400 error), code smells (console.log, var, ==, eval, innerHTML, TODO/FIXME), config hygiene (strict mode), and framework best practices.",
+		risk: "Large files are hard to review and test — AI-generated code accumulates in monolithic files that become impossible to refactor. console.log in production leaks internal data. var causes hoisting bugs. == causes type coercion surprises. Inconsistent naming makes the codebase harder to navigate.",
 		recommendation:
 			"Split files over 300 lines. Replace console.log with a proper logger or remove it. Use const/let, ===, and safe DOM APIs. Enable TypeScript strict mode.",
 	},
