@@ -19,13 +19,17 @@ import { runComplexity } from "./runners/complexity.js";
 import { runDeadPatterns } from "./runners/dead-patterns.js";
 import { runTestAudit } from "./runners/test-audit.js";
 import { runConfusion } from "./runners/confusion.js";
+import { runContainerHealth } from "./runners/container-health.js";
 import { runContext } from "./runners/context.js";
 import { runDependencies } from "./runners/dependencies.js";
+import { runEnvValidation } from "./runners/env-validation.js";
+import { runGitHygiene } from "./runners/git-hygiene.js";
 import { runDocCoherence } from "./runners/doc-coherence.js";
 import { runDocs } from "./runners/docs.js";
 import { runDuplication } from "./runners/duplication.js";
 import { runErrorHandling } from "./runners/error-handling.js";
 import { runLint } from "./runners/lint.js";
+import { runMemorySafety } from "./runners/memory-safety.js";
 import { runPerformance } from "./runners/performance.js";
 import { runReact } from "./runners/react.js";
 import { runSecrets } from "./runners/secrets.js";
@@ -149,6 +153,9 @@ async function runChecks(
 		{ name: "accessibility", fn: () => runAccessibility(cwd) },
 		{ name: "docs", fn: () => runDocs(cwd) },
 		{ name: "best-practices", fn: () => runBestPractices(cwd, workspace) },
+		{ name: "env-validation", fn: () => runEnvValidation(cwd) },
+		{ name: "git-hygiene", fn: () => runGitHygiene(cwd) },
+		{ name: "memory-safety", fn: () => runMemorySafety(cwd) },
 		// Testing
 		{ name: "testing", fn: () => runTesting(cwd, stack, skipTests, srcRoots) },
 		// Security
@@ -158,6 +165,7 @@ async function runChecks(
 		// Architecture
 		{ name: "architecture", fn: () => runArchitecture(cwd, workspace) },
 		{ name: "performance", fn: () => runPerformance(cwd) },
+		{ name: "container-health", fn: () => runContainerHealth(cwd) },
 		// LLM Readiness
 		{ name: "confusion", fn: () => runConfusion(cwd) },
 		{ name: "context", fn: () => runContext(cwd) },
@@ -534,17 +542,9 @@ jobs:
 	// 3. Create .vcqa.json if not present
 	const vcqaConfigPath = join(cwd, ".vcqa.json");
 	if (!existsSync(vcqaConfigPath)) {
-		const allCheckNames = [
-			"structure", "lint", "types", "type-safety", "standards",
-			"complexity", "duplication", "error-handling", "react", "accessibility",
-			"docs", "best-practices", "testing",
-			"secrets", "security", "dependencies",
-			"architecture", "performance",
-			"confusion", "context",
-			"doc-coherence", "code-coherence", "comment-staleness", "dead-patterns", "test-audit",
-		];
+		const { CHECK_META } = await import("./check-meta.js");
 		const checksConfig: Record<string, Record<string, unknown>> = {};
-		for (const name of allCheckNames) {
+		for (const name of Object.keys(CHECK_META)) {
 			checksConfig[name] = {};
 		}
 		const config = {

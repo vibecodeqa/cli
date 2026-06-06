@@ -110,7 +110,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		label: "Duplication",
 		category: "Quality",
 		priority: "medium",
-		weight: 5,
+		weight: 3,
 		description:
 			"Detects copy-pasted code blocks of 6+ lines across source files. Duplication is measured as a percentage of total source lines involved in duplicate blocks.",
 		risk: "Duplicated code means bugs must be fixed in multiple places. Miss one copy and the bug persists. DRY (Don't Repeat Yourself) violations increase maintenance cost linearly with each copy.",
@@ -135,7 +135,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		label: "Testing",
 		category: "Testing",
 		priority: "critical",
-		weight: 15,
+		weight: 13,
 		description:
 			"Deep assessment of test quality across 6 dimensions: pyramid presence (unit/integration/component/E2E layers), test execution (pass/fail), coverage (statement/branch/line/function), file pairing (test file per source file), test quality (assertion density, mock ratio, snapshot ratio), and E2E tool detection (Playwright/Cypress).",
 		risk: "Code without tests is code you can't safely change. Missing test layers mean entire categories of bugs go undetected: unit tests catch logic bugs, integration tests catch API contract breaks, E2E tests catch user-visible regressions. Low coverage means large portions of code are never exercised.",
@@ -198,7 +198,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		label: "Confusion Index",
 		category: "LLM Readiness",
 		priority: "high",
-		weight: 6,
+		weight: 4,
 		description:
 			"Measures naming ambiguity that causes LLMs to misunderstand or edit the wrong code. Checks: file name confusability (Levenshtein distance + synonym detection), generic function/variable names, export name collisions across files, and ambiguous abbreviations.",
 		risk: "GPT-4o drops 28.6 percentage points on code summarization when names are ambiguous (arXiv:2510.03178). LLMs editing similar-named files is the #1 reported failure mode in AI-assisted development. Generic names like process(), handle(), data cause models to misinterpret intent.",
@@ -332,6 +332,54 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		recommendation:
 			"Enable test-audit with a VibeCode QA Pro subscription. The LLM analyzes each test to determine if its assertions actually verify the behavior described in its name.",
 		premium: true,
+	},
+	"env-validation": {
+		name: "env-validation",
+		label: "Environment Validation",
+		category: "Quality",
+		priority: "medium",
+		weight: 2,
+		description:
+			"Checks .env file hygiene: .gitignore coverage, .env.example existence and drift, hardcoded secrets in env files, and empty required variables.",
+		risk: "A missing .env.example means new developers can't onboard without asking which env vars to set. Drift between .env and .env.example causes 'works on my machine' failures. Committed .env files leak secrets.",
+		recommendation:
+			"Create .env.example with all required vars (values blanked). Ensure .env is in .gitignore. Keep .env.example in sync with .env.",
+	},
+	"git-hygiene": {
+		name: "git-hygiene",
+		label: "Git Hygiene",
+		category: "Quality",
+		priority: "medium",
+		weight: 2,
+		description:
+			"Checks git repository health: merge conflict markers in source, commit message quality, large/binary files tracked, and .gitignore completeness.",
+		risk: "Merge conflict markers cause syntax errors. Large binary files bloat the repo forever (git history is append-only). Poor commit messages make git blame and bisect useless for debugging.",
+		recommendation:
+			"Resolve all merge conflicts. Use Git LFS for files over 5MB. Write descriptive commit messages (what and why, not just 'fix').",
+	},
+	"memory-safety": {
+		name: "memory-safety",
+		label: "Memory Safety",
+		category: "Quality",
+		priority: "high",
+		weight: 2,
+		description:
+			"Detects resource leak patterns: setInterval without clearInterval, addEventListener without removeEventListener, unclosed WebSockets/Observers, and global variable pollution.",
+		risk: "Resource leaks cause memory growth over time, eventually crashing the app or browser tab. Leaked event listeners fire on stale state, causing bugs. Global pollution creates hard-to-trace conflicts between modules.",
+		recommendation:
+			"Always pair setInterval with clearInterval in cleanup. Remove event listeners in componentWillUnmount/useEffect return. Call .disconnect() on Observers. Avoid window.* assignments.",
+	},
+	"container-health": {
+		name: "container-health",
+		label: "Container Health",
+		category: "Quality",
+		priority: "medium",
+		weight: 0,
+		description:
+			"Checks Dockerfile best practices: pinned base images, .dockerignore, multi-stage builds, layer caching, non-root user, and exposed ports.",
+		risk: "Unpinned base images break builds when upstream tags change. Missing .dockerignore includes node_modules and .git in the image (10x size). Running as root in containers is a security risk.",
+		recommendation:
+			"Pin base images to specific tags. Add .dockerignore with node_modules/.git/.env. Use multi-stage builds. Add USER instruction.",
 	},
 };
 

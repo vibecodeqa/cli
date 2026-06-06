@@ -20,14 +20,18 @@ import { runCommentStaleness } from "./runners/comment-staleness.js";
 import { runComplexity } from "./runners/complexity.js";
 import { runDeadPatterns } from "./runners/dead-patterns.js";
 import { runTestAudit } from "./runners/test-audit.js";
+import { runContainerHealth } from "./runners/container-health.js";
 import { runConfusion } from "./runners/confusion.js";
 import { runContext } from "./runners/context.js";
 import { runDependencies } from "./runners/dependencies.js";
+import { runEnvValidation } from "./runners/env-validation.js";
+import { runGitHygiene } from "./runners/git-hygiene.js";
 import { runDocCoherence } from "./runners/doc-coherence.js";
 import { runDocs } from "./runners/docs.js";
 import { runDuplication } from "./runners/duplication.js";
 import { runErrorHandling } from "./runners/error-handling.js";
 import { runLint } from "./runners/lint.js";
+import { runMemorySafety } from "./runners/memory-safety.js";
 import { runPerformance } from "./runners/performance.js";
 import { runReact } from "./runners/react.js";
 import { runSecrets } from "./runners/secrets.js";
@@ -86,12 +90,16 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		{ name: "accessibility", fn: () => runAccessibility(resolvedCwd) },
 		{ name: "docs", fn: () => runDocs(resolvedCwd) },
 		{ name: "best-practices", fn: () => runBestPractices(resolvedCwd, workspace) },
+		{ name: "env-validation", fn: () => runEnvValidation(resolvedCwd) },
+		{ name: "git-hygiene", fn: () => runGitHygiene(resolvedCwd) },
+		{ name: "memory-safety", fn: () => runMemorySafety(resolvedCwd) },
 		{ name: "testing", fn: () => runTesting(resolvedCwd, stack, skipTests, srcRoots) },
 		{ name: "secrets", fn: () => runSecrets(resolvedCwd) },
 		{ name: "security", fn: () => runSecurity(resolvedCwd) },
 		{ name: "dependencies", fn: () => runDependencies(resolvedCwd, stack) },
 		{ name: "architecture", fn: () => runArchitecture(resolvedCwd, workspace) },
 		{ name: "performance", fn: () => runPerformance(resolvedCwd) },
+		{ name: "container-health", fn: () => runContainerHealth(resolvedCwd) },
 		{ name: "confusion", fn: () => runConfusion(resolvedCwd) },
 		{ name: "context", fn: () => runContext(resolvedCwd) },
 		{ name: "doc-coherence", fn: () => runDocCoherence(resolvedCwd) },
