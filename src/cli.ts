@@ -1030,6 +1030,12 @@ async function main() {
 		return;
 	}
 
+	// Tip: suggest GitHub Action if no workflow exists
+	if (interactive && existsSync(join(cwd, ".git")) && !existsSync(join(cwd, ".github", "workflows", "vibecodeqa.yml"))) {
+		console.log(`  \x1b[2mTip: Add CI scanning with one line:\x1b[0m  \x1b[1m- uses: vibecodeqa/action@v1\x1b[0m`);
+		console.log("");
+	}
+
 	// Interactive on-ramp: offer to open the live monitor or the HTML report.
 	if (interactive && !flags.uploadMode && !flags.prComment) {
 		await promptNextAction(cwd, outputDir);
@@ -1063,10 +1069,10 @@ function openPath(target: string): void {
 	});
 }
 
-/** Post-scan prompt: [m] monitor · [o] open report · anything else quits. */
+/** Post-scan prompt: [m] monitor · [o] open report · [f] fix · anything else quits. */
 async function promptNextAction(cwd: string, outputDir: string): Promise<void> {
 	process.stdout.write(
-		"  \x1b[1m[m]\x1b[0m\x1b[2m monitor\x1b[0m   \x1b[1m[o]\x1b[0m\x1b[2m open report\x1b[0m   \x1b[1m[enter]\x1b[0m\x1b[2m quit\x1b[0m  ",
+		"  \x1b[1m[m]\x1b[0m\x1b[2m monitor\x1b[0m   \x1b[1m[o]\x1b[0m\x1b[2m open report\x1b[0m   \x1b[1m[f]\x1b[0m\x1b[2m fix --ai\x1b[0m   \x1b[1m[enter]\x1b[0m\x1b[2m quit\x1b[0m  ",
 	);
 	let key: string;
 	try {
@@ -1084,6 +1090,9 @@ async function promptNextAction(cwd: string, outputDir: string): Promise<void> {
 		const reportPath = join(outputDir, "report/index.html");
 		openPath(reportPath);
 		console.log(`  \x1b[2mOpening ${reportPath}\x1b[0m`);
+	} else if (k === "f") {
+		console.log("");
+		await runFix(cwd, { ai: true });
 	}
 	// any other key (enter, q, ctrl-c, …) → quit
 }
