@@ -2,17 +2,17 @@
 
 **Code health scanner for the AI coding era.**
 
-One command. 29 checks. AI-powered fixes. Zero config.
+One command. 33 checks. AI-powered fixes. Zero config.
 
 ```bash
 npx @vibecodeqa/cli
 ```
 
-![Grade](https://img.shields.io/badge/checks-29-blue) ![TypeScript](https://img.shields.io/badge/TypeScript-first-3178C6) ![License](https://img.shields.io/badge/license-MIT-green) ![npm](https://img.shields.io/npm/v/@vibecodeqa/cli)
+![Grade](https://img.shields.io/badge/checks-33-blue) ![TypeScript](https://img.shields.io/badge/TypeScript-first-3178C6) ![License](https://img.shields.io/badge/license-MIT-green) ![npm](https://img.shields.io/npm/v/@vibecodeqa/cli)
 
 ## What it does
 
-vcqa scans your codebase and produces a scored health report with actionable findings. Auto-detects your stack (React, Vue, Svelte, Flutter, monorepos) and runs 29 checks across 7 categories.
+vcqa scans your codebase and produces a scored health report with actionable findings. Auto-detects your stack (React, Vue, Svelte, Flutter, monorepos) and runs 33 checks across 7 categories.
 
 **Scan → See issues → AI fixes them → Score improves.**
 
@@ -56,7 +56,7 @@ npx @vibecodeqa/cli fix --ai --dry-run             # preview without applying
 
 Uses Claude to read your code context, understand the issue, and generate a targeted fix. Requires `ANTHROPIC_API_KEY`.
 
-## 29 Checks
+## 33 Checks
 
 ### Foundations (23%)
 
@@ -68,7 +68,7 @@ Uses Claude to read your code context, understand the issue, and generate a targ
 | Type Safety | 3% | `as any`, `@ts-ignore`, non-null assertions |
 | Standards | 3% | File naming, large files, code smells |
 
-### Quality (30%)
+### Quality (28%)
 
 | Check | Weight | What it measures |
 |-------|--------|-----------------|
@@ -79,9 +79,11 @@ Uses Claude to read your code context, understand the issue, and generate a targ
 | Accessibility | 4% | img alt, click handlers, form labels |
 | Docs | 3% | README quality, JSDoc coverage |
 | Best Practices | 3% | CI/CD, supply chain, repo hygiene |
-| **Env Validation** | 2% | .env hygiene, .env.example drift, hardcoded secrets |
-| **Git Hygiene** | 2% | Merge conflicts, commit quality, large/binary files |
-| **Memory Safety** | 2% | Interval/listener leaks, unclosed observers, global pollution |
+| Frontend Health | 2% | UI framework conflicts, mixed icons, unoptimized images, heavy imports |
+| Styling | 1% | Hardcoded colors, mixed approaches, !important, inconsistent spacing |
+| Env Validation | 1% | .env hygiene, .env.example drift |
+| Git Hygiene | 1% | Merge conflicts, commit quality, large/binary files |
+| Memory Safety | 1% | Interval/listener leaks, unclosed observers, global pollution |
 
 ### Testing (13%)
 
@@ -119,6 +121,8 @@ Deep assessment: pyramid presence, execution, coverage, file pairing, quality me
 | Comment Staleness | Stale TODOs, numeric mismatches, commented-out code |
 | Dead Patterns | Leftover code from incomplete refactors |
 | Test Audit | Fake/shallow tests that inflate coverage |
+| File Cohesion | Files mixing multiple responsibilities |
+| Design Consistency | Visual inconsistency across components |
 
 ## GitHub Action
 
