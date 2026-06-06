@@ -338,7 +338,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		label: "Environment Validation",
 		category: "Quality",
 		priority: "medium",
-		weight: 2,
+		weight: 1,
 		description:
 			"Checks .env file hygiene: .gitignore coverage, .env.example existence and drift, hardcoded secrets in env files, and empty required variables.",
 		risk: "A missing .env.example means new developers can't onboard without asking which env vars to set. Drift between .env and .env.example causes 'works on my machine' failures. Committed .env files leak secrets.",
@@ -350,7 +350,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		label: "Git Hygiene",
 		category: "Quality",
 		priority: "medium",
-		weight: 2,
+		weight: 1,
 		description:
 			"Checks git repository health: merge conflict markers in source, commit message quality, large/binary files tracked, and .gitignore completeness.",
 		risk: "Merge conflict markers cause syntax errors. Large binary files bloat the repo forever (git history is append-only). Poor commit messages make git blame and bisect useless for debugging.",
@@ -368,6 +368,31 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		risk: "Resource leaks cause memory growth over time, eventually crashing the app or browser tab. Leaked event listeners fire on stale state, causing bugs. Global pollution creates hard-to-trace conflicts between modules.",
 		recommendation:
 			"Always pair setInterval with clearInterval in cleanup. Remove event listeners in componentWillUnmount/useEffect return. Call .disconnect() on Observers. Avoid window.* assignments.",
+	},
+	styling: {
+		name: "styling",
+		label: "Styling Consistency",
+		category: "Quality",
+		priority: "medium",
+		weight: 2,
+		description:
+			"Detects CSS/styling antipatterns: mixed styling approaches (Tailwind + styled-components + inline), hardcoded colors instead of design tokens, magic spacing numbers (not on a 4px scale), !important abuse, duplicate Tailwind class strings, and inline style overuse.",
+		risk: "AI-generated components pile up inconsistent styles — hardcoded hex colors, random pixel values, inline styles. This creates an accidental design system where every component looks slightly different and nothing is reusable. Changing the brand color means finding 47 hex values across 30 files.",
+		recommendation:
+			"Pick one styling approach (Tailwind or CSS Modules). Define colors and spacing as design tokens (CSS variables or Tailwind theme). Extract repeated class strings into shared components. Use a 4px/8px spacing scale.",
+	},
+	"design-consistency": {
+		name: "design-consistency",
+		label: "Design Consistency",
+		category: "AI Analysis",
+		priority: "high",
+		weight: 0,
+		description:
+			"LLM-powered audit of visual consistency across components. Finds duplicate visual patterns, inconsistent spacing/color/typography, and missing component extraction opportunities.",
+		risk: "Components that look similar but are styled differently are impossible to maintain. Changing a button style means editing 7 files. Users notice the inconsistency — different border radius, slightly different padding, mismatched colors.",
+		recommendation:
+			"Enable design-consistency with a VibeCode QA Pro subscription. The LLM analyzes styling patterns across all components to surface inconsistencies and suggest shared components.",
+		premium: true,
 	},
 	"file-cohesion": {
 		name: "file-cohesion",

@@ -73,8 +73,8 @@ describe("core API", () => {
 });
 
 describe("re-exports", () => {
-	it("CHECK_META has 30 checks", () => {
-		expect(Object.keys(CHECK_META)).toHaveLength(30);
+	it("CHECK_META has 32 checks", () => {
+		expect(Object.keys(CHECK_META)).toHaveLength(32);
 	});
 
 	it("computeScore works", () => {

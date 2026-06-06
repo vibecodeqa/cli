@@ -24,6 +24,7 @@ import { runContainerHealth } from "./runners/container-health.js";
 import { runConfusion } from "./runners/confusion.js";
 import { runContext } from "./runners/context.js";
 import { runDependencies } from "./runners/dependencies.js";
+import { runDesignConsistency } from "./runners/design-consistency.js";
 import { runEnvValidation } from "./runners/env-validation.js";
 import { runFileCohesion } from "./runners/file-cohesion.js";
 import { runGitHygiene } from "./runners/git-hygiene.js";
@@ -34,6 +35,7 @@ import { runErrorHandling } from "./runners/error-handling.js";
 import { runLint } from "./runners/lint.js";
 import { runMemorySafety } from "./runners/memory-safety.js";
 import { runPerformance } from "./runners/performance.js";
+import { runStyling } from "./runners/styling.js";
 import { runReact } from "./runners/react.js";
 import { runSecrets } from "./runners/secrets.js";
 import { runSecurity } from "./runners/security.js";
@@ -106,9 +108,11 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		{ name: "doc-coherence", fn: () => runDocCoherence(resolvedCwd) },
 		{ name: "code-coherence", fn: () => runCodeCoherence(resolvedCwd) },
 		{ name: "comment-staleness", fn: () => runCommentStaleness(resolvedCwd) },
+		{ name: "styling", fn: () => runStyling(resolvedCwd) },
 		{ name: "dead-patterns", fn: () => runDeadPatterns(resolvedCwd) },
 		{ name: "test-audit", fn: () => runTestAudit(resolvedCwd) },
 		{ name: "file-cohesion", fn: () => runFileCohesion(resolvedCwd) },
+		{ name: "design-consistency", fn: () => runDesignConsistency(resolvedCwd) },
 	];
 
 	// Filter checks if specified
