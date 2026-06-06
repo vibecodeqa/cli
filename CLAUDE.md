@@ -123,7 +123,7 @@ Tries dedicated tools first, falls back to built-in:
 ## Testing
 
 ```bash
-pnpm test                    # 429 tests across 41 files
+pnpm test                    # 435 tests across 42 files
 pnpm test -- --reporter=verbose  # see all test names
 ```
 

@@ -161,20 +161,68 @@ Give AI coding agents real-time code health context:
 claude mcp add vcqa -- npx @vibecodeqa/mcp
 ```
 
-6 tools: `vcqa_score`, `vcqa_scan`, `vcqa_file_health`, `vcqa_check`, `vcqa_explain`, `vcqa_fix`.
+7 tools: `vcqa_score`, `vcqa_scan`, `vcqa_file_health`, `vcqa_check`, `vcqa_explain`, `vcqa_fix`, `vcqa_delta`.
+
+## Delta Reports
+
+Every scan compares against the previous one. The `--markdown` and `--pr-comment` outputs show what changed:
+
+```
+📈 +6 vs previous · 15 fixed · 2 new
+
+- ✅ lint: 45 → 100 (+55)
+- ✅ confusion: 20 → 93 (+73)
+- ⚠️ standards: 50 → 48 (-2)
+```
+
+The `vcqa fix` command runs a baseline scan before fixing and a final scan after, producing a delta report saved to `.vibe-check/delta.md`.
+
+### Programmatic delta
+
+```typescript
+import { scan, computeDelta, formatDeltaMarkdown } from "@vibecodeqa/cli/core";
+
+const before = await scan("./src");
+// ... make changes ...
+const after = await scan("./src");
+const delta = computeDelta(before, after);
+console.log(formatDeltaMarkdown(delta));
+```
 
 ## Configuration
 
-Create `.vcqa.json`:
+Create `.vcqa.json` (or add a `"vcqa"` key to `package.json`):
 
 ```json
 {
   "checks": {
     "react": { "enabled": false },
-    "container-health": { "ignore": ["Dockerfile.dev"] }
+    "container-health": { "ignore": ["Dockerfile.dev"] },
+    "complexity": { "ignore": ["src/legacy/**"] },
+    "security": { "ignore": ["src/test-helpers/**"] }
   },
-  "ignore": ["generated/**", "vendor/**"],
+  "ignore": ["generated/**", "vendor/**", "*.min.js"],
   "failUnder": 70
+}
+```
+
+### Configuration options
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `checks.<name>.enabled` | `boolean` | Disable a check entirely |
+| `checks.<name>.ignore` | `string[]` | Glob patterns to skip for this check |
+| `ignore` | `string[]` | Global glob patterns to skip everywhere |
+| `failUnder` | `number` | Exit code 1 if score is below this (CI quality gate) |
+
+### Alternative: package.json
+
+```json
+{
+  "vcqa": {
+    "checks": { "react": { "enabled": false } },
+    "failUnder": 70
+  }
 }
 ```
 
