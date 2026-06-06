@@ -23,6 +23,7 @@ import { runContainerHealth } from "./runners/container-health.js";
 import { runContext } from "./runners/context.js";
 import { runDependencies } from "./runners/dependencies.js";
 import { runEnvValidation } from "./runners/env-validation.js";
+import { runFileCohesion } from "./runners/file-cohesion.js";
 import { runGitHygiene } from "./runners/git-hygiene.js";
 import { runDocCoherence } from "./runners/doc-coherence.js";
 import { runDocs } from "./runners/docs.js";
@@ -175,6 +176,7 @@ async function runChecks(
 		{ name: "comment-staleness", fn: () => runCommentStaleness(cwd) },
 		{ name: "dead-patterns", fn: () => runDeadPatterns(cwd) },
 		{ name: "test-audit", fn: () => runTestAudit(cwd) },
+		{ name: "file-cohesion", fn: () => runFileCohesion(cwd) },
 	];
 
 	const checks: CheckResult[] = [];

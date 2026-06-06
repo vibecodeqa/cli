@@ -369,6 +369,19 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		recommendation:
 			"Always pair setInterval with clearInterval in cleanup. Remove event listeners in componentWillUnmount/useEffect return. Call .disconnect() on Observers. Avoid window.* assignments.",
 	},
+	"file-cohesion": {
+		name: "file-cohesion",
+		label: "File Cohesion",
+		category: "AI Analysis",
+		priority: "critical",
+		weight: 0,
+		description:
+			"AI-powered detection of files with multiple responsibilities — the #1 code smell in AI-generated code. Detects when a single file handles auth + email + database, or mixes HTTP routing with business logic. Provides concrete split suggestions.",
+		risk: "AI coding assistants pile features into existing files instead of creating new ones. A file handling auth, sessions, AND email is untestable, unreviewable, and impossible to refactor safely. Every change risks breaking unrelated functionality. This is the root cause of 'vibe-coded' technical debt.",
+		recommendation:
+			"Enable file-cohesion with a VibeCode QA Pro subscription. The LLM analyzes each file's exports and logic to label responsibility clusters and suggest concrete splits.",
+		premium: true,
+	},
 	"container-health": {
 		name: "container-health",
 		label: "Container Health",

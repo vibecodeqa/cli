@@ -25,6 +25,7 @@ import { runConfusion } from "./runners/confusion.js";
 import { runContext } from "./runners/context.js";
 import { runDependencies } from "./runners/dependencies.js";
 import { runEnvValidation } from "./runners/env-validation.js";
+import { runFileCohesion } from "./runners/file-cohesion.js";
 import { runGitHygiene } from "./runners/git-hygiene.js";
 import { runDocCoherence } from "./runners/doc-coherence.js";
 import { runDocs } from "./runners/docs.js";
@@ -107,6 +108,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		{ name: "comment-staleness", fn: () => runCommentStaleness(resolvedCwd) },
 		{ name: "dead-patterns", fn: () => runDeadPatterns(resolvedCwd) },
 		{ name: "test-audit", fn: () => runTestAudit(resolvedCwd) },
+		{ name: "file-cohesion", fn: () => runFileCohesion(resolvedCwd) },
 	];
 
 	// Filter checks if specified
