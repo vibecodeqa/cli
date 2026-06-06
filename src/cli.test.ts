@@ -51,7 +51,7 @@ describe("CLI flags", () => {
 		expect(report.score).toBeGreaterThanOrEqual(0);
 		expect(report.score).toBeLessThanOrEqual(100);
 		expect(report.checks).toBeInstanceOf(Array);
-		expect(report.checks.length).toBe(32);
+		expect(report.checks.length).toBe(33);
 	}, 30_000);
 
 	it("nonexistent path exits with error", () => {
@@ -251,7 +251,7 @@ describe("init command", () => {
 		expect(Object.keys(config.checks)).toContain("security");
 		expect(Object.keys(config.checks)).toContain("confusion");
 		expect(Object.keys(config.checks)).toContain("context");
-		expect(Object.keys(config.checks).length).toBe(32);
+		expect(Object.keys(config.checks).length).toBe(33);
 		// Should have help fields
 		expect(config._comment).toContain("vibecodeqa.online");
 		expect(config._checks_help).toContain("enabled");
@@ -271,7 +271,7 @@ describe("init command", () => {
 		const out = run("--skip-tests --json .");
 		const report = JSON.parse(out);
 		// Config should load without error and not disable any checks
-		expect(report.checks.length).toBe(32);
+		expect(report.checks.length).toBe(33);
 		const disabled = report.checks.filter((c: any) => c.details.reason === "disabled in config");
 		expect(disabled).toHaveLength(0);
 	}, 30_000);
@@ -349,7 +349,7 @@ describe("report output", () => {
 	it("--json produces report with all checks and workspace info", () => {
 		const out = run("--skip-tests --json .");
 		const report = JSON.parse(out);
-		expect(report.checks.length).toBe(32);
+		expect(report.checks.length).toBe(33);
 		expect(report.meta.workspace).toBeDefined();
 		expect(typeof report.meta.workspace.isMonorepo).toBe("boolean");
 		// Also verify report file was written

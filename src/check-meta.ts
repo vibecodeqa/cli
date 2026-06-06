@@ -362,19 +362,31 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		label: "Memory Safety",
 		category: "Quality",
 		priority: "high",
-		weight: 2,
+		weight: 1,
 		description:
 			"Detects resource leak patterns: setInterval without clearInterval, addEventListener without removeEventListener, unclosed WebSockets/Observers, and global variable pollution.",
 		risk: "Resource leaks cause memory growth over time, eventually crashing the app or browser tab. Leaked event listeners fire on stale state, causing bugs. Global pollution creates hard-to-trace conflicts between modules.",
 		recommendation:
 			"Always pair setInterval with clearInterval in cleanup. Remove event listeners in componentWillUnmount/useEffect return. Call .disconnect() on Observers. Avoid window.* assignments.",
 	},
+	"frontend-health": {
+		name: "frontend-health",
+		label: "Frontend Health",
+		category: "Quality",
+		priority: "high",
+		weight: 2,
+		description:
+			"Detects frontend antipatterns: conflicting UI frameworks (MUI + Tailwind), mixed icon libraries, unoptimized images (no width/height), heavy full-library imports, missing loading states for async data, DOM nesting violations, and inline base64 images.",
+		risk: "Conflicting UI frameworks bloat the bundle and create visual inconsistency — MUI buttons look different from Tailwind buttons. Mixed icon libraries add hundreds of KB. Images without dimensions cause layout shift (CLS). Heavy imports slow initial page load.",
+		recommendation:
+			"Pick one UI framework and one icon library. Use next/image or set width/height on all images. Import specific components, not entire libraries. Add loading states for all async data fetches.",
+	},
 	styling: {
 		name: "styling",
 		label: "Styling Consistency",
 		category: "Quality",
 		priority: "medium",
-		weight: 2,
+		weight: 1,
 		description:
 			"Detects CSS/styling antipatterns: mixed styling approaches (Tailwind + styled-components + inline), hardcoded colors instead of design tokens, magic spacing numbers (not on a 4px scale), !important abuse, duplicate Tailwind class strings, and inline style overuse.",
 		risk: "AI-generated components pile up inconsistent styles — hardcoded hex colors, random pixel values, inline styles. This creates an accidental design system where every component looks slightly different and nothing is reusable. Changing the brand color means finding 47 hex values across 30 files.",

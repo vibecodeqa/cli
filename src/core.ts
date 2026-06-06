@@ -26,6 +26,7 @@ import { runContext } from "./runners/context.js";
 import { runDependencies } from "./runners/dependencies.js";
 import { runDesignConsistency } from "./runners/design-consistency.js";
 import { runEnvValidation } from "./runners/env-validation.js";
+import { runFrontendHealth } from "./runners/frontend-health.js";
 import { runFileCohesion } from "./runners/file-cohesion.js";
 import { runGitHygiene } from "./runners/git-hygiene.js";
 import { runDocCoherence } from "./runners/doc-coherence.js";
@@ -108,6 +109,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		{ name: "doc-coherence", fn: () => runDocCoherence(resolvedCwd) },
 		{ name: "code-coherence", fn: () => runCodeCoherence(resolvedCwd) },
 		{ name: "comment-staleness", fn: () => runCommentStaleness(resolvedCwd) },
+		{ name: "frontend-health", fn: () => runFrontendHealth(resolvedCwd) },
 		{ name: "styling", fn: () => runStyling(resolvedCwd) },
 		{ name: "dead-patterns", fn: () => runDeadPatterns(resolvedCwd) },
 		{ name: "test-audit", fn: () => runTestAudit(resolvedCwd) },
