@@ -400,7 +400,7 @@ async function startWatch(cwd: string): Promise<void> {
 				running = true;
 				try {
 					console.log(`  \x1b[2mChanged: ${filename} — re-scanning...\x1b[0m`);
-					await main().catch(() => {});
+					await main().catch((err) => { console.error("scan error:", err); });
 				} finally { running = false; }
 			}, 500);
 		});
@@ -566,7 +566,7 @@ async function main() {
 	}
 
 	if (!quietMode && !ciMode && !watchMode && !process.env.VCQA_NO_UPDATE_CHECK) {
-		checkForUpdate(VERSION).catch(() => {});
+		checkForUpdate(VERSION).catch(() => {}); // ok — non-blocking, best-effort
 	}
 
 	if (watchMode) { await startWatch(cwd); return; }

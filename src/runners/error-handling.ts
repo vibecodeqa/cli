@@ -30,6 +30,8 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i].trim();
 			if (line.startsWith("//") || line.startsWith("*")) continue;
+			// Skip suppressed lines (// ok, // intentional, eslint-disable, biome-ignore)
+			if (/\/\/\s*(?:ok|intentional|eslint-disable|biome-ignore)/.test(line)) continue;
 			// Skip string-only lines, metadata definitions, and return statements with string literals
 			if (/^\s*["'`].*["'`][,;]?\s*$/.test(lines[i])) continue;
 			if (/\b(?:message|description|risk|recommendation|name)\s*:\s*["']/.test(line)) continue;
@@ -37,6 +39,8 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 			if (/\brule\s*===?\s*["']/.test(line)) continue;
 
 			if (/catch\s*\([^)]*\)\s*\{\s*\}/.test(line) || /catch\s*\{\s*\}/.test(line)) {
+				// Skip intentional one-liner try-catch for optional browser APIs
+				if (/try\s*\{.*(?:localStorage|sessionStorage|document\.).*\}\s*catch/.test(line)) continue;
 				emptyCatch++;
 				issues.push({ severity: "error", message: "Empty catch block", file: f.path, line: i + 1, rule: "empty-catch" });
 			}
@@ -95,7 +99,10 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i].trim();
 			if (line.startsWith("//") || line.startsWith("*")) continue;
+			if (/\/\/\s*(?:ok|intentional|eslint-disable|biome-ignore)/.test(line)) continue;
+			if (/^\s*["'`].*["'`][,;]?\s*$/.test(lines[i])) continue;
 			if (/\b(?:message|description|risk|recommendation|name)\s*:\s*["']/.test(line)) continue;
+			if (/\breturn\s+["'`]/.test(line)) continue;
 
 			// JSON.parse of external input without try-catch
 			if (/\bJSON\.parse\s*\(/.test(line)) {
@@ -157,7 +164,7 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 			}
 
 			// process.exit() in non-CLI files (library code shouldn't exit)
-			if (/\bprocess\.exit\s*\(/.test(line) && !f.path.includes("cli") && !f.path.includes("bin/")) {
+			if (/\bprocess\.exit\s*\(/.test(line) && !f.path.includes("cli") && !f.path.includes("bin/") && !f.path.includes("commands/") && !f.path.includes("monitor")) {
 				processExit++;
 				issues.push({
 					severity: "warning",
