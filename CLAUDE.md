@@ -8,11 +8,12 @@ ink/react (the `monitor` TUI) and @jscpd/core (duplication engine, ~100 KB).
 ```bash
 pnpm install        # install dev deps
 pnpm build          # tsc → dist/
-pnpm test           # vitest run (360 tests across 35 files)
+pnpm test           # vitest run (372 tests across 37 files)
 pnpm lint           # biome check src/
 node dist/cli.js    # self-scan
 node dist/cli.js init               # set up CI workflow + configs
 node dist/cli.js fix                # auto-fix + suggestions
+node dist/cli.js fix --ai           # AI-powered fix (uses Claude)
 node dist/cli.js --skip-tests --top # fast scan + top issues
 node dist/cli.js --help             # show all flags
 ```
@@ -22,6 +23,8 @@ node dist/cli.js --help             # show all flags
 ```
 src/
 ├── cli.ts              # Entry: flags, init/fix commands, runner orchestration
+├── core.ts             # Programmatic API: import { scan } from "@vibecodeqa/cli/core"
+├── ai-fix.ts           # AI-powered code fixing (Claude API, search/replace)
 ├── types.ts            # CheckResult, Issue, VibeReport, StackInfo, WorkspaceInfo
 ├── score.ts            # Weighted composite score from check-meta weights
 ├── check-meta.ts       # Metadata for all 25 checks (weight, description, deeperTools)
@@ -105,6 +108,9 @@ Tries dedicated tools first, falls back to built-in:
   prompt (`[m]` monitor · `[o]` open report · `enter` quit). Piped/CI runs stay quiet.
 - `vcqa init [path]` — create CI workflow + biome.json + .gitignore
 - `vcqa fix [path]` — auto-fix (biome/eslint) + 30+ fix suggestions
+  - `--ai` — use Claude to fix remaining issues (needs ANTHROPIC_API_KEY or VCQA_PRO_KEY)
+  - `--check NAME` — only fix issues from a specific check
+  - `--dry-run` — preview fixes without applying
 - `vcqa explain [check]` — deep-dive what/risk/fix for a check
 - `vcqa monitor [path]` — live TUI (re-scans on change). Keys: ↑↓/Enter/Esc navigate,
   `/` search issues, `y` copy fix-prompt, `r` scan, `f`/`g`/`t`/`c` views, `?` help, `q` quit
@@ -116,8 +122,22 @@ Tries dedicated tools first, falls back to built-in:
 ## Testing
 
 ```bash
-pnpm test                    # 360 tests across 35 files
+pnpm test                    # 372 tests across 37 files
 pnpm test -- --reporter=verbose  # see all test names
 ```
 
 Test files: `*.test.ts` in src/ and src/runners/. CLI integration tests in `cli.test.ts`.
+
+## Programmatic API
+
+```typescript
+import { scan, CHECK_META, type VibeReport } from "@vibecodeqa/cli/core";
+
+const report = await scan("./src", {
+  skipTests: true,
+  checks: ["security", "testing"],
+  onProgress: (check, result, i, total) => console.log(`${i+1}/${total} ${check}`),
+});
+```
+
+Exports: `scan`, `CHECK_META`, `getCheckMeta`, `computeScore`, `detectStack`, `detectWorkspace`, `loadConfig`, `gradeFromScore`, and all types.
