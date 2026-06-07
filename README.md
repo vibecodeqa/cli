@@ -228,7 +228,21 @@ Create `.vcqa.json` (or add a `"vcqa"` key to `package.json`):
 
 ## Monorepo support
 
-Auto-detects: pnpm, npm, yarn, bun, lerna, turborepo, nx, melos.
+Auto-detects workspace tools: pnpm, npm, yarn, bun, lerna, turborepo, nx, melos.
+
+When a monorepo is detected, vcqa:
+- Resolves all workspace packages from `pnpm-workspace.yaml`, `package.json` `workspaces`, `lerna.json`, etc.
+- Scans `packages/*/src/` (or wherever each package's source lives)
+- Runs linting from root `.` (lets biome/eslint find all files via their own config)
+- Checks `tsconfig.json` in each workspace package for strict mode
+- Detects lockfiles in root or packages (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `bun.lockb`, `bun.lock`)
+- Scopes confusion checks per-package (no false positives from cross-package names)
+
+```bash
+npx @vibecodeqa/cli ~/my-monorepo    # auto-detects workspace, scans all packages
+```
+
+No configuration needed — if your monorepo has a `workspaces` field or `pnpm-workspace.yaml`, it just works.
 
 ## Stack detection
 
