@@ -261,10 +261,35 @@ Auto-detects: TypeScript/JavaScript/Dart, React/Vue/Svelte/Flutter, Vite/Webpack
 | `--upload` | Upload to dashboard |
 | `--top [N]` | Show top N issues |
 | `--diff [base]` | Issues in changed files only |
+| `--checks a,b,c` | Only run named checks |
 | `--markdown` | Markdown summary |
 | `--pr-comment` | PR comment (needs `GITHUB_TOKEN`) |
 | `--annotations` | GitHub Actions annotations |
 | `--watch` | Re-scan on file changes |
+
+## Monitor TUI
+
+Run the live control panel when you want to inspect a project while code is changing:
+
+```bash
+npx @vibecodeqa/cli monitor
+```
+
+The monitor re-scans on file changes, shows score and issue movement, and lets you drill from checks to issues to source context.
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Switch between Checks and Issues |
+| `/` | Search issues by message, check, or file |
+| `r` | Re-scan now |
+| `h` | Open the codebase heatmap |
+| `f` | Show files ranked by issue count |
+| `g` | Show git-changed files |
+| `t` | Show score trends |
+| `c` | Configure monitor thresholds and panels |
+| `y` | Copy an AI fix prompt for the selected issue |
+
+The heatmap combines source LOC, git status, line churn, scan issue counts, and live watcher hits. Hotter files appear larger/brighter so you can see where edits and risk are concentrating during a session.
 
 ## Links
 

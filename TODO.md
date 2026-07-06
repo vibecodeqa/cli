@@ -23,6 +23,7 @@
 - [x] Actionable prompts (copy button generates fix prompt for Claude/Codex)
 - [x] Issues grouped by file on detail pages
 - [x] Watch mode (--watch, re-scans on file changes)
+- [x] Monitor codebase heatmap (live watcher hits + git churn + issue counts)
 - [x] --skip-tests, --ci, --json, --badge flags
 - [x] Badge SVG generation (shields.io style)
 - [x] Check metadata with weighted scoring (weights sum to 100)
