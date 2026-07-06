@@ -30,7 +30,7 @@ How VibeCode QA compares to existing tools. Updated 2026-05-18.
 | **AI Readiness — Confusion** | Levenshtein filename similarity, synonym detection, export collisions, generic naming | Nothing — unique to VibeCode QA |
 | **AI Readiness — Context** | Token density per file, import depth, circular dep impact on LLM context windows | Nothing — unique to VibeCode QA |
 | **Monorepo Understanding** | Auto-detect pnpm/npm/yarn/lerna/melos workspaces, show structure on overview, adjust all checks per-package | Tools treat monorepos as single projects |
-| **Composite Score** | Weighted 0-100 across all 25 checks with trends | SonarQube has quality gate, but not a single score |
+| **Composite Score** | Weighted 0-100 across all 34 checks with trends | SonarQube has quality gate, but not a single score |
 | **Zero-Config** | Auto-detects stack, runs everything, one command | Every other tool requires config files |
 | **Workspace-Aware Report** | Shows repo structure (mono/single), packages, before assessing | Nobody shows understanding before assessment |
 | **Trend History** | Score timeline with sparklines, per-check trends over time | SonarQube has this (enterprise) |

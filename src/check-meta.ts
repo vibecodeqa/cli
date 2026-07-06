@@ -237,11 +237,11 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		priority: "high",
 		weight: 4,
 		description:
-			"Checks common accessibility violations: images without alt text, click handlers on non-interactive elements without keyboard support, form controls without labels, autoFocus usage, positive tabIndex, and missing html lang attribute.",
-		risk: "1 in 4 adults has a disability (CDC). Missing alt text makes images invisible to screen readers. Click-only divs exclude keyboard users. Unlabeled inputs are unusable with assistive technology. Missing lang attribute breaks screen reader pronunciation.",
+			"Checks common accessibility violations: images without alt text, missing accessible names, unlabeled form controls, heading-order skips, missing landmarks, low static color contrast, hidden focus indicators, click-only controls, autoFocus usage, positive tabIndex, dialog focus basics, and missing html lang attribute.",
+		risk: "Missing alt text makes images invisible to screen readers. Icon-only buttons and unlabeled inputs are unusable with assistive technology. Click-only controls, broken focus indicators, bad tab order, and weak dialog focus handling exclude keyboard users. Low contrast makes text unreadable for many users.",
 		recommendation:
-			'Add alt text to all images (use alt="" for decorative). Use <button> for clickable elements, not <div onClick>. Label all form controls with <label>, aria-label, or aria-labelledby. Set lang on <html>.',
-		deeperTools: ["eslint-plugin-jsx-a11y", "axe-core"],
+			'Add alt text to all images (use alt="" for decorative). Give every button/input an accessible name. Use native buttons and links for interactions. Keep semantic heading order and landmarks. Preserve visible focus states, avoid positive tabIndex, and run axe-core with Playwright against the built app for runtime validation.',
+		deeperTools: ["eslint-plugin-jsx-a11y", "axe-core", "@axe-core/playwright", "Playwright"],
 	},
 	performance: {
 		name: "performance",
@@ -301,7 +301,7 @@ export const CHECK_META: Record<string, CheckMeta> = {
 		priority: "medium",
 		weight: 0,
 		description:
-			"Detects stale comments: TODOs older than 6 months, numeric claims that don't match code (\"handles 3 cases\" but switch has 5), commented-out code blocks, and @deprecated without replacement. LLM-powered semantic mismatch detection with Pro.",
+			'Detects stale comments: TODOs older than 6 months, numeric claims that don\'t match code ("handles 3 cases" but switch has 5), commented-out code blocks, and @deprecated without replacement. LLM-powered semantic mismatch detection with Pro.',
 		risk: "Stale comments mislead developers and AI agents. A TODO from 2024 wastes attention. A comment saying '3 cases' when there are 5 causes readers to miss branches. Commented-out code blocks signal incomplete refactoring and confuse LLM context windows.",
 		recommendation:
 			"Delete TODOs that won't be done — create issues instead. Delete commented-out code (it's in git history). Update numeric claims when adding branches. Add replacement info to @deprecated.",

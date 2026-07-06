@@ -17,6 +17,7 @@ interface SarifResult {
 	level: "error" | "warning" | "note";
 	message: { text: string };
 	locations?: { physicalLocation: { artifactLocation: { uri: string }; region?: { startLine: number } } }[];
+	properties?: Record<string, string>;
 }
 
 export function generateSARIF(report: VibeReport): string {
@@ -48,6 +49,14 @@ export function generateSARIF(report: VibeReport): string {
 				level: severityToLevel(issue.severity),
 				message: { text: `[${check.name}] ${issue.message}` },
 			};
+			const properties = Object.fromEntries(
+				Object.entries({
+					selector: issue.selector,
+					wcag: issue.wcag,
+					suggestion: issue.suggestion,
+				}).filter(([, value]) => typeof value === "string" && value.length > 0),
+			) as Record<string, string>;
+			if (Object.keys(properties).length > 0) result.properties = properties;
 
 			if (issue.file && typeof issue.file === "string") {
 				const filePath = issue.file.split(":")[0]!;

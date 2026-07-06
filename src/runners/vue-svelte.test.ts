@@ -57,7 +57,7 @@ const msg = ref('hello')
 
 	it("detects missing img alt in Vue template", async () => {
 		writeFileSync(join(TMP, "src", "Bad.vue"), `<template><img src="photo.jpg"></template>\n<script setup>\n</script>`);
-		const result = runAccessibility(TMP);
+		const result = await runAccessibility(TMP);
 		expect(result.issues.some((i) => i.rule === "img-alt")).toBe(true);
 	});
 
@@ -66,7 +66,7 @@ const msg = ref('hello')
 			join(TMP, "src", "Click.vue"),
 			`<template><div @click="go">Click me</div></template>\n<script setup>\nfunction go() {}\n</script>`,
 		);
-		const result = runAccessibility(TMP);
+		const result = await runAccessibility(TMP);
 		expect(result.issues.some((i) => i.rule === "click-events")).toBe(true);
 	});
 });

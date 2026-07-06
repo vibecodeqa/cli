@@ -73,7 +73,7 @@ src/
     └── components.ts   # HTML escape, file links, grade/priority colors
 ```
 
-## 25 Checks across 7 categories
+## 34 Checks across 7 categories
 
 Weights sum to 100 (Pro checks have weight 0).
 
@@ -100,7 +100,7 @@ Tries dedicated tools first, falls back to built-in:
 - **Duplication**: jscpd CLI (if in devDeps) → @jscpd/core's Rabin-Karp engine fed by our lightweight tokenizer (Type-1/2 maximal clones, 50 tokens/6 lines). Our tokenizer keeps the heavy @jscpd/tokenizer (2.5MB language grammars) out of the install.
 - **Dead code**: Knip (if available)
 - **React hooks**: eslint-plugin-react-hooks (if installed, skips built-in)
-- **Accessibility**: eslint-plugin-jsx-a11y (if installed, skips built-in)
+- **Accessibility**: bundled eslint-plugin-jsx-a11y + html-validate, with built-in heuristics for framework/template gaps
 
 ## CLI commands
 

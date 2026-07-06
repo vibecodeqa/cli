@@ -34,6 +34,7 @@ interface ParsedFlags {
 	topN: number;
 	failUnder: number | null;
 	diffBase: string | null;
+	checks: string[] | null;
 	prComment: boolean;
 	markdownMode: boolean;
 	annotations: boolean;
@@ -59,7 +60,19 @@ function parseFlags(): ParsedFlags {
 	}
 
 	const topN = parseValueFlag("--top", 5) ?? 0;
-	const failUnder = parseValueFlag("--fail-under");
+		const failUnder = parseValueFlag("--fail-under");
+
+		let checks: string[] | null = null;
+		const checksIdx = args.indexOf("--checks");
+		if (checksIdx !== -1) {
+			const next = args[checksIdx + 1];
+			if (next && !next.startsWith("--")) {
+				checks = next.split(",").map((c) => c.trim()).filter(Boolean);
+				valueArgIndices.add(checksIdx + 1);
+			} else {
+				checks = [];
+			}
+		}
 
 	let diffBase: string | null = null;
 	const diffIdx = args.indexOf("--diff");
@@ -85,11 +98,12 @@ function parseFlags(): ParsedFlags {
 		sarifMode: flags.has("--sarif"),
 		uploadMode: flags.has("--upload"),
 		topN,
-		failUnder,
-		diffBase,
-		prComment: flags.has("--pr-comment"),
-		markdownMode: flags.has("--markdown"),
-		annotations: flags.has("--annotations"),
+			failUnder,
+			diffBase,
+			checks,
+			prComment: flags.has("--pr-comment"),
+			markdownMode: flags.has("--markdown"),
+			annotations: flags.has("--annotations"),
 	};
 }
 
@@ -126,6 +140,7 @@ function printHelp(): void {
     --upload          Upload report to app.vibecodeqa.online
     --top [N]         Show top N issues to fix (default: 5)
     --diff [base]     Only show issues in changed files (vs HEAD or branch)
+    --checks a,b,c    Only run the named checks
     --markdown        Output markdown summary (pipe to file or clipboard)
     --pr-comment      Post score as GitHub PR comment (needs GITHUB_TOKEN)
     --annotations     Emit GitHub Actions ::warning/::error annotations
@@ -367,7 +382,7 @@ async function writeOutputs(report: VibeReport, outputDir: string, flags: Parsed
 // ── Upload ──
 
 async function handleUpload(report: VibeReport, cwd: string, quietMode: boolean): Promise<void> {
-	const token = process.env.VCQA_TOKEN || process.env.GITHUB_TOKEN;
+	const token = process.env.VCQA_TOKEN;
 	if (!token) {
 		if (!quietMode) console.log("  \x1b[33m\u26a0 Set VCQA_TOKEN to enable upload\x1b[0m");
 		return;
@@ -518,8 +533,8 @@ async function main() {
 		return;
 	}
 
-	const flags = parseFlags();
-	const { cwd, outputDir, jsonOnly, ciMode, skipTests, watchMode, diffBase } = flags;
+		const flags = parseFlags();
+	const { cwd, outputDir, jsonOnly, ciMode, skipTests, watchMode, diffBase, checks: checksFilter } = flags;
 	validateCwd(cwd);
 
 	const config = loadConfig(cwd);
@@ -530,8 +545,9 @@ async function main() {
 
 	// Run scan using core API with progress output
 	const report = await scan(cwd, {
-		skipTests,
-		config,
+			skipTests,
+			checks: checksFilter ?? undefined,
+			config,
 		onProgress: quietMode ? undefined : (check, result) => {
 			const det = result.details as Record<string, unknown>;
 			const premium = det.comingSoon;

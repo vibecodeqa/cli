@@ -54,6 +54,12 @@ describe("CLI flags", () => {
 		expect(report.checks.length).toBe(34);
 	}, 30_000);
 
+	it("--checks limits the scan to named checks", () => {
+		const out = run("--skip-tests --json --checks structure,docs .");
+		const report = JSON.parse(out);
+		expect(report.checks.map((c: { name: string }) => c.name).sort()).toEqual(["docs", "structure"]);
+	}, 30_000);
+
 	it("nonexistent path exits with error", () => {
 		const out = execSync(`node ${CLI} --skip-tests /nonexistent 2>&1 || true`, { encoding: "utf-8" });
 		expect(out).toContain("does not exist");

@@ -16,6 +16,9 @@ export interface Issue {
 	line?: number;
 	rule?: string;
 	snippet?: string; // copyable code snippet (e.g., duplicated block for search)
+	selector?: string; // CSS/HTML selector or element pattern when available
+	wcag?: string; // WCAG success criterion/category when known
+	suggestion?: string; // specific suggested fix for this issue
 }
 
 export interface VibeReport {

@@ -8,11 +8,12 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { render, Box, Text, useApp, useInput, useStdout } from "ink";
-import { resolve, join, basename } from "node:path";
+import { resolve, join, basename, relative } from "node:path";
 import { watch, existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { execFile, execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { collectFileActivity, type FileActivity } from "./activity.js";
 import { detectStack, detectWorkspace } from "./detect.js";
 import { loadHistory } from "./history.js";
 import type { CheckResult } from "./types.js";
@@ -102,6 +103,10 @@ function ts(): string {
 	return new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+function relPath(cwd: string, path: string): string {
+	return relative(cwd, path).replace(/\\/g, "/");
+}
+
 function copyToClipboard(text: string): boolean {
 	try {
 		const cmd = process.platform === "darwin" ? "pbcopy" : process.platform === "win32" ? "clip" : "xclip -selection clipboard";
@@ -149,8 +154,8 @@ interface GitChange {
 
 function getGitChanges(cwd: string): GitChange[] {
 	try {
-		const out = execSync("git status --porcelain", { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-		if (!out) return [];
+		const out = execSync("git status --porcelain", { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trimEnd();
+		if (!out.trim()) return [];
 		return out.split("\n").map((line) => {
 			const status = (line[0] === "?" ? "?" : line.trim()[0]) as GitChange["status"];
 			const file = line.slice(3).trim();
@@ -685,6 +690,87 @@ function AllFilesView({ checks, height, cursor }: { checks: CheckResult[]; heigh
 	);
 }
 
+// ── Codebase Heatmap View ──
+
+function activityColor(item: FileActivity): string {
+	if (item.issues.errors > 0 || item.status === "D") return "red";
+	if (item.issues.warnings > 0) return "yellow";
+	if (item.recent > 0) return "cyan";
+	if (item.status === "A" || item.status === "?") return "green";
+	if (item.status === "M" || item.added + item.removed > 0) return "magenta";
+	return "gray";
+}
+
+function activityFruit(item: FileActivity): string {
+	if (item.heat >= 80) return "⬤";
+	if (item.heat >= 40) return "◉";
+	if (item.heat >= 15) return "●";
+	return "•";
+}
+
+function treeLabel(file: string, width: number): string {
+	const parts = file.split("/");
+	if (parts.length === 1) return file.slice(0, width).padEnd(width);
+	const name = parts.pop()!;
+	const depth = Math.min(parts.length, 4);
+	const branch = `${"  ".repeat(Math.max(0, depth - 1))}${depth > 0 ? "└─ " : ""}`;
+	const label = `${branch}${name}`;
+	return label.slice(0, width).padEnd(width);
+}
+
+function CodebaseHeatmapView({ activity, height, cursor }: { activity: FileActivity[]; height: number; cursor: number }) {
+	const visibleLines = Math.max(1, height - 7);
+	const scrollStart = Math.max(0, Math.min(cursor - Math.floor(visibleLines / 2), activity.length - visibleLines));
+	const visible = activity.slice(scrollStart, scrollStart + visibleLines);
+	const changed = activity.filter((item) => item.status !== "clean" || item.added + item.removed > 0).length;
+	const recent = activity.reduce((sum, item) => sum + item.recent, 0);
+	const added = activity.reduce((sum, item) => sum + item.added, 0);
+	const removed = activity.reduce((sum, item) => sum + item.removed, 0);
+	const issueFiles = activity.filter((item) => item.issues.total > 0).length;
+
+	return (
+		<Box flexDirection="column" height={height} paddingX={1} overflowY="hidden">
+			<Text bold color="magenta"> ◈ Codebase Heatmap ({activity.length})</Text>
+			<Text>
+				<Text dimColor> changed </Text><Text color="magenta" bold>{changed}</Text>
+				<Text dimColor> recent </Text><Text color="cyan" bold>{recent}</Text>
+				<Text dimColor> +</Text><Text color="green" bold>{added}</Text>
+				<Text dimColor> -</Text><Text color="red" bold>{removed}</Text>
+				<Text dimColor> issue files </Text><Text color={issueFiles > 0 ? "yellow" : "green"} bold>{issueFiles}</Text>
+			</Text>
+			<Text dimColor> </Text>
+			<Text dimColor>   tree/file                 st  heat  churn    issues  loc</Text>
+			{activity.length === 0 ? (
+				<Text dimColor> No source files found.</Text>
+			) : (
+				<>
+					{visible.map((item, i) => {
+						const idx = scrollStart + i;
+						const sel = idx === cursor;
+						const color = activityColor(item);
+						const churn = item.added + item.removed;
+						return (
+							<Text key={item.file} wrap="truncate">
+								<Text color={sel ? "white" : "gray"}>{sel ? "▸" : " "}</Text>
+								<Text color={color} bold>{activityFruit(item)} </Text>
+								<Text color={sel ? "white" : color}>{treeLabel(item.file, 25)} </Text>
+								<Text color={item.status === "clean" ? "gray" : color}>{item.status.padEnd(2)} </Text>
+								<Text color={color}>{String(item.heat).padStart(4)} </Text>
+								<Text color={churn > 0 ? "magenta" : "gray"}>{String(churn).padStart(5)} </Text>
+								<Text color={item.issues.errors > 0 ? "red" : item.issues.warnings > 0 ? "yellow" : "gray"}>
+									{String(item.issues.total).padStart(6)}{" "}
+								</Text>
+								<Text dimColor>{String(item.lines).padStart(4)}</Text>
+							</Text>
+						);
+					})}
+					{activity.length > scrollStart + visibleLines && <Text dimColor> +{activity.length - scrollStart - visibleLines} more (↓)</Text>}
+				</>
+			)}
+		</Box>
+	);
+}
+
 // ── Main App ──
 
 type Panel = "checks" | "issues";
@@ -693,6 +779,7 @@ type Mode =
 	| { view: "check-detail"; checkName: string }
 	| { view: "issue-detail"; checkName: string; issueIdx: number }
 	| { view: "git-changes" }
+	| { view: "heatmap" }
 	| { view: "all-files" }
 	| { view: "file-issues"; file: string }
 	| { view: "trends" }
@@ -725,6 +812,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 	const [showHelp, setShowHelp] = useState(false);
 	const [search, setSearch] = useState("");
 	const [searchActive, setSearchActive] = useState(false);
+	const [recentChanges, setRecentChanges] = useState<Record<string, number>>({});
 	const scanningRef = useRef(false);
 	const prevScoreRef = useRef<number | null>(cached ? cached.score : null);
 
@@ -768,6 +856,10 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		return [...map.keys()].sort((a, b) => (map.get(b) || 0) - (map.get(a) || 0));
 	}, [state.checks]);
 	const gitChanges = useMemo(() => getGitChanges(cwd), [cwd, state.scanCount]);
+	const fileActivity = useMemo(
+		() => collectFileActivity(cwd, state.checks, recentChanges, workspace.isMonorepo ? workspace.srcRoots : undefined),
+		[cwd, state.checks, recentChanges, workspace],
+	);
 
 	// Clamp cursor when data changes
 	useEffect(() => {
@@ -826,7 +918,9 @@ function MonitorApp({ cwd }: { cwd: string }) {
 			watch(dir, { recursive: true }, (_event, filename) => {
 				if (!filename || filename.includes("node_modules") || filename.includes(".vibe-check")) return;
 				if (scanningRef.current) return;
-				addLog(`Changed: ${filename}`, "change");
+				const changedPath = relPath(cwd, join(dir, filename.toString()));
+				addLog(`Changed: ${changedPath}`, "change");
+				setRecentChanges((prev) => ({ ...prev, [changedPath]: (prev[changedPath] ?? 0) + 1 }));
 				if (debounce) clearTimeout(debounce);
 				debounce = setTimeout(() => doScan(), monCfg.debounceMs);
 			}),
@@ -888,8 +982,8 @@ function MonitorApp({ cwd }: { cwd: string }) {
 			return;
 		}
 
-		// Rescan from dashboard or check-detail
-		if (input === "r" && (mode.view === "dashboard" || mode.view === "check-detail")) { doScan(); return; }
+		// Rescan from dashboard or detail-heavy views
+		if (input === "r" && (mode.view === "dashboard" || mode.view === "check-detail" || mode.view === "heatmap")) { doScan(); return; }
 
 		// ── Config view ──
 		if (mode.view === "config") {
@@ -929,6 +1023,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 		// View switching (not from config — handled above)
 		if (input === "t") { setMode({ view: "trends" }); setCursor(0); return; }
 		if (input === "g") { setMode({ view: "git-changes" }); setCursor(0); return; }
+		if (input === "h") { setMode({ view: "heatmap" }); setCursor(0); return; }
 		if (input === "f") { setMode({ view: "all-files" }); setCursor(0); return; }
 		if (input === "c") { setMode({ view: "config" }); setConfigCursor(0); setPendingCfg({ ...monCfg, panels: { ...monCfg.panels } }); return; }
 
@@ -1004,6 +1099,16 @@ function MonitorApp({ cwd }: { cwd: string }) {
 			}
 		}
 
+		// ── Heatmap: ↑↓ navigate, Enter drill into file issues ──
+		if (mode.view === "heatmap") {
+			if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
+			if (key.downArrow) setCursor((c) => Math.min(Math.max(0, fileActivity.length - 1), c + 1));
+			if (key.return && fileActivity[cursor]) {
+				setMode({ view: "file-issues", file: fileActivity[cursor].file });
+				setCursor(0);
+			}
+		}
+
 		// ── File issues: ↑↓ navigate, Enter drill into issue detail, y copy ──
 		if (mode.view === "file-issues") {
 			const fileIssues = state.checks.flatMap((c) =>
@@ -1067,6 +1172,18 @@ function MonitorApp({ cwd }: { cwd: string }) {
 				<GitChangesView changes={gitChanges} checks={state.checks} height={rows - 3} cursor={cursor} />
 				<Box paddingX={1}>
 					<Text dimColor>Esc back · ↑↓ select · Enter view file issues · q quit</Text>
+				</Box>
+			</Box>
+		);
+	}
+
+	if (mode.view === "heatmap") {
+		return (
+			<Box flexDirection="column" height={rows}>
+				<Header proj={proj} stack={stack} workspace={workspace} state={state} />
+				<CodebaseHeatmapView activity={fileActivity} height={rows - 3} cursor={cursor} />
+				<Box paddingX={1}>
+					<Text dimColor>Esc back · ↑↓ select · Enter view file issues · r scan · q quit</Text>
 				</Box>
 			</Box>
 		);
@@ -1257,7 +1374,7 @@ function MonitorApp({ cwd }: { cwd: string }) {
 
 			{/* Footer */}
 			<Box paddingX={1} justifyContent="space-between">
-				<Text dimColor>Tab · ↑↓ Enter Esc · / search · r scan · f files · g git · t trends · c config · ? help · q</Text>
+				<Text dimColor>Tab · ↑↓ Enter Esc · / search · r scan · h heatmap · f files · g git · t trends · c config · ? help · q</Text>
 			</Box>
 		</Box>
 	);
@@ -1279,6 +1396,7 @@ function HelpOverlay({ height }: { height: number }) {
 			title: "Views",
 			keys: [
 				["r", "re-scan now"],
+				["h", "codebase heatmap"],
 				["f", "all files by issue count"],
 				["g", "git-changed files"],
 				["t", "score trends"],
