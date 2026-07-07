@@ -52,14 +52,31 @@ export function setGlobalIgnore(patterns: string[] | undefined): void {
 	_globalIgnore = patterns;
 }
 
-/** Walk source directories and return all code files. */
+/**
+ * Drop any root nested inside another root in the same list, and collapse exact
+ * duplicates. Monorepo detection can emit overlapping roots (e.g. `app/src` plus
+ * a catch-all `app`); without this, `app/src/**` would be walked once per root and
+ * every file collected twice — making files look duplicated against themselves.
+ */
+function pruneNestedRoots(dirs: string[]): string[] {
+	const seen = new Set<string>();
+	const uniq = dirs
+		.map((d) => d.replace(/\/+$/, ""))
+		.filter((d) => (seen.has(d) ? false : (seen.add(d), true)));
+	return uniq.filter((d) => !uniq.some((other) => other !== d && `${d}/`.startsWith(`${other}/`)));
+}
+
+/** Walk source directories and return all code files (deduplicated by absolute path). */
 export function collectSourceFiles(cwd: string, opts?: { includeTests?: boolean; extraExts?: boolean; srcRoots?: string[] }): SourceFile[] {
 	const files: SourceFile[] = [];
 	const dirs = [...(opts?.srcRoots || _globalSrcRoots || DEFAULT_SRC_DIRS)];
 	if (opts?.includeTests && !opts?.srcRoots && !_globalSrcRoots) dirs.push("test", "tests", "__tests__");
-	for (const dir of dirs) {
+	// A single seen-set across all roots guarantees each file is collected once
+	// even if the roots overlap or a symlink points back into the tree.
+	const seen = new Set<string>();
+	for (const dir of pruneNestedRoots(dirs)) {
 		try {
-			walk(join(cwd, dir), cwd, files, opts?.extraExts ? ALL_EXTS : CODE_EXTS);
+			walk(join(cwd, dir), cwd, files, opts?.extraExts ? ALL_EXTS : CODE_EXTS, seen);
 		} catch {
 			/* dir doesn't exist */
 		}
@@ -101,7 +118,7 @@ export function readDeps(cwd: string): Record<string, string> {
 /** Walk from cwd root (not just src/) — for checks like secrets that scan all project files. */
 export function collectAllFiles(cwd: string, opts?: { extraExts?: boolean }): SourceFile[] {
 	const files: SourceFile[] = [];
-	walk(cwd, cwd, files, opts?.extraExts ? ALL_EXTS : CODE_EXTS);
+	walk(cwd, cwd, files, opts?.extraExts ? ALL_EXTS : CODE_EXTS, new Set());
 	return files;
 }
 
@@ -131,7 +148,7 @@ function shouldIgnore(relPath: string): boolean {
 	});
 }
 
-function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>): void {
+function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>, seen: Set<string>): void {
 	let entries: string[];
 	try {
 		entries = readdirSync(dir);
@@ -148,13 +165,16 @@ function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>): v
 			if (lstatSync(full).isSymbolicLink()) continue;
 			const stat = statSync(full);
 			if (stat.isDirectory()) {
-				walk(full, cwd, out, exts);
+				walk(full, cwd, out, exts, seen);
 				continue;
 			}
 			const ext = extname(entry);
 			if (!exts.has(ext)) continue;
 			// Skip files over 1MB to prevent memory issues (M1)
 			if (stat.size > 1_000_000) continue;
+			// A file reachable from two overlapping roots is collected once.
+			if (seen.has(full)) continue;
+			seen.add(full);
 			const fileContent = readFileSync(full, "utf-8");
 			const isSFC = ext === ".vue" || ext === ".svelte";
 			// For SFCs, extract <script> block for logic analysis; keep raw for template checks

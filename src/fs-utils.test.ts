@@ -125,6 +125,25 @@ describe("collectSourceFiles with monorepo srcRoots", () => {
 		rmSync(dir, { recursive: true });
 	});
 
+	it("collects each file once when roots overlap (app/src nested under app)", () => {
+		// Mirrors real monorepo detection, which emits both `app/src` and a
+		// catch-all `app`. Without dedup, app/src/** files appear twice and every
+		// downstream check (duplication, confusion, architecture) double-counts.
+		const dir = makeProject({
+			"app/src/pages/ProjectForm.tsx": "export function ProjectForm() {}",
+			"app/functions/api.ts": "export const handler = 1;",
+		});
+		setGlobalSrcRoots(["app/src", "app"]);
+		const files = collectSourceFiles(dir);
+		expect(files).toHaveLength(2);
+		const paths = files.map((f) => f.path).sort();
+		expect(paths).toEqual(["app/functions/api.ts", "app/src/pages/ProjectForm.tsx"]);
+		// The nested root must not drop coverage the broad root provides.
+		expect(paths).toContain("app/functions/api.ts");
+		setGlobalSrcRoots(undefined);
+		rmSync(dir, { recursive: true });
+	});
+
 	it("falls back to DEFAULT_SRC_DIRS when no srcRoots set", () => {
 		const dir = makeProject({
 			"src/app.ts": "export const x = 1;",
