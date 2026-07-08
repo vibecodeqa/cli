@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.44.1 (2026-07-08)
+
+### Duplication fix
+- **Fixed**: Overlapping source roots (e.g. `app/src` nested under a catch-all `app`) caused files to be walked twice, so the duplication check matched each file against its own copy and reported bogus self-clones (`file:8 ↔ file:8`) and inflated duplication percentages. `pruneNestedRoots` now drops any root nested under another before walking, and file collection dedupes by absolute path.
+
 ## 0.44.0 (2026-06-07)
 
 ### Monorepo fixes
