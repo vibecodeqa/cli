@@ -68,8 +68,18 @@ export function setGlobalIgnore(patterns: string[] | undefined): void {
 // graphs, and the report all exclude the same folders. Populated from the
 // VCQA_IGNORE env var (see readEnvIgnoreNames) or setGlobalIgnoreNames().
 let _globalIgnoreNames: Set<string> = new Set();
+let _globalIgnoreSubpaths: string[] = [];
 export function setGlobalIgnoreNames(names: Iterable<string> | undefined): void {
-	_globalIgnoreNames = new Set(names ?? []);
+	const all = [...(names ?? [])];
+	// Bare names are matched per path segment (like SKIP_DIRS); entries containing
+	// a slash are matched as a slash-bounded sub-path against the relative path.
+	_globalIgnoreNames = new Set(all.filter((n) => !n.includes("/")));
+	_globalIgnoreSubpaths = all.filter((n) => n.includes("/")).map((n) => n.replace(/^\/+|\/+$/g, ""));
+}
+function matchesIgnoreSubpath(relPath: string): boolean {
+	if (_globalIgnoreSubpaths.length === 0) return false;
+	const bounded = `/${relPath}/`;
+	return _globalIgnoreSubpaths.some((sp) => bounded.includes(`/${sp}/`));
 }
 /** Parse VCQA_IGNORE (comma/newline/whitespace separated segment names). */
 export function readEnvIgnoreNames(env: string | undefined): string[] {
@@ -184,7 +194,7 @@ function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>, se
 		if (SKIP_DIRS.has(entry) || _globalIgnoreNames.has(entry)) continue;
 		const full = join(dir, entry);
 		const relPath = full.replace(`${cwd}/`, "");
-		if (shouldIgnore(relPath)) continue;
+		if (shouldIgnore(relPath) || matchesIgnoreSubpath(relPath)) continue;
 		try {
 			// Skip symlinks to prevent traversal attacks (H3)
 			if (lstatSync(full).isSymbolicLink()) continue;

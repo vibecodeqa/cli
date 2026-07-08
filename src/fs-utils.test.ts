@@ -89,6 +89,22 @@ describe("collectSourceFiles", () => {
 			rmSync(dir, { recursive: true });
 		}
 	});
+
+	it("honors multi-segment ignore entries as slash-bounded sub-paths", () => {
+		const dir = makeProject({
+			"src/app.ts": "export const x = 1;",
+			"src/generated/api.ts": "export const y = 2;",
+			"src/other/keep.ts": "export const z = 3;",
+		});
+		setGlobalIgnoreNames(["src/generated"]);
+		try {
+			const files = collectSourceFiles(dir).map((f) => f.path).sort();
+			expect(files).toEqual(["src/app.ts", "src/other/keep.ts"]);
+		} finally {
+			setGlobalIgnoreNames([]);
+			rmSync(dir, { recursive: true });
+		}
+	});
 });
 
 describe("readEnvIgnoreNames", () => {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.44.4 (2026-07-08)
+
+### Configurable ignore
+- **Improved**: ignore entries (`VCQA_IGNORE` / `ignoreNames`) containing a slash — e.g. `src/generated` — now match that slash-bounded sub-path anywhere in the tree, instead of silently matching nothing. Bare names still match per path segment. Keeps the CLI in parity with the monitor's watcher and graph filters.
+
 ## 0.44.3 (2026-07-08)
 
 ### Configurable ignore
