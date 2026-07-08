@@ -1,6 +1,6 @@
 /** Git hygiene — checks commit quality, large files, and repo health. */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
@@ -112,7 +112,7 @@ export function runGitHygiene(cwd: string): CheckResult {
 
 	// 5. Check .gitignore completeness
 	if (existsSync(join(cwd, ".gitignore"))) {
-		const gitignore = require("node:fs").readFileSync(join(cwd, ".gitignore"), "utf-8") as string;
+		const gitignore = readFileSync(join(cwd, ".gitignore"), "utf-8");
 		const missing: string[] = [];
 		if (!gitignore.includes("node_modules") && existsSync(join(cwd, "package.json"))) missing.push("node_modules");
 		if (!gitignore.includes(".env") && existsSync(join(cwd, ".env"))) missing.push(".env");

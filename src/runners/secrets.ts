@@ -28,6 +28,10 @@ function tryGitleaks(cwd: string, issues: Issue[]): boolean {
 		const findings = JSON.parse(stdout);
 		if (!Array.isArray(findings)) return false;
 		for (const f of findings) {
+			// Skip our own generated report artifacts — the HTML/JSON we write under
+			// .vibe-check/ embeds sample keys and trips gitleaks on every scan.
+			const file = String(f.File ?? "");
+			if (/(?:^|[/\\])\.vibe-check[/\\]/.test(file)) continue;
 			issues.push({
 				severity: "error",
 				message: `${f.Description || f.RuleID || "Secret detected"} (${f.Match?.slice(0, 8)}...)`,

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.44.5 (2026-07-09)
+
+### Runner crash + false-positive fixes
+- **Fixed**: the `git-hygiene` and `styling` runners called `require("node:fs")` in an ESM build, throwing `require is not defined` at runtime — both checks crashed instead of reporting. Switched to static ESM imports; both now run normally.
+- **Fixed**: gitleaks scanned the CLI's own generated `.vibe-check/` report HTML (which embeds sample keys), flooding the `secrets` check with dozens of false "Generic API Key" findings. Findings under `.vibe-check/` are now excluded.
+
 ## 0.44.4 (2026-07-08)
 
 ### Configurable ignore

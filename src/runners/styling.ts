@@ -12,7 +12,7 @@
  *     7. Inconsistent spacing values across components
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { getProductionFiles, readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
@@ -286,7 +286,6 @@ export function runStyling(cwd: string): CheckResult {
 
 /** Recursively scan for CSS/SCSS files. */
 function scanCssFiles(cwd: string, subdir: string, fn: (content: string) => void): void {
-	const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
 	const dir = join(cwd, subdir);
 	if (!existsSync(dir)) return;
 	try {
