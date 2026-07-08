@@ -18,6 +18,29 @@ node dist/cli.js --skip-tests --top # fast scan + top issues
 node dist/cli.js --help             # show all flags
 ```
 
+## Releasing — CI only, never local
+
+**Never run `npm publish` locally.** Publishing is fully automated by
+`.github/workflows/publish.yml` and is the *only* sanctioned path to npm — it
+uses OIDC trusted publishing with `--provenance`, which a local publish cannot
+reproduce (and which local publishes would undermine).
+
+To cut a release:
+
+1. Land the code fix on `main` (via PR or push).
+2. Bump `version` in `package.json` and add a `CHANGELOG.md` entry.
+3. Push to `main`.
+
+The workflow triggers on pushes touching `src/**`, `package.json`, or the
+workflow file. It builds, runs the full test suite, then compares the local
+`package.json` version against the published npm version — **it publishes only
+when they differ.** So a code change without a version bump will NOT ship
+(this is the trap that stranded the `pruneNestedRoots` fix in 0.44.0: the code
+was committed but the version was never bumped, so CI kept skipping publish).
+
+Verify a release with `gh run list` and `npm view @vibecodeqa/cli version`.
+`workflow_dispatch` is available to re-run manually.
+
 ## Architecture
 
 ```
