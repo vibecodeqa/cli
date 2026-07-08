@@ -50,6 +50,19 @@ describe("collectSourceFiles", () => {
 		rmSync(dir, { recursive: true });
 	});
 
+	it("skips framework build/cache output (.wrangler, .vercel, .svelte-kit)", () => {
+		const dir = makeProject({
+			"src/app.ts": "export const x = 1;",
+			".wrangler/tmp/bundle-abc/middleware-loader.entry.ts": "export const x = 1;",
+			".vercel/output/fn.ts": "bad",
+			".svelte-kit/generated/root.ts": "bad",
+		});
+		const files = collectSourceFiles(dir);
+		expect(files).toHaveLength(1);
+		expect(files[0]!.path).toBe("src/app.ts");
+		rmSync(dir, { recursive: true });
+	});
+
 	it("skips files over 1MB", () => {
 		const dir = makeProject({
 			"src/small.ts": "export const x = 1;",

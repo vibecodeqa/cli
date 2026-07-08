@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.44.2 (2026-07-08)
+
+### Duplication fix
+- **Fixed**: Framework build/cache directories are now skipped during file collection, so generated bundles are no longer scanned or flagged as duplicates of the real source. Cloudflare's `.wrangler/tmp/bundle-*/` (which mirrors `src` into `middleware-loader.entry.ts`) was the reported case; also added `.vercel`, `.turbo`, `.svelte-kit`, `.astro`, `.cache`, and `.parcel-cache` to `SKIP_DIRS`.
+
 ## 0.44.1 (2026-07-08)
 
 ### Duplication fix

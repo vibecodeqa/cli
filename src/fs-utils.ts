@@ -30,6 +30,16 @@ const SKIP_DIRS = new Set([
 	".output",
 	"vendor",
 	"third_party",
+	// Framework build/cache output — generated copies of source that otherwise
+	// get scanned and flagged as duplicates of the real files (e.g. Cloudflare's
+	// .wrangler/tmp/bundle-*/ mirrors src into middleware-loader.entry.ts).
+	".wrangler",
+	".vercel",
+	".turbo",
+	".svelte-kit",
+	".astro",
+	".cache",
+	".parcel-cache",
 ]);
 const CODE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".dart", ".vue", ".svelte"]);
 const ALL_EXTS = new Set([...CODE_EXTS, ".json", ".env", ".yaml", ".yml", ".toml"]);
