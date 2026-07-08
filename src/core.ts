@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { CHECK_META, getCheckMeta, type CheckMeta } from "./check-meta.js";
 import { getCheckIgnore, isCheckEnabled, loadConfig, type VcqaConfig } from "./config.js";
 import { detectRepoUrl, detectStack, detectWorkspace } from "./detect.js";
-import { setGlobalIgnore, setGlobalSrcRoots } from "./fs-utils.js";
+import { readEnvIgnoreNames, setGlobalIgnore, setGlobalIgnoreNames, setGlobalSrcRoots } from "./fs-utils.js";
 import { runAccessibility } from "./runners/accessibility.js";
 import { runArchitecture } from "./runners/architecture.js";
 import { runBestPractices } from "./runners/best-practices.js";
@@ -62,6 +62,8 @@ export interface ScanOptions {
 	checks?: string[];
 	/** Override config (instead of loading from .vcqa.json). */
 	config?: VcqaConfig;
+	/** Extra directory/file names to skip (segment match), merged with VCQA_IGNORE. */
+	ignoreNames?: string[];
 	/** Progress callback — called for each completed check. */
 	onProgress?: (check: string, result: CheckResult, index: number, total: number) => void;
 }
@@ -78,6 +80,10 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 
 	setGlobalSrcRoots(workspace.isMonorepo ? workspace.srcRoots : undefined);
 	setGlobalIgnore(config.ignore);
+	// Extra ignore names: .vcqa.json config + the VCQA_IGNORE env var (the desktop
+	// monitor's user "Ignored paths"). Merged so the scan skips the same folders
+	// the watcher and graphs do.
+	setGlobalIgnoreNames([...(options.ignoreNames ?? []), ...readEnvIgnoreNames(process.env.VCQA_IGNORE)]);
 
 	const srcRoots = workspace.isMonorepo ? workspace.srcRoots : undefined;
 	const skipTests = options.skipTests ?? false;

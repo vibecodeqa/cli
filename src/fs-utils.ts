@@ -62,6 +62,21 @@ export function setGlobalIgnore(patterns: string[] | undefined): void {
 	_globalIgnore = patterns;
 }
 
+// Extra directory/file *names* to skip, matched per path segment exactly like
+// SKIP_DIRS (not globs). This is the channel the desktop monitor uses to push
+// its user-configurable "Ignored paths" into the scan, so the watcher, the
+// graphs, and the report all exclude the same folders. Populated from the
+// VCQA_IGNORE env var (see readEnvIgnoreNames) or setGlobalIgnoreNames().
+let _globalIgnoreNames: Set<string> = new Set();
+export function setGlobalIgnoreNames(names: Iterable<string> | undefined): void {
+	_globalIgnoreNames = new Set(names ?? []);
+}
+/** Parse VCQA_IGNORE (comma/newline/whitespace separated segment names). */
+export function readEnvIgnoreNames(env: string | undefined): string[] {
+	if (!env) return [];
+	return [...new Set(env.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean))];
+}
+
 /**
  * Drop any root nested inside another root in the same list, and collapse exact
  * duplicates. Monorepo detection can emit overlapping roots (e.g. `app/src` plus
@@ -166,7 +181,7 @@ function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>, se
 		return; // directory doesn't exist, permission denied, or broken symlink
 	}
 	for (const entry of entries) {
-		if (SKIP_DIRS.has(entry)) continue;
+		if (SKIP_DIRS.has(entry) || _globalIgnoreNames.has(entry)) continue;
 		const full = join(dir, entry);
 		const relPath = full.replace(`${cwd}/`, "");
 		if (shouldIgnore(relPath)) continue;

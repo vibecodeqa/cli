@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.44.3 (2026-07-08)
+
+### Configurable ignore
+- **Added**: `VCQA_IGNORE` env var and a `ScanOptions.ignoreNames` option — extra directory/file *names* skipped during file collection (segment match, same gate as the built-in `SKIP_DIRS`). This lets the VibeCode Monitor push its user-configurable "Ignored paths" into the scan, so the file watcher, the graphs, and the report all exclude the same folders. Non-intrusive: nothing is written into the scanned repo.
+
 ## 0.44.2 (2026-07-08)
 
 ### Duplication fix

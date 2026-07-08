@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { collectSourceFiles, getProductionFiles, getTestFiles, readDeps, readSafe, setGlobalSrcRoots } from "./fs-utils.js";
+import { collectSourceFiles, getProductionFiles, getTestFiles, readDeps, readEnvIgnoreNames, readSafe, setGlobalIgnoreNames, setGlobalSrcRoots } from "./fs-utils.js";
 
 function makeProject(files: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-fs-"));
@@ -72,6 +72,30 @@ describe("collectSourceFiles", () => {
 		expect(files).toHaveLength(1);
 		expect(files[0]!.path).toBe("src/small.ts");
 		rmSync(dir, { recursive: true });
+	});
+
+	it("honors extra ignore names (the monitor's VCQA_IGNORE list)", () => {
+		const dir = makeProject({
+			"src/app.ts": "export const x = 1;",
+			"src/fixtures/big.ts": "export const y = 2;",
+			"generated/g.ts": "export const z = 3;",
+		});
+		setGlobalIgnoreNames(["fixtures", "generated"]);
+		try {
+			const files = collectSourceFiles(dir);
+			expect(files.map((f) => f.path)).toEqual(["src/app.ts"]);
+		} finally {
+			setGlobalIgnoreNames([]); // reset module state so other tests are unaffected
+			rmSync(dir, { recursive: true });
+		}
+	});
+});
+
+describe("readEnvIgnoreNames", () => {
+	it("splits on commas/whitespace, trims, dedupes, and tolerates empty/undefined", () => {
+		expect(readEnvIgnoreNames("node_modules, .wrangler\n dist  dist")).toEqual(["node_modules", ".wrangler", "dist"]);
+		expect(readEnvIgnoreNames("")).toEqual([]);
+		expect(readEnvIgnoreNames(undefined)).toEqual([]);
 	});
 });
 
