@@ -96,7 +96,7 @@ src/
     └── components.ts   # HTML escape, file links, grade/priority colors
 ```
 
-## 25 Checks across 7 categories
+## 34 Checks across 7 categories
 
 Weights sum to 100 (Pro checks have weight 0).
 
