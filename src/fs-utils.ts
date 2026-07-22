@@ -40,6 +40,7 @@ const SKIP_DIRS = new Set([
 	".astro",
 	".cache",
 	".parcel-cache",
+	".provision",
 ]);
 const CODE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".dart", ".vue", ".svelte"]);
 const ALL_EXTS = new Set([...CODE_EXTS, ".json", ".env", ".yaml", ".yml", ".toml"]);
@@ -205,6 +206,10 @@ function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>, se
 			if (lstatSync(full).isSymbolicLink()) continue;
 			const stat = statSync(full);
 			if (stat.isDirectory()) {
+				// Hidden/tooling directories are not product source. Keep files intact,
+				// but do not recurse into hidden mirrors/caches/config dirs like
+				// .provision, .github, .claude.
+				if (entry.startsWith(".")) continue;
 				walk(full, cwd, out, exts, seen);
 				continue;
 			}

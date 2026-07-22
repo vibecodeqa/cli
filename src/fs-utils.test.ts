@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+	collectAllFiles,
 	collectSourceFiles,
 	getProductionFiles,
 	getTestFiles,
@@ -69,6 +70,20 @@ describe("collectSourceFiles", () => {
 		const files = collectSourceFiles(dir);
 		expect(files).toHaveLength(1);
 		expect(files[0]!.path).toBe("src/app.ts");
+		rmSync(dir, { recursive: true });
+	});
+
+	it("skips hidden directories in source and all-file scans", () => {
+		const dir = makeProject({
+			"src/app.ts": "export const x = 1;",
+			".provision/demo/src/app.ts": "export const x = 1;",
+			".claude/worktrees/copy.ts": "export const y = 2;",
+			".github/workflows/build.ts": "export const z = 3;",
+		});
+		const sourceFiles = collectSourceFiles(dir);
+		expect(sourceFiles.map((f) => f.path)).toEqual(["src/app.ts"]);
+		const allFiles = collectAllFiles(dir, { extraExts: true });
+		expect(allFiles.map((f) => f.path).sort()).toEqual(["package.json", "src/app.ts"]);
 		rmSync(dir, { recursive: true });
 	});
 
