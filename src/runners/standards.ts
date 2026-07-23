@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
-import { getProductionFiles, readDeps } from "../fs-utils.js";
+import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
@@ -213,22 +213,6 @@ export function runStandards(cwd: string, stack: StackInfo, workspace?: Workspac
 		}
 	}
 
-	// Tailwind: check for inline styles when TW is available
-	if (stack.framework === "react" && readDeps(cwd).tailwindcss) {
-		let inlineStyles = 0;
-		for (const f of files) {
-			if (!f.path.endsWith(".tsx")) continue;
-			const matches = f.content.match(/style=\{\{/g);
-			if (matches) inlineStyles += matches.length;
-		}
-		if (inlineStyles > 10) {
-			issues.push({
-				severity: "warning",
-				message: `${inlineStyles} inline style objects in TSX — prefer Tailwind classes`,
-				rule: "prefer-tailwind",
-			});
-		}
-	}
 
 	const errors = issues.filter((i) => i.severity === "error").length;
 	const warnings = issues.filter((i) => i.severity === "warning").length;

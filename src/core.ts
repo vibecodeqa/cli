@@ -96,8 +96,8 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		{ name: "standards", fn: () => runStandards(resolvedCwd, stack, workspace) },
 		{ name: "complexity", fn: () => runComplexity(resolvedCwd) },
 		{ name: "duplication", fn: () => runDuplication(resolvedCwd) },
-		{ name: "error-handling", fn: () => runErrorHandling(resolvedCwd, stack) },
-		{ name: "react", fn: () => runReact(resolvedCwd, stack) },
+		{ name: "error-handling", fn: () => runErrorHandling(resolvedCwd) },
+		{ name: "react", fn: () => runReact(resolvedCwd) },
 		{ name: "accessibility", fn: () => runAccessibility(resolvedCwd) },
 		{ name: "docs", fn: () => runDocs(resolvedCwd) },
 		{ name: "best-practices", fn: () => runBestPractices(resolvedCwd, workspace) },
@@ -149,6 +149,30 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 			checks.push(skipped);
 			options.onProgress?.(runner.name, skipped, i, total);
 			continue;
+		}
+
+		// Central stack gating: a check either declares appliesTo in CheckMeta or is
+		// stack-blind. Runners must not re-implement this (see CLAUDE.md).
+		const applies = getCheckMeta(runner.name).appliesTo;
+		if (applies) {
+			const langOk = !applies.language || applies.language.includes(stack.language);
+			const fwOk = !applies.framework || applies.framework.includes(stack.framework);
+			if (!langOk || !fwOk) {
+				const parts: string[] = [];
+				if (applies.framework) parts.push(`framework: ${applies.framework.join("/")}`);
+				if (applies.language) parts.push(`language: ${applies.language.join("/")}`);
+				const gated: CheckResult = {
+					name: runner.name,
+					score: 100,
+					grade: "A",
+					details: { skipped: true, reason: `not applicable to this stack (requires ${parts.join(", ")})` },
+					issues: [],
+					duration: 0,
+				};
+				checks.push(gated);
+				options.onProgress?.(runner.name, gated, i, total);
+				continue;
+			}
 		}
 
 		let result: CheckResult;

@@ -3,7 +3,7 @@
  *  This runner catches patterns beyond what the plugin covers. */
 
 import { getProductionFiles, readDeps } from "../fs-utils.js";
-import type { CheckResult, Issue, StackInfo } from "../types.js";
+import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
 /** True when the `.map()` callback starting at line `i` actually returns JSX.
@@ -27,21 +27,12 @@ function mapCallbackReturnsJsx(after: string, lines: string[], i: number): boole
 	return false;
 }
 
-export function runReact(cwd: string, stack: StackInfo): CheckResult {
+export function runReact(cwd: string): CheckResult {
 	const start = Date.now();
 
-	if (stack.framework !== "react") {
-		return {
-			name: "react",
-			score: 100,
-			grade: "A",
-			details: { skipped: true, reason: "not a React project" },
-			issues: [],
-			duration: Date.now() - start,
-		};
-	}
-
-	const files = getProductionFiles(cwd).filter((f) => f.ext === ".tsx" || f.ext === ".jsx");
+	// Stack gating is central (core.ts, via CheckMeta.appliesTo) — no framework check here.
+	const allFiles = getProductionFiles(cwd);
+	const files = allFiles.filter((f) => f.ext === ".tsx" || f.ext === ".jsx");
 	if (files.length === 0) {
 		return {
 			name: "react",
@@ -197,12 +188,39 @@ export function runReact(cwd: string, stack: StackInfo): CheckResult {
 		});
 	}
 
+	// Error Boundary presence (moved here from error-handling — React-owned concern).
+	// Flat 5-point penalty, matching its historical weight; kept out of warnPenalty.
+	const hasErrorBoundary = allFiles.some(
+		(f) => f.content.includes("componentDidCatch") || f.content.includes("ErrorBoundary"),
+	);
+
+	// Tailwind: inline style objects when TW is available (moved from standards).
+	let inlineStyles = 0;
+	if (deps.tailwindcss) {
+		for (const f of files) {
+			if (!f.path.endsWith(".tsx")) continue;
+			const matches = f.content.match(/style=\{\{/g);
+			if (matches) inlineStyles += matches.length;
+		}
+		if (inlineStyles > 10) {
+			issues.push({
+				severity: "warning",
+				message: `${inlineStyles} inline style objects in TSX — prefer Tailwind classes`,
+				rule: "prefer-tailwind",
+			});
+		}
+	}
+
 	const errors = issues.filter((i) => i.severity === "error").length;
 	const warnings = issues.filter((i) => i.severity === "warning").length;
 	const totalFiles = files.length || 1;
 	const errorPenalty = Math.min(50, (errors / totalFiles) * 200);
 	const warnPenalty = Math.min(30, (warnings / totalFiles) * 80);
-	const score = Math.max(0, Math.min(100, Math.round(100 - errorPenalty - warnPenalty)));
+	const boundaryPenalty = hasErrorBoundary ? 0 : 5;
+	if (!hasErrorBoundary && files.some((f) => f.ext === ".tsx")) {
+		issues.push({ severity: "warning", message: "React project with no Error Boundary", rule: "no-error-boundary" });
+	}
+	const score = Math.max(0, Math.min(100, Math.round(100 - errorPenalty - warnPenalty - boundaryPenalty)));
 
 	return {
 		name: "react",
@@ -217,6 +235,8 @@ export function runReact(cwd: string, stack: StackInfo): CheckResult {
 			inlineHandlers,
 			effectNoDeps,
 			domManipulation,
+			hasErrorBoundary,
+			inlineStyles,
 			suggestion: !hasHooksPlugin ? "Install eslint-plugin-react-hooks for deeper React analysis: pnpm add -D eslint-plugin-react-hooks" : undefined,
 		},
 		issues,

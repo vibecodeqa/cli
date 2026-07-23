@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.45.0 (2026-07-23)
+
+### Declarative stack gating (appliesTo)
+- **Added**: checks now declare which stacks they apply to via `CheckMeta.appliesTo` (from `@vibecodeqa/schema@0.2.0`); the scan core gates centrally and emits a standard skipped result (`not applicable to this stack`). First gated check: `react`.
+- **Changed**: React-specific logic evicted from generic checks — the Error Boundary warning + flat 5-point penalty moved from `error-handling` into `react`, and the Tailwind inline-style warning moved from `standards` into `react`. Rule going forward: a check is either stack-gated or stack-blind, never stack-branching inside.
+- **Score movement**: React projects without an Error Boundary — `error-handling` rises by up to 5, `react` drops by 5; composite impact is small (react weight 3 vs error-handling 3). React+Tailwind projects with >10 inline styles shift one warning from `standards` to `react`.
+- **Changed**: cli now consumes `@vibecodeqa/schema` ^0.2.0 (shared contract package).
+
 ## 0.44.5 (2026-07-09)
 
 ### Runner crash + false-positive fixes

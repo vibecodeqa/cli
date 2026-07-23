@@ -51,7 +51,7 @@ src/
 ├── delta.ts            # Delta report: computeDelta(before, after), formatDeltaMarkdown
 ├── types.ts            # CheckResult, Issue, VibeReport, StackInfo, WorkspaceInfo
 ├── score.ts            # Weighted composite score from check-meta weights
-├── check-meta.ts       # Metadata for all 34 checks (weight, description, deeperTools)
+├── check-meta.ts       # Re-export shim → @vibecodeqa/schema (weight, description, appliesTo)
 ├── detect.ts           # Auto-detect stack + workspace (monorepo, melos, turborepo, nx)
 ├── fs-utils.ts         # File walker (symlink-safe, SFC extraction, global srcRoots)
 ├── trend.ts            # Trend comparison + terminal sparkline
@@ -63,7 +63,7 @@ src/
 │   ├── type-safety.ts  # as any, @ts-ignore, dynamic (Dart)
 │   ├── standards.ts    # Code smells, naming, large files
 │   ├── error-handling.ts  # Empty catch, floating promises, JSON.parse, infinite loops
-│   ├── react.ts        # Hooks rules, missing keys (skips when eslint plugin installed)
+│   ├── react.ts        # Hooks rules, missing keys, Error Boundary, Tailwind inline styles
 │   ├── accessibility.ts   # img alt, click handlers, v-for key (Vue/Svelte SFC aware)
 │   ├── complexity.ts   # Cognitive complexity per function
 │   ├── duplication.ts  # jscpd CLI (opt-in) → @jscpd/core engine over our own tokenizer (maximal clones)
@@ -95,6 +95,16 @@ src/
     ├── styles.ts       # All CSS
     └── components.ts   # HTML escape, file links, grade/priority colors
 ```
+
+## Stack gating rule (enforced in review)
+
+A check is either **stack-gated** (declares `appliesTo` in its CheckMeta — language
+and/or framework lists; the scan core in `core.ts` skips it centrally with a standard
+"not applicable" result) or **stack-blind** (never mentions a framework). A
+`stack.framework === ...` branch inside a generic runner is a rejected diff — move the
+logic into the framework's own check (see `react.ts`) or gate the whole check.
+Stack-*adaptive* behavior driven by detection (e.g. `structure` requiring `pubspec.yaml`
+vs `package.json` by language) is fine; framework special-casing is not.
 
 ## 34 Checks across 7 categories
 

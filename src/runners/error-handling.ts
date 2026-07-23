@@ -1,10 +1,10 @@
 /** Error handling check — detects poor error handling patterns. */
 
 import { getProductionFiles } from "../fs-utils.js";
-import type { CheckResult, Issue, StackInfo } from "../types.js";
+import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
-export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
+export function runErrorHandling(cwd: string): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 	const files = getProductionFiles(cwd);
@@ -193,28 +193,14 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 		}
 	}
 
-	let hasErrorBoundary = false;
-	if (stack.framework === "react") {
-		for (const f of files) {
-			if (f.content.includes("componentDidCatch") || f.content.includes("ErrorBoundary")) {
-				hasErrorBoundary = true;
-				break;
-			}
-		}
-		if (!hasErrorBoundary && files.some((f) => f.ext === ".tsx")) {
-			issues.push({ severity: "warning", message: "React project with no Error Boundary", rule: "no-error-boundary" });
-		}
-	}
-
 	const totalFiles = files.length || 1;
 	const emptyPenalty = Math.min(40, (emptyCatch / totalFiles) * 200);
 	const throwPenalty = Math.min(15, (throwString / totalFiles) * 100);
 	const promisePenalty = Math.min(15, ((floatingPromises + catchIgnored) / totalFiles) * 100);
 	const runtimePenalty = Math.min(15, ((jsonParseUnsafe + infiniteLoops + processExit) / totalFiles) * 100);
-	const boundaryPenalty = stack.framework === "react" && !hasErrorBoundary ? 5 : 0;
 	const score = Math.max(
 		0,
-		Math.min(100, Math.round(100 - emptyPenalty - throwPenalty - promisePenalty - runtimePenalty - boundaryPenalty)),
+		Math.min(100, Math.round(100 - emptyPenalty - throwPenalty - promisePenalty - runtimePenalty)),
 	);
 
 	return {
@@ -227,7 +213,6 @@ export function runErrorHandling(cwd: string, stack: StackInfo): CheckResult {
 			floatingPromises,
 			jsonParseUnsafe,
 			infiniteLoops,
-			hasErrorBoundary: stack.framework === "react" ? hasErrorBoundary : "n/a",
 			tool: "built-in",
 		},
 		issues,

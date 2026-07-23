@@ -2,7 +2,6 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { StackInfo } from "../types.js";
 import { runReact } from "./react.js";
 
 function makeProject(files: Record<string, string>): string {
@@ -17,28 +16,33 @@ function makeProject(files: Record<string, string>): string {
 	return dir;
 }
 
-const reactStack: StackInfo = {
-	language: "typescript",
-	framework: "react",
-	bundler: "vite",
-	testRunner: "vitest",
-	linter: "biome",
-	packageManager: "pnpm",
-};
-const nodeStack: StackInfo = {
-	language: "typescript",
-	framework: "none",
-	bundler: "none",
-	testRunner: "vitest",
-	linter: "biome",
-	packageManager: "pnpm",
-};
 
 describe("runReact", () => {
-	it("skips for non-React projects", () => {
-		const result = runReact("/tmp/empty", nodeStack);
+	it("skips when there are no JSX/TSX files (framework gating is central, in core.ts)", () => {
+		const dir = makeProject({ "util.ts": "export const x = 1;" });
+		const result = runReact(dir);
 		expect(result.score).toBe(100);
 		expect((result.details as any).skipped).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("warns about missing Error Boundary (flat 5-point penalty)", () => {
+		const dir = makeProject({ "App.tsx": `export function App() { return <div>hi</div>; }` });
+		const result = runReact(dir);
+		expect(result.issues.some((i) => i.rule === "no-error-boundary")).toBe(true);
+		expect((result.details as any).hasErrorBoundary).toBe(false);
+		expect(result.score).toBe(95);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("no boundary warning when an ErrorBoundary exists", () => {
+		const dir = makeProject({
+			"App.tsx": `export function App() { return <div>hi</div>; }`,
+			"Boundary.tsx": `export class ErrorBoundary extends React.Component { componentDidCatch() {} render() { return this.props.children; } }`,
+		});
+		const result = runReact(dir);
+		expect(result.issues.some((i) => i.rule === "no-error-boundary")).toBe(false);
+		rmSync(dir, { recursive: true });
 	});
 
 	it("detects missing keys in .map()", () => {
@@ -48,7 +52,7 @@ describe("runReact", () => {
   return <div>{items.map(i => <span>{i}</span>)}</div>;
 }`,
 		});
-		const result = runReact(dir, reactStack);
+		const result = runReact(dir);
 		expect(result.issues.some((i) => i.rule === "missing-key")).toBe(true);
 		rmSync(dir, { recursive: true });
 	});
@@ -59,7 +63,7 @@ describe("runReact", () => {
   return <div>{items.map((item, i) => <span key={i}>{item}</span>)}</div>;
 }`,
 		});
-		const result = runReact(dir, reactStack);
+		const result = runReact(dir);
 		expect(result.issues.some((i) => i.rule === "index-key")).toBe(true);
 		rmSync(dir, { recursive: true });
 	});
@@ -71,8 +75,9 @@ export function App() {
   const [count, setCount] = useState(0);
   return <button onClick={() => setCount(c => c + 1)}>{count}</button>;
 }`,
+			"ErrorBoundary.tsx": `export class ErrorBoundary extends React.Component { componentDidCatch() {} render() { return this.props.children; } }`,
 		});
-		const result = runReact(dir, reactStack);
+		const result = runReact(dir);
 		expect(result.score).toBe(100);
 		rmSync(dir, { recursive: true });
 	});
@@ -89,7 +94,7 @@ export const objs = [{ name: "a" }].map((i) => ({ check: i.name }));
 export const chars = [1, 2, 3].map((v) => \`#\${v}\`).join("");
 export const cmp = [1, 2].map((v) => (v < 2 ? "lo" : "hi"));`,
 		});
-		const result = runReact(dir, reactStack);
+		const result = runReact(dir);
 		expect(result.issues.some((i) => i.rule === "missing-key")).toBe(false);
 		rmSync(dir, { recursive: true });
 	});
@@ -103,7 +108,7 @@ export function View({ items }: { items: string[] }) {
   return <ul>{items.map((x) => <li key={x}>{x}</li>)}</ul>;
 }`,
 		});
-		const result = runReact(dir, reactStack);
+		const result = runReact(dir);
 		expect(result.issues.some((i) => i.rule === "missing-key")).toBe(false);
 		rmSync(dir, { recursive: true });
 	});
@@ -112,7 +117,7 @@ export function View({ items }: { items: string[] }) {
 		const dir = makeProject({
 			"good.tsx": `export const L = (items: string[]) => <ul>{items.map((x) => <li key={x}>{x}</li>)}</ul>;`,
 		});
-		const result = runReact(dir, reactStack);
+		const result = runReact(dir);
 		expect(result.issues.some((i) => i.rule === "missing-key")).toBe(false);
 		rmSync(dir, { recursive: true });
 	});
@@ -127,7 +132,7 @@ export function View({ items }: { items: string[] }) {
   </table>
 );`,
 		});
-		const result = runReact(dir, reactStack);
+		const result = runReact(dir);
 		expect(result.issues.some((i) => i.rule === "missing-key")).toBe(true);
 		rmSync(dir, { recursive: true });
 	});
