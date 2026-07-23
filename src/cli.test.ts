@@ -1,8 +1,8 @@
 import { execSync } from "node:child_process";
-import { CHECK_META } from "./check-meta.js";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { CHECK_META } from "./check-meta.js";
 
 const CLI = join(import.meta.dirname!, "..", "dist", "cli.js");
 const TMP = join(import.meta.dirname!, "__test_cli__");
