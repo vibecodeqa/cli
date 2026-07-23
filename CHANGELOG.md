@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.48.0 (2026-07-24)
+
+### New check: sqlite-d1 (advisory, component-gated)
+- **Added**: audits SQLite/D1 data access and migration discipline. Injection findings are tiered by interpolation *position*, which is what makes them trustworthy: a **value** position (`= ${x}`, `'${x}'`, inside a string literal) is an error; a **table/column identifier** (`FROM ${x}`) and a spliced **SQL fragment** (`${scopeClause}`) are warnings ("safe if it comes from constants"); the canonical `IN (${placeholders})` idiom and SCREAMING_CASE constants are quiet. Also: `?` placeholders with no `.bind()` (statement-reuse and batch idioms recognised), queries inside loops (N+1 — excluding statements built *for* `batch()`), `SELECT *` (info), duplicate/unnumbered migration files, and `DROP TABLE` without `IF EXISTS`.
+- **Scoring** is proportional to query volume, so a large well-written codebase is not punished for scale.
+
+### Fixed — hidden directories are no longer scanned
+- **Fixed**: the file walker recursed into hidden directories, so deploy mirrors and tooling copies (`.deploy/`, `.provision/`, `.claude/`) were scanned as if they were source. On a real project this **tripled** the file set and inflated every check — duplication, complexity, security, secrets. Hidden dirs are now skipped (files at the root are unaffected). This fix existed on an unmerged branch since 2026-07-22 and is now on main.
+
 ## 0.47.1 (2026-07-23)
 
 ### cloudflare-workers: false-positive fixes from first dogfood run

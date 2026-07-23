@@ -40,6 +40,7 @@ import { runPerformance } from "./runners/performance.js";
 import { runReact } from "./runners/react.js";
 import { runSecrets } from "./runners/secrets.js";
 import { runSecurity } from "./runners/security.js";
+import { runSqliteD1 } from "./runners/sqlite-d1.js";
 import { runStandards } from "./runners/standards.js";
 import { runStructure } from "./runners/structure.js";
 import { runStyling } from "./runners/styling.js";
@@ -113,6 +114,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		{ name: "performance", fn: () => runPerformance(resolvedCwd) },
 		{ name: "container-health", fn: () => runContainerHealth(resolvedCwd) },
 		{ name: "cloudflare-workers", fn: () => runCloudflareWorkers(resolvedCwd, workspace) },
+		{ name: "sqlite-d1", fn: () => runSqliteD1(resolvedCwd, workspace) },
 		{ name: "confusion", fn: () => runConfusion(resolvedCwd) },
 		{ name: "context", fn: () => runContext(resolvedCwd) },
 		{ name: "doc-coherence", fn: () => runDocCoherence(resolvedCwd) },

@@ -106,7 +106,7 @@ logic into the framework's own check (see `react.ts`) or gate the whole check.
 Stack-*adaptive* behavior driven by detection (e.g. `structure` requiring `pubspec.yaml`
 vs `package.json` by language) is fine; framework special-casing is not.
 
-## 35 Checks across 7 categories
+## 36 Checks across 7 categories
 
 Weights sum to 100 (Pro checks have weight 0).
 
@@ -116,7 +116,7 @@ Weights sum to 100 (Pro checks have weight 0).
 | **Quality** | complexity, duplication, error-handling, react, accessibility, docs, best-practices, frontend-health, env-validation, git-hygiene, memory-safety, styling, html-quality, container-health, cloudflare-workers | 5+3+3+3+4+3+3+2+1+1+1+1+0+0+0 = 30 |
 | **Testing** | testing | 13 |
 | **Architecture** | architecture, performance | 5+4 = 9 |
-| **Security** | secrets, security, dependencies | 6+5+5 = 16 |
+| **Security** | secrets, security, dependencies, sqlite-d1 | 6+5+5+0 = 16 |
 | **AI Readiness** | confusion, context | 4+5 = 9 |
 | **AI Analysis** | doc-coherence, code-coherence, comment-staleness, dead-patterns, test-audit, file-cohesion, design-consistency | all 0 (PRO) |
 
