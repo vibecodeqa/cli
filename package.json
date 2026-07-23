@@ -1,0 +1,68 @@
+{
+	"name": "@vibecodeqa/cli",
+	"version": "0.47.1",
+	"description": "Code health scanner for the AI coding era. Zero config, full report.",
+	"type": "module",
+	"bin": {
+		"vcqa": "./dist/cli.js",
+		"vibe-check": "./dist/cli.js"
+	},
+	"exports": {
+		".": "./dist/cli.js",
+		"./core": "./dist/core.js"
+	},
+	"files": [
+		"dist",
+		"LICENSE",
+		"README.md"
+	],
+	"scripts": {
+		"build": "tsc",
+		"dev": "tsc --watch",
+		"test": "vitest run",
+		"lint": "biome check src/",
+		"prepublishOnly": "tsc && chmod +x dist/cli.js"
+	},
+	"keywords": [
+		"code-quality",
+		"code-health",
+		"lint",
+		"coverage",
+		"complexity",
+		"duplication",
+		"security",
+		"architecture",
+		"llm",
+		"ai",
+		"vibe-coding",
+		"typescript",
+		"react",
+		"vite"
+	],
+	"author": "VibeCode QA <hello@vibecodeqa.online>",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/vibecodeqa/cli"
+	},
+	"homepage": "https://vibecodeqa.online",
+	"engines": {
+		"node": ">=20"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.15",
+		"@types/node": "^25.8.0",
+		"@types/react": "^18.3.29",
+		"typescript": "^5.8.3",
+		"vitest": "^4.1.6"
+	},
+	"dependencies": {
+		"@vibecodeqa/schema": "^0.3.1",
+		"@jscpd/core": "^4.2.4",
+		"@secretlint/core": "^13.0.2",
+		"@secretlint/secretlint-rule-preset-recommend": "^13.0.2",
+		"dependency-cruiser": "^17.4.3",
+		"ink": "^5.2.1",
+		"react": "^18.3.1"
+	}
+}
