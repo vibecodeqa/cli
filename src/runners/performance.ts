@@ -200,7 +200,8 @@ export function runPerformance(cwd: string): CheckResult {
 			issues.push({ severity: "info", message: "No web app manifest — can't install as PWA or add to home screen", rule: "no-manifest" });
 		}
 		const swPaths = ["public/sw.js", "public/service-worker.js", "src/service-worker.ts", "src/sw.ts"];
-		const hasSW = swPaths.some((p) => existsSync(join(cwd, p))) || !!(deps["workbox-webpack-plugin"] || deps["vite-plugin-pwa"] || deps["next-pwa"]);
+		const hasSW =
+			swPaths.some((p) => existsSync(join(cwd, p))) || !!(deps["workbox-webpack-plugin"] || deps["vite-plugin-pwa"] || deps["next-pwa"]);
 		if (!hasSW) {
 			issues.push({ severity: "info", message: "No service worker — app won't work offline", rule: "no-service-worker" });
 		}
@@ -214,12 +215,23 @@ export function runPerformance(cwd: string): CheckResult {
 			const line = lines[i];
 			// !important overuse
 			if (/!important/.test(line)) {
-				issues.push({ severity: "info", message: "!important — specificity escape hatch, usually a sign of CSS architecture issues", file: f.path, line: i + 1, rule: "css-important" });
+				issues.push({
+					severity: "info",
+					message: "!important — specificity escape hatch, usually a sign of CSS architecture issues",
+					file: f.path,
+					line: i + 1,
+					rule: "css-important",
+				});
 			}
 		}
 		// No media queries in CSS with fixed layouts
 		if (f.content.length > 500 && !/@media/.test(f.content) && /width:\s*\d{3,}px/.test(f.content)) {
-			issues.push({ severity: "info", message: "CSS with fixed widths but no @media queries — likely not responsive", file: f.path, rule: "no-media-queries" });
+			issues.push({
+				severity: "info",
+				message: "CSS with fixed widths but no @media queries — likely not responsive",
+				file: f.path,
+				rule: "no-media-queries",
+			});
 		}
 	}
 

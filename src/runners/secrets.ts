@@ -86,7 +86,8 @@ function scanPatterns(files: ScanFile[], add: (iss: Issue) => void): void {
 			const line = lines[i];
 			if (line.trim().startsWith("//") || line.trim().startsWith("*")) continue;
 			for (const { name, pattern } of SECRET_PATTERNS) {
-				if (pattern.test(line)) add({ severity: "error", message: `Possible ${name}`, file: sf.path, line: i + 1, rule: "secret-detected" });
+				if (pattern.test(line))
+					add({ severity: "error", message: `Possible ${name}`, file: sf.path, line: i + 1, rule: "secret-detected" });
 			}
 		}
 	}
@@ -100,7 +101,13 @@ async function scanSecretlint(files: ScanFile[], add: (iss: Issue) => void): Pro
 				options: { config: SECRETLINT_CONFIG },
 			});
 			for (const m of result.messages) {
-				add({ severity: "error", message: `Possible ${secretlintKind(m)} — remove and rotate`, file: sf.path, line: m.loc?.start?.line ?? 1, rule: "secret-detected" });
+				add({
+					severity: "error",
+					message: `Possible ${secretlintKind(m)} — remove and rotate`,
+					file: sf.path,
+					line: m.loc?.start?.line ?? 1,
+					rule: "secret-detected",
+				});
 			}
 		} catch {
 			/* unparseable file — skip */

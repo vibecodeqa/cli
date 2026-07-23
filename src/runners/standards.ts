@@ -66,7 +66,9 @@ export function runStandards(cwd: string, stack: StackInfo, workspace?: Workspac
 			const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
 			isCLI = !!pkg.bin;
 		}
-	} catch { /* ignore */ }
+	} catch {
+		/* ignore */
+	}
 
 	// Collect source files
 	const files = getProductionFiles(cwd);
@@ -125,12 +127,22 @@ export function runStandards(cwd: string, stack: StackInfo, workspace?: Workspac
 			largeFiles++;
 			const excess = lines - SOFT_LIMIT;
 			fileSizePenalty += (excess / 100) ** 2;
-			issues.push({ severity: "error", message: `${lines} lines — split this file (exponential penalty above ${SOFT_LIMIT})`, file: f.path, rule: "large-file" });
+			issues.push({
+				severity: "error",
+				message: `${lines} lines — split this file (exponential penalty above ${SOFT_LIMIT})`,
+				file: f.path,
+				rule: "large-file",
+			});
 		} else if (lines > SOFT_LIMIT) {
 			largeFiles++;
 			const excess = lines - SOFT_LIMIT;
 			fileSizePenalty += (excess / 100) ** 2;
-			issues.push({ severity: "warning", message: `${lines} lines — consider splitting (penalty grows exponentially above ${SOFT_LIMIT})`, file: f.path, rule: "large-file" });
+			issues.push({
+				severity: "warning",
+				message: `${lines} lines — consider splitting (penalty grows exponentially above ${SOFT_LIMIT})`,
+				file: f.path,
+				rule: "large-file",
+			});
 		}
 	}
 
@@ -212,7 +224,6 @@ export function runStandards(cwd: string, stack: StackInfo, workspace?: Workspac
 			}
 		}
 	}
-
 
 	const errors = issues.filter((i) => i.severity === "error").length;
 	const warnings = issues.filter((i) => i.severity === "warning").length;

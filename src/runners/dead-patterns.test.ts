@@ -7,7 +7,18 @@ vi.mock("node:fs", async () => {
 
 function mockFiles(mod: typeof import("../fs-utils.js"), files: { path: string; content: string }[]) {
 	vi.spyOn(mod, "getProductionFiles").mockReturnValue(
-		files.map((f) => ({ path: f.path, fullPath: `/tmp/${f.path}`, base: f.path.split("/").pop()!.replace(/\.\w+$/, ""), ext: ".ts", content: f.content, lines: f.content.split("\n").length, isTest: false })),
+		files.map((f) => ({
+			path: f.path,
+			fullPath: `/tmp/${f.path}`,
+			base: f.path
+				.split("/")
+				.pop()!
+				.replace(/\.\w+$/, ""),
+			ext: ".ts",
+			content: f.content,
+			lines: f.content.split("\n").length,
+			isTest: false,
+		})),
 	);
 }
 
@@ -29,12 +40,14 @@ describe("dead-patterns local heuristics", () => {
 		const { runDeadPatterns } = await import("./dead-patterns.js");
 		process.env.VCQA_PRO_KEY = "test-key";
 		const mod = await import("../fs-utils.js");
-		mockFiles(mod, [{
-			path: "src/db.ts",
-			content: `const queryOld = () => {};
+		mockFiles(mod, [
+			{
+				path: "src/db.ts",
+				content: `const queryOld = () => {};
 const query_backup = () => {};
 interface ConfigV1 { x: number; }`,
-		}]);
+			},
+		]);
 
 		const result = await runDeadPatterns("/tmp");
 		const legacy = result.issues.filter((i) => i.rule === "legacy-naming");
@@ -47,10 +60,12 @@ interface ConfigV1 { x: number; }`,
 		const { runDeadPatterns } = await import("./dead-patterns.js");
 		process.env.VCQA_PRO_KEY = "test-key";
 		const mod = await import("../fs-utils.js");
-		mockFiles(mod, [{
-			path: "src/config.ts",
-			content: `const USE_NEW_AUTH = true;\nif (USE_NEW_AUTH) { doNew(); } else { doOld(); }`,
-		}]);
+		mockFiles(mod, [
+			{
+				path: "src/config.ts",
+				content: `const USE_NEW_AUTH = true;\nif (USE_NEW_AUTH) { doNew(); } else { doOld(); }`,
+			},
+		]);
 
 		const result = await runDeadPatterns("/tmp");
 		const flags = result.issues.filter((i) => i.rule === "hardcoded-flag");
@@ -64,10 +79,12 @@ interface ConfigV1 { x: number; }`,
 		const { runDeadPatterns } = await import("./dead-patterns.js");
 		process.env.VCQA_PRO_KEY = "test-key";
 		const mod = await import("../fs-utils.js");
-		mockFiles(mod, [{
-			path: "src/config.ts",
-			content: `const ENABLE_LOGS = true;\nconsole.log(ENABLE_LOGS);`,
-		}]);
+		mockFiles(mod, [
+			{
+				path: "src/config.ts",
+				content: `const ENABLE_LOGS = true;\nconsole.log(ENABLE_LOGS);`,
+			},
+		]);
 
 		const result = await runDeadPatterns("/tmp");
 		expect(result.issues.filter((i) => i.rule === "hardcoded-flag")).toHaveLength(0);
@@ -79,9 +96,10 @@ interface ConfigV1 { x: number; }`,
 		const { runDeadPatterns } = await import("./dead-patterns.js");
 		process.env.VCQA_PRO_KEY = "test-key";
 		const mod = await import("../fs-utils.js");
-		mockFiles(mod, [{
-			path: "src/api.ts",
-			content: `function getData() {
+		mockFiles(mod, [
+			{
+				path: "src/api.ts",
+				content: `function getData() {
   try {
     return newApi();
   }
@@ -93,7 +111,8 @@ interface ConfigV1 { x: number; }`,
     return result;
   }
 }`,
-		}]);
+			},
+		]);
 
 		const result = await runDeadPatterns("/tmp");
 		const fallbacks = result.issues.filter((i) => i.rule === "fallback-catch");
@@ -106,10 +125,12 @@ interface ConfigV1 { x: number; }`,
 		const { runDeadPatterns } = await import("./dead-patterns.js");
 		process.env.VCQA_PRO_KEY = "test-key";
 		const mod = await import("../fs-utils.js");
-		mockFiles(mod, [{
-			path: "src/api.ts",
-			content: `try { doThing(); } catch (e) { console.error(e); }`,
-		}]);
+		mockFiles(mod, [
+			{
+				path: "src/api.ts",
+				content: `try { doThing(); } catch (e) { console.error(e); }`,
+			},
+		]);
 
 		const result = await runDeadPatterns("/tmp");
 		expect(result.issues.filter((i) => i.rule === "fallback-catch")).toHaveLength(0);

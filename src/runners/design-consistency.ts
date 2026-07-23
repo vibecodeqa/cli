@@ -35,7 +35,8 @@ export async function runDesignConsistency(cwd: string): Promise<CheckResult> {
 				premium: true,
 				comingSoon: true,
 				reason: "Set VCQA_PRO_KEY to enable design consistency analysis",
-				description: "LLM-powered audit of visual consistency — finds components with duplicate styling, inconsistent spacing scales, and missing component extraction opportunities.",
+				description:
+					"LLM-powered audit of visual consistency — finds components with duplicate styling, inconsistent spacing scales, and missing component extraction opportunities.",
 			},
 			issues: [],
 			duration: Date.now() - start,
@@ -78,9 +79,7 @@ export async function runDesignConsistency(cwd: string): Promise<CheckResult> {
 	}
 
 	// Extract styling snippets from top components (by size, most likely to have styling)
-	const candidates = componentFiles
-		.sort((a, b) => b.content.length - a.content.length)
-		.slice(0, 10);
+	const candidates = componentFiles.sort((a, b) => b.content.length - a.content.length).slice(0, 10);
 
 	const snippets = candidates.map((f) => ({
 		path: f.path,
@@ -104,10 +103,7 @@ export async function runDesignConsistency(cwd: string): Promise<CheckResult> {
 	};
 }
 
-async function analyzeDesign(
-	files: { path: string; content: string }[],
-	proKey: string,
-): Promise<Issue[]> {
+async function analyzeDesign(files: { path: string; content: string }[], proKey: string): Promise<Issue[]> {
 	try {
 		const res = await fetch("https://api.vibecodeqa.online/api/pro/design-consistency", {
 			method: "POST",
@@ -134,7 +130,9 @@ function loadCache(cwd: string): DesignCache | null {
 			const data = JSON.parse(readFileSync(cachePath, "utf-8"));
 			if (data.version === 1) return data;
 		}
-	} catch { /* corrupt cache */ }
+	} catch {
+		/* corrupt cache */
+	}
 	return null;
 }
 
@@ -143,5 +141,7 @@ function saveCache(cwd: string, cache: DesignCache): void {
 		const dir = join(cwd, ".vibe-check");
 		if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 		writeFileSync(join(dir, "design-consistency-cache.json"), JSON.stringify(cache));
-	} catch { /* write failed */ }
+	} catch {
+		/* write failed */
+	}
 }

@@ -41,11 +41,7 @@ export function runGitHygiene(cwd: string): CheckResult {
 	}
 
 	// 2. Check recent commit message quality (last 20 commits)
-	const { stdout: logOutput, ok: logOk } = run(
-		"git log --oneline -20 --format='%s' 2>/dev/null",
-		cwd,
-		10_000,
-	);
+	const { stdout: logOutput, ok: logOk } = run("git log --oneline -20 --format='%s' 2>/dev/null", cwd, 10_000);
 	if (logOk && logOutput.trim()) {
 		const messages = logOutput.trim().split("\n").filter(Boolean);
 		let poorMessages = 0;
@@ -72,7 +68,7 @@ export function runGitHygiene(cwd: string): CheckResult {
 
 	// 3. Check for large files tracked in git
 	const { stdout: lsOutput, ok: lsOk } = run(
-		"git ls-files -z 2>/dev/null | xargs -0 -I{} sh -c 'wc -c < \"{}\" | tr -d \" \" | xargs -I@ echo @\\t{}' 2>/dev/null | sort -rn | head -5",
+		'git ls-files -z 2>/dev/null | xargs -0 -I{} sh -c \'wc -c < "{}" | tr -d " " | xargs -I@ echo @\\t{}\' 2>/dev/null | sort -rn | head -5',
 		cwd,
 		15_000,
 	);
@@ -82,7 +78,8 @@ export function runGitHygiene(cwd: string): CheckResult {
 			if (parts.length < 2) continue;
 			const size = parseInt(parts[0], 10);
 			const file = parts[1];
-			if (size > 5_000_000) { // 5MB
+			if (size > 5_000_000) {
+				// 5MB
 				issues.push({
 					severity: "warning",
 					message: `Large file tracked in git: ${file} (${(size / 1_000_000).toFixed(1)}MB) — consider Git LFS`,

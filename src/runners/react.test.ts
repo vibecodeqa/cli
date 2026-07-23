@@ -16,7 +16,6 @@ function makeProject(files: Record<string, string>): string {
 	return dir;
 }
 
-
 describe("runReact", () => {
 	it("skips when there are no JSX/TSX files (framework gating is central, in core.ts)", () => {
 		const dir = makeProject({ "util.ts": "export const x = 1;" });

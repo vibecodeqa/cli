@@ -31,7 +31,8 @@ function tryStylelint(cwd: string): Issue[] | null {
 	if (!deps.stylelint) return null;
 
 	// Check for config
-	const hasConfig = existsSync(join(cwd, ".stylelintrc.json")) ||
+	const hasConfig =
+		existsSync(join(cwd, ".stylelintrc.json")) ||
 		existsSync(join(cwd, ".stylelintrc.js")) ||
 		existsSync(join(cwd, ".stylelintrc.yml")) ||
 		existsSync(join(cwd, "stylelint.config.js")) ||
@@ -45,7 +46,7 @@ function tryStylelint(cwd: string): Issue[] | null {
 	}
 
 	const results = runJSON<StylelintResult[]>(
-		"npx stylelint --formatter json \"**/*.{css,scss}\" --ignore-pattern node_modules 2>/dev/null || true",
+		'npx stylelint --formatter json "**/*.{css,scss}" --ignore-pattern node_modules 2>/dev/null || true',
 		cwd,
 		30_000,
 	);
@@ -54,7 +55,7 @@ function tryStylelint(cwd: string): Issue[] | null {
 
 	const issues: Issue[] = [];
 	for (const file of results) {
-		const relPath = file.source.replace(cwd + "/", "").replace(cwd + "\\", "");
+		const relPath = file.source.replace(`${cwd}/`, "").replace(`${cwd}\\`, "");
 		for (const w of file.warnings) {
 			issues.push({
 				severity: w.severity === "error" ? "error" : "warning",
@@ -107,7 +108,8 @@ export function runStyling(cwd: string): CheckResult {
 
 	// ── Phase 2: Cross-file analysis (always runs — Stylelint can't do this) ──
 	const approaches = new Map<string, number>();
-	const hasTailwind = existsSync(join(cwd, "tailwind.config.js")) ||
+	const hasTailwind =
+		existsSync(join(cwd, "tailwind.config.js")) ||
 		existsSync(join(cwd, "tailwind.config.ts")) ||
 		existsSync(join(cwd, "tailwind.config.mjs")) ||
 		!!deps.tailwindcss;
@@ -163,9 +165,7 @@ export function runStyling(cwd: string): CheckResult {
 
 			// Spacing values (cross-file consistency)
 			if (SPACING_PROP.test(line)) {
-				let match: RegExpExecArray | null;
-				MAGIC_PX.lastIndex = 0;
-				while ((match = MAGIC_PX.exec(line)) !== null) {
+				for (const match of line.matchAll(MAGIC_PX)) {
 					const px = parseInt(match[1], 10);
 					if (px > 2) spacingValues.set(px, (spacingValues.get(px) || 0) + 1);
 				}
@@ -210,19 +210,31 @@ export function runStyling(cwd: string): CheckResult {
 
 	// Hardcoded colors summary
 	if (hardcodedColorCount > 5) {
-		issues.push({ severity: "warning", message: `${hardcodedColorCount} hardcoded colors in JSX — define a color palette`, rule: "hardcoded-color" });
+		issues.push({
+			severity: "warning",
+			message: `${hardcodedColorCount} hardcoded colors in JSX — define a color palette`,
+			rule: "hardcoded-color",
+		});
 	}
 
 	// !important (only if we counted, not Stylelint)
 	if (!stylelintIssues && importantCount > 3) {
-		issues.push({ severity: "warning", message: `${importantCount} uses of !important — indicates specificity wars`, rule: "important-abuse" });
+		issues.push({
+			severity: "warning",
+			message: `${importantCount} uses of !important — indicates specificity wars`,
+			rule: "important-abuse",
+		});
 	}
 
 	// Inconsistent spacing
 	const values = [...spacingValues.keys()].sort((a, b) => a - b);
 	const notOnScale = values.filter((v) => v % 4 !== 0 && v !== 1 && v !== 2);
 	if (notOnScale.length > 3) {
-		issues.push({ severity: "warning", message: `Inconsistent spacing: ${notOnScale.slice(0, 6).join(", ")}px — use a 4px/8px scale`, rule: "inconsistent-spacing" });
+		issues.push({
+			severity: "warning",
+			message: `Inconsistent spacing: ${notOnScale.slice(0, 6).join(", ")}px — use a 4px/8px scale`,
+			rule: "inconsistent-spacing",
+		});
 	}
 
 	// Duplicate Tailwind strings
@@ -241,7 +253,11 @@ export function runStyling(cwd: string): CheckResult {
 			}
 		}
 		if (dupeCount > 3) {
-			issues.push({ severity: "warning", message: `${dupeCount} duplicated Tailwind class strings — extract shared components`, rule: "duplicate-tailwind" });
+			issues.push({
+				severity: "warning",
+				message: `${dupeCount} duplicated Tailwind class strings — extract shared components`,
+				rule: "duplicate-tailwind",
+			});
 		}
 	}
 
@@ -250,12 +266,20 @@ export function runStyling(cwd: string): CheckResult {
 		let hasThemeExtend = false;
 		for (const cfg of ["tailwind.config.js", "tailwind.config.ts", "tailwind.config.mjs"]) {
 			if (existsSync(join(cwd, cfg))) {
-				try { if (readFileSync(join(cwd, cfg), "utf-8").includes("extend")) hasThemeExtend = true; } catch { /* ignore */ }
+				try {
+					if (readFileSync(join(cwd, cfg), "utf-8").includes("extend")) hasThemeExtend = true;
+				} catch {
+					/* ignore */
+				}
 				break;
 			}
 		}
 		if (!hasThemeExtend) {
-			issues.push({ severity: "info", message: "No theme extension in tailwind.config — consider defining custom colors/spacing", rule: "tailwind-no-theme" });
+			issues.push({
+				severity: "info",
+				message: "No theme extension in tailwind.config — consider defining custom colors/spacing",
+				rule: "tailwind-no-theme",
+			});
 		}
 	}
 
@@ -277,7 +301,9 @@ export function runStyling(cwd: string): CheckResult {
 			importantCount,
 			spacingValues: spacingValues.size,
 			stylelintIssues: stylelintIssues?.length ?? 0,
-			suggestion: !stylelintIssues ? "Install Stylelint for deeper CSS analysis (170+ rules): pnpm add -D stylelint stylelint-config-standard" : undefined,
+			suggestion: !stylelintIssues
+				? "Install Stylelint for deeper CSS analysis (170+ rules): pnpm add -D stylelint stylelint-config-standard"
+				: undefined,
 		},
 		issues,
 		duration: Date.now() - start,
@@ -296,7 +322,11 @@ function scanCssFiles(cwd: string, subdir: string, fn: (content: string) => void
 				const stat = statSync(full);
 				if (stat.isDirectory()) scanCssFiles(cwd, join(subdir, entry), fn);
 				else if (/\.(css|scss)$/.test(entry)) fn(readFileSync(full, "utf-8"));
-			} catch { /* skip */ }
+			} catch {
+				/* skip */
+			}
 		}
-	} catch { /* skip */ }
+	} catch {
+		/* skip */
+	}
 }

@@ -85,9 +85,11 @@ function countPatterns(content: string) {
 
 function findTestFiles(cwd: string, srcRoots?: string[]): TestFile[] {
 	const files: TestFile[] = [];
-	const dirs = srcRoots ? [...srcRoots, "e2e", "playwright"]
-		: existsSync(join(cwd, "src")) ? ["src", "web/src", "lib", "test", "tests", "__tests__", "e2e", "playwright"]
-		: [".", "test", "tests", "__tests__", "e2e", "playwright"];
+	const dirs = srcRoots
+		? [...srcRoots, "e2e", "playwright"]
+		: existsSync(join(cwd, "src"))
+			? ["src", "web/src", "lib", "test", "tests", "__tests__", "e2e", "playwright"]
+			: [".", "test", "tests", "__tests__", "e2e", "playwright"];
 	const seen = new Set<string>();
 	for (const dir of dirs) {
 		const full = join(cwd, dir);

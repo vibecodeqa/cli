@@ -338,7 +338,12 @@ export function runSecurity(cwd: string): CheckResult {
 			const trimmed = line.trim();
 			if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
 			// Skip pattern/config definition lines and string-heavy metadata (prevents false positives on own code)
-			if (/\bpattern\s*:|name:\s*["']|message:\s*["'`]|description:\s*["']|risk:\s*["']|recommendation:\s*["']|rule:\s*["']|severity:\s*["']/.test(trimmed)) continue;
+			if (
+				/\bpattern\s*:|name:\s*["']|message:\s*["'`]|description:\s*["']|risk:\s*["']|recommendation:\s*["']|rule:\s*["']|severity:\s*["']/.test(
+					trimmed,
+				)
+			)
+				continue;
 			// Skip lines that are primarily string content (check-meta descriptions, etc.)
 			if (/^\s*["'`].*["'`][,;]?\s*$/.test(line)) continue;
 			// Skip return statements returning string literals (e.g., fix suggestions mentioning patterns)
@@ -438,7 +443,15 @@ export function runSecurity(cwd: string): CheckResult {
 		name: "security",
 		score,
 		grade: gradeFromScore(score),
-		details: { filesScanned: sourceFiles.length, patterns: issues.length, cweCategories: cwePrefixes.size, errors, warnings, storageAudit, tool },
+		details: {
+			filesScanned: sourceFiles.length,
+			patterns: issues.length,
+			cweCategories: cwePrefixes.size,
+			errors,
+			warnings,
+			storageAudit,
+			tool,
+		},
 		issues,
 		duration: Date.now() - start,
 	};
@@ -468,7 +481,10 @@ function tryEslintPluginSecurity(cwd: string): Issue[] | null {
 	);
 
 	try {
-		const files = JSON.parse(stdout) as { filePath: string; messages: { severity: number; message: string; line: number; ruleId: string }[] }[];
+		const files = JSON.parse(stdout) as {
+			filePath: string;
+			messages: { severity: number; message: string; line: number; ruleId: string }[];
+		}[];
 		const issues: Issue[] = [];
 		for (const file of files) {
 			const relPath = file.filePath.replace(`${cwd}/`, "");

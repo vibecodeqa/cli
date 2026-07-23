@@ -1,6 +1,6 @@
 /** Container health — Dockerfile best practices, .dockerignore, base image hygiene. */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -17,7 +17,9 @@ export function runContainerHealth(cwd: string): CheckResult {
 				dockerfiles.push(f);
 			}
 		}
-	} catch { /* not readable */ }
+	} catch {
+		/* not readable */
+	}
 
 	if (dockerfiles.length === 0) {
 		return {

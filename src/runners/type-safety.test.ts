@@ -68,7 +68,7 @@ describe("runTypeSafety", () => {
 
 	it("scales penalty by codebase size", () => {
 		const smallFile = "const x = foo as any;\n";
-		const bigFile = Array.from({ length: 200 }, (_, i) => `export const v${i} = ${i};`).join("\n") + "\nconst y = bar as any;\n";
+		const bigFile = `${Array.from({ length: 200 }, (_, i) => `export const v${i} = ${i};`).join("\n")}\nconst y = bar as any;\n`;
 		const dirSmall = makeProject({ "src/small.ts": smallFile });
 		const dirBig = makeProject({ "src/big.ts": bigFile });
 		const rSmall = runTypeSafety(dirSmall);

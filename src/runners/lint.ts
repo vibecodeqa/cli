@@ -17,9 +17,7 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 	// Determine the target path for linting
 	// Monorepos with root config: lint "." (biome/eslint will find all files)
 	// Single-package: lint "src/"
-	const lintTarget = workspace?.isMonorepo ? "."
-		: existsSync(join(cwd, "src")) ? "src/"
-		: ".";
+	const lintTarget = workspace?.isMonorepo ? "." : existsSync(join(cwd, "src")) ? "src/" : ".";
 
 	if (stack.linter === "biome") {
 		const { stdout } = run(`npx biome check ${lintTarget} --reporter=json 2>/dev/null || true`, cwd);

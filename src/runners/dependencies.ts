@@ -182,17 +182,38 @@ export function runDependencies(cwd: string, stack: StackInfo): CheckResult {
 // ── License compliance ──
 
 const COPYLEFT_LICENSES = new Set([
-	"GPL-2.0", "GPL-2.0-only", "GPL-2.0-or-later",
-	"GPL-3.0", "GPL-3.0-only", "GPL-3.0-or-later",
-	"AGPL-1.0", "AGPL-3.0", "AGPL-3.0-only", "AGPL-3.0-or-later",
-	"LGPL-2.0", "LGPL-2.1", "LGPL-3.0",
-	"MPL-2.0", "EUPL-1.1", "EUPL-1.2",
-	"SSPL-1.0", "CPAL-1.0", "OSL-3.0",
+	"GPL-2.0",
+	"GPL-2.0-only",
+	"GPL-2.0-or-later",
+	"GPL-3.0",
+	"GPL-3.0-only",
+	"GPL-3.0-or-later",
+	"AGPL-1.0",
+	"AGPL-3.0",
+	"AGPL-3.0-only",
+	"AGPL-3.0-or-later",
+	"LGPL-2.0",
+	"LGPL-2.1",
+	"LGPL-3.0",
+	"MPL-2.0",
+	"EUPL-1.1",
+	"EUPL-1.2",
+	"SSPL-1.0",
+	"CPAL-1.0",
+	"OSL-3.0",
 ]);
 
 const PERMISSIVE_LICENSES = new Set([
-	"MIT", "ISC", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0",
-	"CC0-1.0", "Unlicense", "0BSD", "BlueOak-1.0.0", "Zlib",
+	"MIT",
+	"ISC",
+	"BSD-2-Clause",
+	"BSD-3-Clause",
+	"Apache-2.0",
+	"CC0-1.0",
+	"Unlicense",
+	"0BSD",
+	"BlueOak-1.0.0",
+	"Zlib",
 ]);
 
 interface LicenseFinding {
@@ -226,7 +247,9 @@ function auditLicenses(cwd: string): LicenseFinding[] | null {
 				for (const sub of readdirSync(join(nodeModules, entry))) {
 					checkPackageLicense(join(nodeModules, entry, sub), `${entry}/${sub}`, findings, seen);
 				}
-			} catch { /* skip */ }
+			} catch {
+				/* skip */
+			}
 		} else {
 			checkPackageLicense(join(nodeModules, entry), entry, findings, seen);
 		}

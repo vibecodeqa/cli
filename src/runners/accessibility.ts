@@ -122,7 +122,7 @@ export function runAccessibility(cwd: string): CheckResult {
 				// Collect the full opening tag (may span multiple lines until >)
 				let tag = trimmed;
 				for (let k = i + 1; k < Math.min(i + 5, lines.length) && !tag.includes(">"); k++) {
-					tag += " " + lines[k].trim();
+					tag += ` ${lines[k].trim()}`;
 				}
 				if (!/:key=/.test(tag) && !/v-bind:key=/.test(tag)) {
 					issues.push({
@@ -149,7 +149,12 @@ export function runAccessibility(cwd: string): CheckResult {
 		}
 		// Mobile viewport
 		if (!/<meta[^>]*name=["']viewport["']/.test(content)) {
-			issues.push({ severity: "error", message: "Missing <meta name=\"viewport\"> — page won't scale on mobile", file: h, rule: "missing-viewport" });
+			issues.push({
+				severity: "error",
+				message: 'Missing <meta name="viewport"> — page won\'t scale on mobile',
+				file: h,
+				rule: "missing-viewport",
+			});
 		}
 		// charset
 		if (!/<meta[^>]*charset=/i.test(content)) {
@@ -157,7 +162,12 @@ export function runAccessibility(cwd: string): CheckResult {
 		}
 		// Touch icon for mobile bookmarks
 		if (!/<link[^>]*apple-touch-icon/.test(content) && !/<link[^>]*icon/.test(content)) {
-			issues.push({ severity: "info", message: "No favicon or apple-touch-icon — poor mobile bookmark experience", file: h, rule: "missing-icon" });
+			issues.push({
+				severity: "info",
+				message: "No favicon or apple-touch-icon — poor mobile bookmark experience",
+				file: h,
+				rule: "missing-icon",
+			});
 		}
 	}
 
@@ -169,19 +179,43 @@ export function runAccessibility(cwd: string): CheckResult {
 			const line = lines[i];
 			// Fixed pixel widths that break on mobile
 			if (/style=.*width:\s*\d{4,}px/.test(line)) {
-				issues.push({ severity: "info", message: "Fixed width ≥1000px — likely breaks on mobile", file: f.path, line: i + 1, rule: "fixed-width" });
+				issues.push({
+					severity: "info",
+					message: "Fixed width ≥1000px — likely breaks on mobile",
+					file: f.path,
+					line: i + 1,
+					rule: "fixed-width",
+				});
 			}
 			// Horizontal scroll containers without overflow handling
 			if (/overflow-x:\s*(?:scroll|auto)/.test(line) && !/\btouch\b/.test(line) && !/-webkit-overflow-scrolling/.test(line)) {
-				issues.push({ severity: "info", message: "Horizontal scroll without touch-action — poor mobile scroll UX", file: f.path, line: i + 1, rule: "touch-scroll" });
+				issues.push({
+					severity: "info",
+					message: "Horizontal scroll without touch-action — poor mobile scroll UX",
+					file: f.path,
+					line: i + 1,
+					rule: "touch-scroll",
+				});
 			}
 			// Hover-only interactions (no touch fallback)
 			if (/onMouseEnter=|@mouseenter|on:mouseenter/.test(line) && !/onClick=|@click|on:click|onTouchStart|@touchstart/.test(line)) {
-				issues.push({ severity: "info", message: "Hover-only interaction — unreachable on touch devices", file: f.path, line: i + 1, rule: "hover-only" });
+				issues.push({
+					severity: "info",
+					message: "Hover-only interaction — unreachable on touch devices",
+					file: f.path,
+					line: i + 1,
+					rule: "hover-only",
+				});
 			}
 			// Tiny touch targets
 			if (/(?:width|height):\s*(?:1[0-9]|[1-9])px/.test(line) && /(?:onClick|@click|on:click|button|<a )/.test(line)) {
-				issues.push({ severity: "info", message: "Touch target likely <44px — hard to tap on mobile (WCAG 2.5.8)", file: f.path, line: i + 1, rule: "small-touch-target" });
+				issues.push({
+					severity: "info",
+					message: "Touch target likely <44px — hard to tap on mobile (WCAG 2.5.8)",
+					file: f.path,
+					line: i + 1,
+					rule: "small-touch-target",
+				});
 			}
 		}
 	}
@@ -198,8 +232,16 @@ export function runAccessibility(cwd: string): CheckResult {
 		score,
 		grade: gradeFromScore(score),
 		details: {
-			jsxFiles: files.length, missingAlt, clickDiv, missingLabel, missingLang, autofocus, positiveTabindex,
-			suggestion: !hasA11yPlugin ? "Install eslint-plugin-jsx-a11y for deeper accessibility analysis: pnpm add -D eslint-plugin-jsx-a11y" : undefined,
+			jsxFiles: files.length,
+			missingAlt,
+			clickDiv,
+			missingLabel,
+			missingLang,
+			autofocus,
+			positiveTabindex,
+			suggestion: !hasA11yPlugin
+				? "Install eslint-plugin-jsx-a11y for deeper accessibility analysis: pnpm add -D eslint-plugin-jsx-a11y"
+				: undefined,
 		},
 		issues,
 		duration: Date.now() - start,

@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getCheckMeta, type CheckMeta } from "../check-meta.js";
+import { type CheckMeta, getCheckMeta } from "../check-meta.js";
 import { suggestFix } from "../commands/shared.js";
 import type { ScanDelta } from "../delta.js";
 import { buildCoverageMapInput, generateCoverageMap } from "../diagrams/coverage.js";
@@ -552,9 +552,7 @@ export function featureMapPage(deadPatternsCheck: CheckResult | undefined, fl: F
 			const hasFindings = cluster.findings.length > 0;
 			const warningCount = cluster.findings.filter((f) => f.severity === "warning").length;
 			const badgeClass = hasFindings ? (warningCount > 0 ? "fm-warn" : "fm-info") : "fm-ok";
-			const badgeText = hasFindings
-				? `${cluster.findings.length} dead pattern${cluster.findings.length !== 1 ? "s" : ""}`
-				: "Clean";
+			const badgeText = hasFindings ? `${cluster.findings.length} dead pattern${cluster.findings.length !== 1 ? "s" : ""}` : "Clean";
 
 			const fileList = cluster.files
 				.slice(0, 8)
@@ -677,7 +675,10 @@ export function actionsPage(allChecks: CheckResult[], fl: FL, linter: string, de
   <details class="act-details"><summary>${totalAuto} issues (${linterName} formatting, missing files, config)</summary>
   <table class="act-table"><tbody>${autoFixes
 		.slice(0, 50)
-		.map((i) => `<tr><td class="act-check">${e(i.check)}</td><td>${i.file ? fl(i.file.split(":")[0]!, i.line) : ""}</td><td>${e(i.message)}</td></tr>`)
+		.map(
+			(i) =>
+				`<tr><td class="act-check">${e(i.check)}</td><td>${i.file ? fl(i.file.split(":")[0]!, i.line) : ""}</td><td>${e(i.message)}</td></tr>`,
+		)
 		.join("")}</tbody></table>
   ${totalAuto > 50 ? `<p class="muted">+${totalAuto - 50} more</p>` : ""}
   </details>
@@ -692,7 +693,10 @@ export function actionsPage(allChecks: CheckResult[], fl: FL, linter: string, de
 			.map((g) => {
 				const topItems = g.items
 					.slice(0, 3)
-					.map((i) => `<div class="act-item">${i.file ? fl(i.file.split(":")[0]!, i.line) : ""} <span class="muted">${e(i.message)}</span></div>`)
+					.map(
+						(i) =>
+							`<div class="act-item">${i.file ? fl(i.file.split(":")[0]!, i.line) : ""} <span class="muted">${e(i.message)}</span></div>`,
+					)
 					.join("");
 				const more = g.items.length > 3 ? `<div class="act-item muted">+${g.items.length - 3} more</div>` : "";
 				return `<div class="act-card"><div class="act-card-head"><span class="act-check">${e(g.meta.label)}</span><span class="act-count">${g.items.length}</span></div><div class="act-fix">${e(g.fix)}</div>${topItems}${more}</div>`;
@@ -717,7 +721,10 @@ export function actionsPage(allChecks: CheckResult[], fl: FL, linter: string, de
 				const clr = gc(g.score >= 90 ? "A" : g.score >= 75 ? "B" : g.score >= 60 ? "C" : g.score >= 40 ? "D" : "F");
 				const topIssues = g.issues
 					.slice(0, 3)
-					.map((i) => `<div class="act-item">${i.file ? fl(i.file.split(":")[0]!, i.line) : ""} <span class="muted">${e(i.message)}</span></div>`)
+					.map(
+						(i) =>
+							`<div class="act-item">${i.file ? fl(i.file.split(":")[0]!, i.line) : ""} <span class="muted">${e(i.message)}</span></div>`,
+					)
 					.join("");
 				const more = g.issues.length > 3 ? `<div class="act-item muted">+${g.issues.length - 3} more</div>` : "";
 				return `<div class="act-card"><div class="act-card-head"><span class="act-check">${e(g.meta.label)}</span><span style="color:${clr}">${g.score}/100</span></div><div class="act-rec">${e(g.meta.recommendation)}</div>${topIssues}${more}</div>`;
@@ -755,13 +762,23 @@ export function actionsPage(allChecks: CheckResult[], fl: FL, linter: string, de
 		if (delta.fixed.length > 0) {
 			const byCheck = new Map<string, number>();
 			for (const f of delta.fixed) byCheck.set(f.check, (byCheck.get(f.check) || 0) + 1);
-			fixedList = `<div class="delta-fixed"><strong style="color:var(--pass)">Fixed (${delta.fixed.length}):</strong> ${[...byCheck.entries()].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} (${n})`).join(", ")}</div>`;
+			fixedList = `<div class="delta-fixed"><strong style="color:var(--pass)">Fixed (${delta.fixed.length}):</strong> ${[
+				...byCheck.entries(),
+			]
+				.sort((a, b) => b[1] - a[1])
+				.map(([c, n]) => `${c} (${n})`)
+				.join(", ")}</div>`;
 		}
 		let newList = "";
 		if (delta.introduced.length > 0) {
 			const byCheck = new Map<string, number>();
 			for (const f of delta.introduced) byCheck.set(f.check, (byCheck.get(f.check) || 0) + 1);
-			newList = `<div class="delta-new"><strong style="color:var(--fail)">New (${delta.introduced.length}):</strong> ${[...byCheck.entries()].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} (${n})`).join(", ")}</div>`;
+			newList = `<div class="delta-new"><strong style="color:var(--fail)">New (${delta.introduced.length}):</strong> ${[
+				...byCheck.entries(),
+			]
+				.sort((a, b) => b[1] - a[1])
+				.map(([c, n]) => `${c} (${n})`)
+				.join(", ")}</div>`;
 		}
 
 		deltaSection = `

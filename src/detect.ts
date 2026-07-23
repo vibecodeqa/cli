@@ -21,13 +21,17 @@ export function detectStack(cwd: string, workspace?: WorkspaceInfo): StackInfo {
 	if (!pubspec && workspace?.tool === "melos") {
 		for (const wp of workspace.packages) {
 			const ps = read(join(wp.path, "pubspec.yaml"));
-			if (ps) { pubspec = ps; break; }
+			if (ps) {
+				pubspec = ps;
+				break;
+			}
 		}
 	}
 	if (pubspec || has("pubspec.lock")) {
 		const isFlutter = pubspec.includes("flutter:") || pubspec.includes("flutter_test:");
 		const hasTest = pubspec.includes("test:") || pubspec.includes("flutter_test:");
-		const hasAnalysis = has("analysis_options.yaml") || workspace?.packages.some((p) => existsSync(join(cwd, p.path, "analysis_options.yaml")));
+		const hasAnalysis =
+			has("analysis_options.yaml") || workspace?.packages.some((p) => existsSync(join(cwd, p.path, "analysis_options.yaml")));
 		return {
 			language: "dart",
 			framework: isFlutter ? "flutter" : "none",
@@ -219,7 +223,9 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 			const full = join(cwd, entry);
 			try {
 				if (!statSync(full).isDirectory()) continue;
-			} catch { continue; }
+			} catch {
+				continue;
+			}
 			if (existsSync(join(full, "package.json"))) {
 				addPackage(entry, full, packages);
 			}

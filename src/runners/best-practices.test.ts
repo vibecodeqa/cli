@@ -152,7 +152,8 @@ describe("runBestPractices", () => {
 	it("credits health endpoint when present", () => {
 		const dir = makeProject({
 			"package.json": JSON.stringify({ dependencies: { express: "^4" } }),
-			"src/index.ts": 'import express from "express";\nconst app = express();\napp.get("/health", (req, res) => res.json({ ok: true }));\napp.listen(3000);\n',
+			"src/index.ts":
+				'import express from "express";\nconst app = express();\napp.get("/health", (req, res) => res.json({ ok: true }));\napp.listen(3000);\n',
 		});
 		const result = runBestPractices(dir);
 		expect(result.issues.some((i) => i.rule === "no-health-endpoint")).toBe(false);
@@ -190,7 +191,7 @@ describe("runBestPractices", () => {
 				"  greet:",
 				"    runs-on: ubuntu-latest",
 				"    steps:",
-				"      - run: echo \"Hello ${{ github.event.issue.title }}\"",
+				'      - run: echo "Hello ${{ github.event.issue.title }}"',
 			].join("\n"),
 		});
 		const result = runBestPractices(dir);

@@ -27,15 +27,53 @@ interface CohesionCache {
 }
 
 const CONCERN_PATTERNS: { name: string; patterns: RegExp[] }[] = [
-	{ name: "HTTP/routing", patterns: [/\b(app|router|server)\.(get|post|put|delete|patch|use)\b/, /\bRequest\b.*\bResponse\b/, /\breq\s*,\s*res\b/, /\bfastify\b|\bhono\b|\bexpress\b/] },
-	{ name: "database", patterns: [/\b(prisma|sequelize|typeorm|knex|drizzle)\b/, /\bSELECT\b.*\bFROM\b/i, /\.query\s*\(/, /\bcreateClient\b.*\bsupabase\b/i] },
-	{ name: "auth", patterns: [/\b(jwt|token|session|cookie|passport|oauth|login|signup|signIn|signUp)\b/i, /\bverify(Token|Session|Auth)\b/, /\bbcrypt|argon2|scrypt\b/] },
+	{
+		name: "HTTP/routing",
+		patterns: [
+			/\b(app|router|server)\.(get|post|put|delete|patch|use)\b/,
+			/\bRequest\b.*\bResponse\b/,
+			/\breq\s*,\s*res\b/,
+			/\bfastify\b|\bhono\b|\bexpress\b/,
+		],
+	},
+	{
+		name: "database",
+		patterns: [/\b(prisma|sequelize|typeorm|knex|drizzle)\b/, /\bSELECT\b.*\bFROM\b/i, /\.query\s*\(/, /\bcreateClient\b.*\bsupabase\b/i],
+	},
+	{
+		name: "auth",
+		patterns: [
+			/\b(jwt|token|session|cookie|passport|oauth|login|signup|signIn|signUp)\b/i,
+			/\bverify(Token|Session|Auth)\b/,
+			/\bbcrypt|argon2|scrypt\b/,
+		],
+	},
 	{ name: "email", patterns: [/\bsendMail|sendEmail|transporter|nodemailer|resend|postmark\b/i, /\bsmtp\b/i] },
-	{ name: "file I/O", patterns: [/\breadFileSync|writeFileSync|createReadStream|createWriteStream\b/, /\bfs\.(read|write|mkdir|unlink|stat)\b/] },
-	{ name: "validation", patterns: [/\bz\.(string|number|object|array)\b/, /\bJoi\.(string|number|object)\b/, /\byup\.(string|number|object)\b/, /\bvalidate\w*Schema\b/] },
-	{ name: "UI rendering", patterns: [/\bJSX\b|\breturn\s*\(?\s*</, /\buseState|useEffect|useRef|useMemo\b/, /\brender\(\)/, /\bcomponent\b/i] },
-	{ name: "state management", patterns: [/\bcreateStore|useStore|createSlice|createReducer\b/, /\bdispatch\(|getState\(\)/, /\buseSelector|useDispatch\b/] },
-	{ name: "testing", patterns: [/\bdescribe\s*\(|it\s*\(|test\s*\(|expect\s*\(/, /\bbeforeEach|afterEach|beforeAll\b/, /\bjest\.|vitest\./] },
+	{
+		name: "file I/O",
+		patterns: [/\breadFileSync|writeFileSync|createReadStream|createWriteStream\b/, /\bfs\.(read|write|mkdir|unlink|stat)\b/],
+	},
+	{
+		name: "validation",
+		patterns: [
+			/\bz\.(string|number|object|array)\b/,
+			/\bJoi\.(string|number|object)\b/,
+			/\byup\.(string|number|object)\b/,
+			/\bvalidate\w*Schema\b/,
+		],
+	},
+	{
+		name: "UI rendering",
+		patterns: [/\bJSX\b|\breturn\s*\(?\s*</, /\buseState|useEffect|useRef|useMemo\b/, /\brender\(\)/, /\bcomponent\b/i],
+	},
+	{
+		name: "state management",
+		patterns: [/\bcreateStore|useStore|createSlice|createReducer\b/, /\bdispatch\(|getState\(\)/, /\buseSelector|useDispatch\b/],
+	},
+	{
+		name: "testing",
+		patterns: [/\bdescribe\s*\(|it\s*\(|test\s*\(|expect\s*\(/, /\bbeforeEach|afterEach|beforeAll\b/, /\bjest\.|vitest\./],
+	},
 	{ name: "CLI", patterns: [/\bprocess\.argv\b/, /\bcommander|yargs|meow|cac\b/, /\bparse(Args|Options)\b/] },
 ];
 
@@ -52,7 +90,8 @@ export async function runFileCohesion(cwd: string): Promise<CheckResult> {
 				premium: true,
 				comingSoon: true,
 				reason: "Set VCQA_PRO_KEY to enable file cohesion analysis",
-				description: "Detects files with multiple responsibilities — the #1 code smell in AI-generated code. Labels each file's concern clusters and suggests concrete split points.",
+				description:
+					"Detects files with multiple responsibilities — the #1 code smell in AI-generated code. Labels each file's concern clusters and suggests concrete split points.",
 			},
 			issues: [],
 			duration: Date.now() - start,
@@ -93,9 +132,7 @@ export async function runFileCohesion(cwd: string): Promise<CheckResult> {
 	}
 
 	// Phase 2: LLM analysis for top candidates (by line count, most likely to benefit from splitting)
-	const topCandidates = candidates
-		.sort((a, b) => b.lines - a.lines)
-		.slice(0, 5);
+	const topCandidates = candidates.sort((a, b) => b.lines - a.lines).slice(0, 5);
 
 	for (const candidate of topCandidates) {
 		const hash = createHash("sha256").update(candidate.content).digest("hex").slice(0, 16);
@@ -189,7 +226,9 @@ function loadCache(cwd: string): CohesionCache {
 			const data = JSON.parse(readFileSync(cachePath, "utf-8"));
 			if (data.version === 1) return data;
 		}
-	} catch { /* corrupt cache */ }
+	} catch {
+		/* corrupt cache */
+	}
 	return { version: 1, files: {} };
 }
 
@@ -198,5 +237,7 @@ function saveCache(cwd: string, cache: CohesionCache): void {
 		const dir = join(cwd, ".vibe-check");
 		if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 		writeFileSync(join(dir, "file-cohesion-cache.json"), JSON.stringify(cache));
-	} catch { /* write failed */ }
+	} catch {
+		/* write failed */
+	}
 }

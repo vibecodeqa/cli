@@ -1,11 +1,13 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runHtmlQuality } from "./html-quality.js";
 
 let dir: string;
-beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "vcqa-html-")); });
+beforeEach(() => {
+	dir = mkdtempSync(join(tmpdir(), "vcqa-html-"));
+});
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("html-quality", () => {
@@ -28,19 +30,28 @@ describe("html-quality", () => {
 	});
 
 	it("detects missing meta description", () => {
-		writeFileSync(join(dir, "index.html"), '<!DOCTYPE html><html><head><title>Test</title><meta name="viewport" content="width=device-width"></head><body></body></html>');
+		writeFileSync(
+			join(dir, "index.html"),
+			'<!DOCTYPE html><html><head><title>Test</title><meta name="viewport" content="width=device-width"></head><body></body></html>',
+		);
 		const result = runHtmlQuality(dir);
 		expect(result.issues.some((i) => i.rule === "missing-description")).toBe(true);
 	});
 
 	it("detects missing alt on images", () => {
-		writeFileSync(join(dir, "index.html"), '<!DOCTYPE html><html lang="en"><head><title>Test</title></head><body><img src="photo.jpg"></body></html>');
+		writeFileSync(
+			join(dir, "index.html"),
+			'<!DOCTYPE html><html lang="en"><head><title>Test</title></head><body><img src="photo.jpg"></body></html>',
+		);
 		const result = runHtmlQuality(dir);
 		expect(result.issues.some((i) => i.rule === "img-no-alt")).toBe(true);
 	});
 
 	it("detects missing image dimensions", () => {
-		writeFileSync(join(dir, "index.html"), '<!DOCTYPE html><html lang="en"><head><title>Test</title></head><body><img src="photo.jpg" alt="photo"></body></html>');
+		writeFileSync(
+			join(dir, "index.html"),
+			'<!DOCTYPE html><html lang="en"><head><title>Test</title></head><body><img src="photo.jpg" alt="photo"></body></html>',
+		);
 		const result = runHtmlQuality(dir);
 		expect(result.issues.some((i) => i.rule === "img-no-dimensions")).toBe(true);
 	});
@@ -52,51 +63,72 @@ describe("html-quality", () => {
 	});
 
 	it("detects heading hierarchy skip", () => {
-		writeFileSync(join(dir, "index.html"), '<!DOCTYPE html><html lang="en"><head><title>Test</title></head><body><h1>Title</h1><h4>Skipped</h4></body></html>');
+		writeFileSync(
+			join(dir, "index.html"),
+			'<!DOCTYPE html><html lang="en"><head><title>Test</title></head><body><h1>Title</h1><h4>Skipped</h4></body></html>',
+		);
 		const result = runHtmlQuality(dir);
 		expect(result.issues.some((i) => i.rule === "heading-skip")).toBe(true);
 	});
 
 	it("detects render-blocking scripts", () => {
-		writeFileSync(join(dir, "index.html"), '<!DOCTYPE html><html lang="en"><head><title>T</title><script src="app.js"></script></head><body></body></html>');
+		writeFileSync(
+			join(dir, "index.html"),
+			'<!DOCTYPE html><html lang="en"><head><title>T</title><script src="app.js"></script></head><body></body></html>',
+		);
 		const result = runHtmlQuality(dir);
 		expect(result.issues.some((i) => i.rule === "render-blocking")).toBe(true);
 	});
 
 	it("allows scripts with async/defer", () => {
-		writeFileSync(join(dir, "index.html"), '<!DOCTYPE html><html lang="en"><head><title>T</title><script src="app.js" defer></script></head><body></body></html>');
+		writeFileSync(
+			join(dir, "index.html"),
+			'<!DOCTYPE html><html lang="en"><head><title>T</title><script src="app.js" defer></script></head><body></body></html>',
+		);
 		const result = runHtmlQuality(dir);
 		expect(result.issues.some((i) => i.rule === "render-blocking")).toBe(false);
 	});
 
 	it("detects HTTP links", () => {
-		writeFileSync(join(dir, "index.html"), '<!DOCTYPE html><html lang="en"><head><title>T</title></head><body><a href="http://example.com">link</a></body></html>');
+		writeFileSync(
+			join(dir, "index.html"),
+			'<!DOCTYPE html><html lang="en"><head><title>T</title></head><body><a href="http://example.com">link</a></body></html>',
+		);
 		const result = runHtmlQuality(dir);
 		expect(result.issues.some((i) => i.rule === "http-link")).toBe(true);
 	});
 
 	it("detects missing noopener on target=_blank", () => {
-		writeFileSync(join(dir, "index.html"), '<!DOCTYPE html><html lang="en"><head><title>T</title></head><body><a href="https://x.com" target="_blank">link</a></body></html>');
+		writeFileSync(
+			join(dir, "index.html"),
+			'<!DOCTYPE html><html lang="en"><head><title>T</title></head><body><a href="https://x.com" target="_blank">link</a></body></html>',
+		);
 		const result = runHtmlQuality(dir);
 		expect(result.issues.some((i) => i.rule === "missing-noopener")).toBe(true);
 	});
 
 	it("detects broken internal links", () => {
-		writeFileSync(join(dir, "index.html"), '<!DOCTYPE html><html lang="en"><head><title>T</title></head><body><a href="about.html">About</a></body></html>');
+		writeFileSync(
+			join(dir, "index.html"),
+			'<!DOCTYPE html><html lang="en"><head><title>T</title></head><body><a href="about.html">About</a></body></html>',
+		);
 		const result = runHtmlQuality(dir);
 		expect(result.issues.some((i) => i.rule === "broken-link")).toBe(true);
 	});
 
 	it("passes valid internal links", () => {
-		writeFileSync(join(dir, "index.html"), '<!DOCTYPE html><html lang="en"><head><title>T</title></head><body><a href="about.html">About</a></body></html>');
-		writeFileSync(join(dir, "about.html"), "<!DOCTYPE html><html lang=\"en\"><head><title>About</title></head><body></body></html>");
+		writeFileSync(
+			join(dir, "index.html"),
+			'<!DOCTYPE html><html lang="en"><head><title>T</title></head><body><a href="about.html">About</a></body></html>',
+		);
+		writeFileSync(join(dir, "about.html"), '<!DOCTYPE html><html lang="en"><head><title>About</title></head><body></body></html>');
 		const result = runHtmlQuality(dir);
 		expect(result.issues.some((i) => i.rule === "broken-link")).toBe(false);
 	});
 
 	it("detects duplicate titles", () => {
-		writeFileSync(join(dir, "index.html"), "<!DOCTYPE html><html lang=\"en\"><head><title>Same Title</title></head><body></body></html>");
-		writeFileSync(join(dir, "about.html"), "<!DOCTYPE html><html lang=\"en\"><head><title>Same Title</title></head><body></body></html>");
+		writeFileSync(join(dir, "index.html"), '<!DOCTYPE html><html lang="en"><head><title>Same Title</title></head><body></body></html>');
+		writeFileSync(join(dir, "about.html"), '<!DOCTYPE html><html lang="en"><head><title>Same Title</title></head><body></body></html>');
 		const result = runHtmlQuality(dir);
 		expect(result.issues.some((i) => i.rule === "duplicate-title")).toBe(true);
 	});
@@ -104,7 +136,9 @@ describe("html-quality", () => {
 	it("passes a well-formed page", () => {
 		writeFileSync(join(dir, "robots.txt"), "User-agent: *\nAllow: /");
 		writeFileSync(join(dir, "sitemap.xml"), "<urlset></urlset>");
-		writeFileSync(join(dir, "index.html"), `<!DOCTYPE html>
+		writeFileSync(
+			join(dir, "index.html"),
+			`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -122,7 +156,8 @@ describe("html-quality", () => {
 <img src="hero.jpg" alt="Hero image" width="800" height="400" loading="lazy">
 <a href="https://example.com" target="_blank" rel="noopener">External</a>
 </body>
-</html>`);
+</html>`,
+		);
 		const result = runHtmlQuality(dir);
 		const errors = result.issues.filter((i) => i.severity === "error");
 		const warnings = result.issues.filter((i) => i.severity === "warning");

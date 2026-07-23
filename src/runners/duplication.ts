@@ -184,10 +184,23 @@ export function tokenize(content: string): Token[] {
 
 	while (cur.i < n) {
 		const c = content[cur.i]!;
-		if (c === "\n") { cur.line++; cur.i++; continue; }
-		if (c === " " || c === "\t" || c === "\r") { cur.i++; continue; }
-		if (c === "/" && content[cur.i + 1] === "/") { while (cur.i < n && content[cur.i] !== "\n") cur.i++; continue; }
-		if (c === "/" && content[cur.i + 1] === "*") { scanBlockComment(content, cur); continue; }
+		if (c === "\n") {
+			cur.line++;
+			cur.i++;
+			continue;
+		}
+		if (c === " " || c === "\t" || c === "\r") {
+			cur.i++;
+			continue;
+		}
+		if (c === "/" && content[cur.i + 1] === "/") {
+			while (cur.i < n && content[cur.i] !== "\n") cur.i++;
+			continue;
+		}
+		if (c === "/" && content[cur.i + 1] === "*") {
+			scanBlockComment(content, cur);
+			continue;
+		}
 
 		const startLine = cur.line;
 		const startPos = cur.i;
@@ -251,7 +264,14 @@ class VcqaTokenizer implements ITokenizer {
 		const toks = tokenize(stripImports(data)).map((t) => toIToken(t, format));
 		const frames: IMapFrame[] = [];
 		for (let i = 0; i + w <= toks.length; i++) {
-			const id2 = createHash("md5").update(toks.slice(i, i + w).map((t) => t.value).join(" ")).digest("hex");
+			const id2 = createHash("md5")
+				.update(
+					toks
+						.slice(i, i + w)
+						.map((t) => t.value)
+						.join(" "),
+				)
+				.digest("hex");
 			frames.push({ id: id2, sourceId: id, start: toks[i]!, end: toks[i + w - 1]! });
 		}
 		return [new VcqaTokensMap(id, format, data, toks.length, frames)];
@@ -267,10 +287,18 @@ class VcqaTokensMap implements ITokensMap {
 		private readonly tokensCount: number,
 		private readonly frames: IMapFrame[],
 	) {}
-	getFormat() { return this.format; }
-	getId() { return this.id; }
-	getLinesCount() { return this.data.split("\n").length; }
-	getTokensCount() { return this.tokensCount; }
+	getFormat() {
+		return this.format;
+	}
+	getId() {
+		return this.id;
+	}
+	getLinesCount() {
+		return this.data.split("\n").length;
+	}
+	getTokensCount() {
+		return this.tokensCount;
+	}
 	next(): IteratorResult<IMapFrame | boolean> {
 		if (this.p < this.frames.length) return { value: this.frames[this.p++]!, done: false };
 		return { value: false, done: true };

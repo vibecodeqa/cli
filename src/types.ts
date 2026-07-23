@@ -1,4 +1,3 @@
-export { gradeFromScore } from "@vibecodeqa/schema";
 export type {
 	CheckResult,
 	Issue,
@@ -7,3 +6,4 @@ export type {
 	WorkspaceInfo,
 	WorkspacePackage,
 } from "@vibecodeqa/schema";
+export { gradeFromScore } from "@vibecodeqa/schema";

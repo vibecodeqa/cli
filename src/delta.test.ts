@@ -9,7 +9,14 @@ function makeReport(overrides: Partial<VibeReport> = {}): VibeReport {
 		score: 80,
 		grade: "B",
 		checks: [],
-		meta: { cwd: "/tmp", node: "22", duration: 100, stack: { language: "typescript", framework: "none", bundler: "none", testRunner: "none", linter: "none", packageManager: "npm" }, repoUrl: null, branch: "main" },
+		meta: {
+			cwd: "/tmp",
+			node: "22",
+			duration: 100,
+			stack: { language: "typescript", framework: "none", bundler: "none", testRunner: "none", linter: "none", packageManager: "npm" },
+			repoUrl: null,
+			branch: "main",
+		},
 		...overrides,
 	};
 }
@@ -19,10 +26,19 @@ describe("computeDelta", () => {
 		const before = makeReport({
 			score: 70,
 			grade: "C",
-			checks: [{ name: "lint", score: 50, grade: "D", details: {}, issues: [
-				{ severity: "error", message: "unused var", file: "src/a.ts", rule: "no-unused" },
-				{ severity: "error", message: "missing semi", file: "src/b.ts", rule: "semi" },
-			], duration: 10 }],
+			checks: [
+				{
+					name: "lint",
+					score: 50,
+					grade: "D",
+					details: {},
+					issues: [
+						{ severity: "error", message: "unused var", file: "src/a.ts", rule: "no-unused" },
+						{ severity: "error", message: "missing semi", file: "src/b.ts", rule: "semi" },
+					],
+					duration: 10,
+				},
+			],
 		});
 		const after = makeReport({
 			score: 90,
@@ -39,9 +55,18 @@ describe("computeDelta", () => {
 
 	it("detects introduced issues", () => {
 		const before = makeReport({ checks: [{ name: "security", score: 100, grade: "A", details: {}, issues: [], duration: 10 }] });
-		const after = makeReport({ checks: [{ name: "security", score: 80, grade: "B", details: {}, issues: [
-			{ severity: "warning", message: "innerHTML usage", file: "src/x.ts", rule: "CWE-79" },
-		], duration: 10 }] });
+		const after = makeReport({
+			checks: [
+				{
+					name: "security",
+					score: 80,
+					grade: "B",
+					details: {},
+					issues: [{ severity: "warning", message: "innerHTML usage", file: "src/x.ts", rule: "CWE-79" }],
+					duration: 10,
+				},
+			],
+		});
 
 		const delta = computeDelta(before, after);
 		expect(delta.introduced).toHaveLength(1);
@@ -61,10 +86,25 @@ describe("computeDelta", () => {
 
 describe("formatDeltaMarkdown", () => {
 	it("produces valid markdown", () => {
-		const before = makeReport({ score: 70, grade: "C", checks: [{ name: "lint", score: 50, grade: "D", details: {}, issues: [
-			{ severity: "error", message: "unused var", file: "src/a.ts", rule: "no-unused" },
-		], duration: 10 }] });
-		const after = makeReport({ score: 80, grade: "B", checks: [{ name: "lint", score: 100, grade: "A", details: {}, issues: [], duration: 10 }] });
+		const before = makeReport({
+			score: 70,
+			grade: "C",
+			checks: [
+				{
+					name: "lint",
+					score: 50,
+					grade: "D",
+					details: {},
+					issues: [{ severity: "error", message: "unused var", file: "src/a.ts", rule: "no-unused" }],
+					duration: 10,
+				},
+			],
+		});
+		const after = makeReport({
+			score: 80,
+			grade: "B",
+			checks: [{ name: "lint", score: 100, grade: "A", details: {}, issues: [], duration: 10 }],
+		});
 
 		const delta = computeDelta(before, after);
 		const md = formatDeltaMarkdown(delta);

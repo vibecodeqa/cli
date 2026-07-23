@@ -5,7 +5,7 @@
  * checks miss entirely.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -36,7 +36,9 @@ export function runHtmlQuality(cwd: string): CheckResult {
 		let content: string;
 		try {
 			content = readFileSync(file, "utf-8");
-		} catch { continue; }
+		} catch {
+			continue;
+		}
 
 		// ── Meta tags ──
 		if (content.includes("<head")) {
@@ -47,7 +49,12 @@ export function runHtmlQuality(cwd: string): CheckResult {
 				if (titleMatch) {
 					const title = titleMatch[1].trim();
 					if (title.length < 10) {
-						issues.push({ severity: "warning", message: `Title too short: "${title}" — aim for 30-60 characters`, file: relPath, rule: "short-title" });
+						issues.push({
+							severity: "warning",
+							message: `Title too short: "${title}" — aim for 30-60 characters`,
+							file: relPath,
+							rule: "short-title",
+						});
 					}
 					const existing = titles.get(title) || [];
 					existing.push(relPath);
@@ -60,7 +67,12 @@ export function runHtmlQuality(cwd: string): CheckResult {
 			}
 
 			if (!/<meta\s[^>]*name=["']viewport["']/i.test(content)) {
-				issues.push({ severity: "error", message: "Missing viewport meta — page won't be mobile-responsive", file: relPath, rule: "missing-viewport" });
+				issues.push({
+					severity: "error",
+					message: "Missing viewport meta — page won't be mobile-responsive",
+					file: relPath,
+					rule: "missing-viewport",
+				});
 			}
 
 			if (!/<meta\s[^>]*charset/i.test(content)) {
@@ -68,11 +80,21 @@ export function runHtmlQuality(cwd: string): CheckResult {
 			}
 
 			if (!/<meta\s[^>]*property=["']og:title["']/i.test(content)) {
-				issues.push({ severity: "info", message: "Missing Open Graph tags (og:title, og:description) — social sharing will look plain", file: relPath, rule: "missing-og" });
+				issues.push({
+					severity: "info",
+					message: "Missing Open Graph tags (og:title, og:description) — social sharing will look plain",
+					file: relPath,
+					rule: "missing-og",
+				});
 			}
 
 			if (!/<link\s[^>]*rel=["']canonical["']/i.test(content)) {
-				issues.push({ severity: "info", message: "Missing canonical link — may cause duplicate content issues", file: relPath, rule: "missing-canonical" });
+				issues.push({
+					severity: "info",
+					message: "Missing canonical link — may cause duplicate content issues",
+					file: relPath,
+					rule: "missing-canonical",
+				});
 			}
 
 			if (!/<link\s[^>]*rel=["']icon["']/i.test(content) && !/<link\s[^>]*rel=["']shortcut icon["']/i.test(content)) {
@@ -82,13 +104,17 @@ export function runHtmlQuality(cwd: string): CheckResult {
 
 		// ── HTML lang ──
 		if (/<html[\s>]/.test(content) && !/<html\s[^>]*lang=/i.test(content)) {
-			issues.push({ severity: "warning", message: "Missing lang attribute on <html> — screen readers need this", file: relPath, rule: "missing-lang" });
+			issues.push({
+				severity: "warning",
+				message: "Missing lang attribute on <html> — screen readers need this",
+				file: relPath,
+				rule: "missing-lang",
+			});
 		}
 
 		// ── Images ──
 		const imgRegex = /<img\s[^>]*>/gi;
-		let imgMatch: RegExpExecArray | null;
-		while ((imgMatch = imgRegex.exec(content)) !== null) {
+		for (const imgMatch of content.matchAll(imgRegex)) {
 			const tag = imgMatch[0];
 			const line = content.slice(0, imgMatch.index).split("\n").length;
 
@@ -97,18 +123,29 @@ export function runHtmlQuality(cwd: string): CheckResult {
 			}
 
 			if (!/(?:width|height)\s*=/i.test(tag)) {
-				issues.push({ severity: "warning", message: "Image missing width/height — causes layout shift", file: relPath, line, rule: "img-no-dimensions" });
+				issues.push({
+					severity: "warning",
+					message: "Image missing width/height — causes layout shift",
+					file: relPath,
+					line,
+					rule: "img-no-dimensions",
+				});
 			}
 
 			if (!/loading\s*=/i.test(tag)) {
-				issues.push({ severity: "info", message: "Image missing loading=\"lazy\" — add for below-fold images", file: relPath, line, rule: "img-no-lazy" });
+				issues.push({
+					severity: "info",
+					message: 'Image missing loading="lazy" — add for below-fold images',
+					file: relPath,
+					line,
+					rule: "img-no-lazy",
+				});
 			}
 		}
 
 		// ── Links ──
 		const linkRegex = /<a\s[^>]*href=["']([^"']+)["'][^>]*>/gi;
-		let linkMatch: RegExpExecArray | null;
-		while ((linkMatch = linkRegex.exec(content)) !== null) {
+		for (const linkMatch of content.matchAll(linkRegex)) {
 			const href = linkMatch[1];
 			const tag = linkMatch[0];
 			const line = content.slice(0, linkMatch.index).split("\n").length;
@@ -120,7 +157,13 @@ export function runHtmlQuality(cwd: string): CheckResult {
 
 			// External links without rel=noopener
 			if (href.startsWith("http") && /target\s*=\s*["']_blank["']/i.test(tag) && !/rel\s*=\s*["'][^"']*noopener/i.test(tag)) {
-				issues.push({ severity: "warning", message: "External link with target=\"_blank\" missing rel=\"noopener\"", file: relPath, line, rule: "missing-noopener" });
+				issues.push({
+					severity: "warning",
+					message: 'External link with target="_blank" missing rel="noopener"',
+					file: relPath,
+					line,
+					rule: "missing-noopener",
+				});
 			}
 
 			// Collect internal links for broken link check
@@ -132,8 +175,7 @@ export function runHtmlQuality(cwd: string): CheckResult {
 		// ── Heading hierarchy ──
 		const headings: number[] = [];
 		const headingRegex = /<h(\d)/gi;
-		let hMatch: RegExpExecArray | null;
-		while ((hMatch = headingRegex.exec(content)) !== null) {
+		for (const hMatch of content.matchAll(headingRegex)) {
 			headings.push(parseInt(hMatch[1], 10));
 		}
 		for (let i = 1; i < headings.length; i++) {
@@ -152,18 +194,27 @@ export function runHtmlQuality(cwd: string): CheckResult {
 		// Render-blocking scripts (script in head without async/defer)
 		const headContent = content.match(/<head[^>]*>([\s\S]*?)<\/head>/i)?.[1] || "";
 		const scriptInHead = /<script\s[^>]*src=["'][^"']+["'][^>]*>/gi;
-		let scriptMatch: RegExpExecArray | null;
-		while ((scriptMatch = scriptInHead.exec(headContent)) !== null) {
+		for (const scriptMatch of headContent.matchAll(scriptInHead)) {
 			const tag = scriptMatch[0];
 			if (!/\b(?:async|defer|type=["']module["'])\b/i.test(tag)) {
-				issues.push({ severity: "warning", message: "Render-blocking script in <head> — add async or defer", file: relPath, rule: "render-blocking" });
+				issues.push({
+					severity: "warning",
+					message: "Render-blocking script in <head> — add async or defer",
+					file: relPath,
+					rule: "render-blocking",
+				});
 			}
 		}
 
 		// ── Security ──
 		// Mixed content (http:// resources on a page)
 		if (/<(?:img|script|link|iframe)\s[^>]*(?:src|href)=["']http:\/\/(?!localhost)/i.test(content)) {
-			issues.push({ severity: "warning", message: "Mixed content: HTTP resource on page — use HTTPS", file: relPath, rule: "mixed-content" });
+			issues.push({
+				severity: "warning",
+				message: "Mixed content: HTTP resource on page — use HTTPS",
+				file: relPath,
+				rule: "mixed-content",
+			});
 		}
 	}
 
@@ -180,7 +231,11 @@ export function runHtmlQuality(cwd: string): CheckResult {
 	// Duplicate titles
 	for (const [title, files] of titles) {
 		if (files.length > 1) {
-			issues.push({ severity: "warning", message: `Duplicate title "${title}" in ${files.length} files — each page should have a unique title`, rule: "duplicate-title" });
+			issues.push({
+				severity: "warning",
+				message: `Duplicate title "${title}" in ${files.length} files — each page should have a unique title`,
+				rule: "duplicate-title",
+			});
 		}
 	}
 
@@ -221,8 +276,12 @@ function collectHtmlFiles(cwd: string, subdir = ""): string[] {
 				} else if (entry.endsWith(".html") || entry.endsWith(".htm")) {
 					files.push(full);
 				}
-			} catch { /* skip */ }
+			} catch {
+				/* skip */
+			}
 		}
-	} catch { /* skip */ }
+	} catch {
+		/* skip */
+	}
 	return files;
 }

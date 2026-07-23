@@ -6,9 +6,9 @@
  *   console.log(report.score, report.grade);
  */
 
-import { resolve } from "node:path";
 import { readFileSync } from "node:fs";
-import { CHECK_META, getCheckMeta, type CheckMeta } from "./check-meta.js";
+import { resolve } from "node:path";
+import { CHECK_META, type CheckMeta, getCheckMeta } from "./check-meta.js";
 import { getCheckIgnore, isCheckEnabled, loadConfig, type VcqaConfig } from "./config.js";
 import { detectRepoUrl, detectStack, detectWorkspace } from "./detect.js";
 import { readEnvIgnoreNames, setGlobalIgnore, setGlobalIgnoreNames, setGlobalSrcRoots } from "./fs-utils.js";
@@ -18,31 +18,31 @@ import { runBestPractices } from "./runners/best-practices.js";
 import { runCodeCoherence } from "./runners/code-coherence.js";
 import { runCommentStaleness } from "./runners/comment-staleness.js";
 import { runComplexity } from "./runners/complexity.js";
-import { runDeadPatterns } from "./runners/dead-patterns.js";
-import { runTestAudit } from "./runners/test-audit.js";
-import { runContainerHealth } from "./runners/container-health.js";
 import { runConfusion } from "./runners/confusion.js";
+import { runContainerHealth } from "./runners/container-health.js";
 import { runContext } from "./runners/context.js";
+import { runDeadPatterns } from "./runners/dead-patterns.js";
 import { runDependencies } from "./runners/dependencies.js";
 import { runDesignConsistency } from "./runners/design-consistency.js";
-import { runEnvValidation } from "./runners/env-validation.js";
-import { runFrontendHealth } from "./runners/frontend-health.js";
-import { runHtmlQuality } from "./runners/html-quality.js";
-import { runFileCohesion } from "./runners/file-cohesion.js";
-import { runGitHygiene } from "./runners/git-hygiene.js";
 import { runDocCoherence } from "./runners/doc-coherence.js";
 import { runDocs } from "./runners/docs.js";
 import { runDuplication } from "./runners/duplication.js";
+import { runEnvValidation } from "./runners/env-validation.js";
 import { runErrorHandling } from "./runners/error-handling.js";
+import { runFileCohesion } from "./runners/file-cohesion.js";
+import { runFrontendHealth } from "./runners/frontend-health.js";
+import { runGitHygiene } from "./runners/git-hygiene.js";
+import { runHtmlQuality } from "./runners/html-quality.js";
 import { runLint } from "./runners/lint.js";
 import { runMemorySafety } from "./runners/memory-safety.js";
 import { runPerformance } from "./runners/performance.js";
-import { runStyling } from "./runners/styling.js";
 import { runReact } from "./runners/react.js";
 import { runSecrets } from "./runners/secrets.js";
 import { runSecurity } from "./runners/security.js";
 import { runStandards } from "./runners/standards.js";
 import { runStructure } from "./runners/structure.js";
+import { runStyling } from "./runners/styling.js";
+import { runTestAudit } from "./runners/test-audit.js";
 import { runTesting } from "./runners/testing.js";
 import { runTypeSafety } from "./runners/type-safety.js";
 import { runTypeCheck } from "./runners/types-check.js";
@@ -127,9 +127,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 
 	// Filter checks if specified
 	const checkFilter = options.checks ? new Set(options.checks) : null;
-	const runners = checkFilter
-		? allRunners.filter((r) => checkFilter.has(r.name))
-		: allRunners;
+	const runners = checkFilter ? allRunners.filter((r) => checkFilter.has(r.name)) : allRunners;
 
 	const checks: CheckResult[] = [];
 	const total = runners.length;
@@ -197,7 +195,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 				if (!issue.file || typeof issue.file !== "string") return true;
 				const f = issue.file;
 				return !patterns.some((p) => {
-					if (p.endsWith("/**")) return f.startsWith(p.slice(0, -3) + "/");
+					if (p.endsWith("/**")) return f.startsWith(`${p.slice(0, -3)}/`);
 					if (p.startsWith("*")) return f.endsWith(p.slice(1));
 					return f.startsWith(p);
 				});
@@ -232,10 +230,10 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 
 // ── Re-exports ──
 
-export { CHECK_META, getCheckMeta, type CheckMeta };
-export { computeScore } from "./score.js";
-export { computeDelta, formatDeltaMarkdown, type ScanDelta } from "./delta.js";
 export { loadConfig, type VcqaConfig } from "./config.js";
+export { computeDelta, formatDeltaMarkdown, type ScanDelta } from "./delta.js";
 export { detectStack, detectWorkspace } from "./detect.js";
+export { computeScore } from "./score.js";
 export { gradeFromScore } from "./types.js";
 export type { CheckResult, Issue, StackInfo, VibeReport, WorkspaceInfo, WorkspacePackage };
+export { CHECK_META, type CheckMeta, getCheckMeta };

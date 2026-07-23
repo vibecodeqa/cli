@@ -141,7 +141,9 @@ export function runErrorHandling(cwd: string): CheckResult {
 			}
 
 			// Error info leakage — sending stack traces or error details to client
-			if (/(?:res\.(?:json|send|status)|Response\.json|new Response)\s*\(.*(?:err\.stack|err\.message|error\.stack|error\.message)/.test(line)) {
+			if (
+				/(?:res\.(?:json|send|status)|Response\.json|new Response)\s*\(.*(?:err\.stack|err\.message|error\.stack|error\.message)/.test(line)
+			) {
 				issues.push({
 					severity: "warning",
 					message: "Error details sent to client — stack traces reveal internal structure. Log server-side, return generic message",
@@ -150,7 +152,11 @@ export function runErrorHandling(cwd: string): CheckResult {
 					rule: "error-info-leak",
 				});
 			}
-			if (/catch\s*\([^)]*\)\s*\{[^}]*(?:return|res\.\w+\().*(?:\.message|\.stack)/.test(lines.slice(i, Math.min(i + 5, lines.length)).join(" "))) {
+			if (
+				/catch\s*\([^)]*\)\s*\{[^}]*(?:return|res\.\w+\().*(?:\.message|\.stack)/.test(
+					lines.slice(i, Math.min(i + 5, lines.length)).join(" "),
+				)
+			) {
 				const alreadyCaught = issues.some((iss) => iss.file === f.path && iss.line === i + 1 && iss.rule === "error-info-leak");
 				if (!alreadyCaught) {
 					issues.push({
@@ -164,7 +170,13 @@ export function runErrorHandling(cwd: string): CheckResult {
 			}
 
 			// process.exit() in non-CLI files (library code shouldn't exit)
-			if (/\bprocess\.exit\s*\(/.test(line) && !f.path.includes("cli") && !f.path.includes("bin/") && !f.path.includes("commands/") && !f.path.includes("monitor")) {
+			if (
+				/\bprocess\.exit\s*\(/.test(line) &&
+				!f.path.includes("cli") &&
+				!f.path.includes("bin/") &&
+				!f.path.includes("commands/") &&
+				!f.path.includes("monitor")
+			) {
 				processExit++;
 				issues.push({
 					severity: "warning",
@@ -198,10 +210,7 @@ export function runErrorHandling(cwd: string): CheckResult {
 	const throwPenalty = Math.min(15, (throwString / totalFiles) * 100);
 	const promisePenalty = Math.min(15, ((floatingPromises + catchIgnored) / totalFiles) * 100);
 	const runtimePenalty = Math.min(15, ((jsonParseUnsafe + infiniteLoops + processExit) / totalFiles) * 100);
-	const score = Math.max(
-		0,
-		Math.min(100, Math.round(100 - emptyPenalty - throwPenalty - promisePenalty - runtimePenalty)),
-	);
+	const score = Math.max(0, Math.min(100, Math.round(100 - emptyPenalty - throwPenalty - promisePenalty - runtimePenalty)));
 
 	return {
 		name: "error-handling",

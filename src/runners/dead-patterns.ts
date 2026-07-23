@@ -106,9 +106,7 @@ export async function runDeadPatterns(cwd: string): Promise<CheckResult> {
 			}
 
 			// Hardcoded feature flags
-			const flagMatch = line.match(
-				/(?:const|let|var)\s+(USE_\w+|ENABLE_\w+|FEATURE_\w+|FLAG_\w+|WITH_\w+)\s*[=:]\s*(true|false)\b/,
-			);
+			const flagMatch = line.match(/(?:const|let|var)\s+(USE_\w+|ENABLE_\w+|FEATURE_\w+|FLAG_\w+|WITH_\w+)\s*[=:]\s*(true|false)\b/);
 			if (flagMatch) {
 				const flagName = flagMatch[1];
 				const usedInCondition = f.content.includes(`if (${flagName}`) || f.content.includes(`if (!${flagName}`);

@@ -32,7 +32,8 @@ export function runCommentStaleness(cwd: string): CheckResult {
 				premium: true,
 				comingSoon: true,
 				reason: "Set VCQA_PRO_KEY to enable comment staleness analysis",
-				description: "Detects stale comments: TODOs older than 6 months, numeric mismatches, commented-out code, semantic contradictions (LLM-powered).",
+				description:
+					"Detects stale comments: TODOs older than 6 months, numeric mismatches, commented-out code, semantic contradictions (LLM-powered).",
 			},
 			issues: [],
 			duration: Date.now() - start,
@@ -71,7 +72,9 @@ export function runCommentStaleness(cwd: string): CheckResult {
 								rule: "stale-todo",
 							});
 						}
-					} catch { /* invalid date */ }
+					} catch {
+						/* invalid date */
+					}
 				} else {
 					// No date — flag as potentially stale
 					issues.push({
@@ -163,8 +166,11 @@ export function runCommentStaleness(cwd: string): CheckResult {
 					let comment = trimmed;
 					if (trimmed.startsWith("/**")) {
 						for (let j = i; j < Math.min(i + 15, lines.length); j++) {
-							comment += "\n" + lines[j];
-							if (lines[j].includes("*/")) { commentEnd = j; break; }
+							comment += `\n${lines[j]}`;
+							if (lines[j].includes("*/")) {
+								commentEnd = j;
+								break;
+							}
 						}
 					}
 					const nextLines = lines.slice(commentEnd + 1, Math.min(commentEnd + 4, lines.length)).join("\n");
@@ -196,4 +202,3 @@ export function runCommentStaleness(cwd: string): CheckResult {
 		duration: Date.now() - start,
 	};
 }
-

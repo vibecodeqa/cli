@@ -10,7 +10,9 @@ import { suggestFix, validateCwd } from "./shared.js";
 
 export async function runFix(cwd: string, opts: { ai?: boolean; dryRun?: boolean; checkFilter?: string } = {}): Promise<void> {
 	console.log("");
-	console.log(`  \x1b[1m\x1b[38;5;141mvcqa fix${opts.ai ? " --ai" : ""}${opts.dryRun ? " --dry-run" : ""}${opts.checkFilter ? ` --check ${opts.checkFilter}` : ""}\x1b[0m`);
+	console.log(
+		`  \x1b[1m\x1b[38;5;141mvcqa fix${opts.ai ? " --ai" : ""}${opts.dryRun ? " --dry-run" : ""}${opts.checkFilter ? ` --check ${opts.checkFilter}` : ""}\x1b[0m`,
+	);
 	console.log(`  \x1b[2m${cwd}\x1b[0m`);
 	console.log("");
 
@@ -23,21 +25,21 @@ export async function runFix(cwd: string, opts: { ai?: boolean; dryRun?: boolean
 	console.log("");
 
 	const stack = detectStack(cwd);
-	let fixed = 0;
+	let _fixed = 0;
 
 	// 1. Auto-fix structure issues (missing files)
 	if (!existsSync(join(cwd, ".gitignore"))) {
 		writeFileSync(join(cwd, ".gitignore"), "node_modules\ndist\n.vibe-check\ncoverage\n.env\n.env.local\n");
 		console.log("  \x1b[32m\u2713 Created .gitignore\x1b[0m");
-		fixed++;
+		_fixed++;
 	}
 
 	if (existsSync(join(cwd, ".gitignore"))) {
 		const gi = readFileSync(join(cwd, ".gitignore"), "utf-8");
 		if (!gi.includes(".vibe-check")) {
-			writeFileSync(join(cwd, ".gitignore"), gi.trimEnd() + "\n.vibe-check/\n");
+			writeFileSync(join(cwd, ".gitignore"), `${gi.trimEnd()}\n.vibe-check/\n`);
 			console.log("  \x1b[32m\u2713 Added .vibe-check/ to .gitignore\x1b[0m");
-			fixed++;
+			_fixed++;
 		}
 	}
 
@@ -48,11 +50,13 @@ export async function runFix(cwd: string, opts: { ai?: boolean; dryRun?: boolean
 			const tsconfig = JSON.parse(raw);
 			if (!tsconfig.compilerOptions?.strict) {
 				tsconfig.compilerOptions = { ...tsconfig.compilerOptions, strict: true };
-				writeFileSync(tsconfigPath, JSON.stringify(tsconfig, null, 2) + "\n");
+				writeFileSync(tsconfigPath, `${JSON.stringify(tsconfig, null, 2)}\n`);
 				console.log('  \x1b[32m\u2713 Enabled "strict": true in tsconfig.json\x1b[0m');
-				fixed++;
+				_fixed++;
 			}
-		} catch { /* can't parse tsconfig */ }
+		} catch {
+			/* can't parse tsconfig */
+		}
 	}
 
 	// 2. Run linter auto-fix
@@ -61,7 +65,7 @@ export async function runFix(cwd: string, opts: { ai?: boolean; dryRun?: boolean
 		const { execSync } = await import("node:child_process");
 		try {
 			execSync("npx biome check --write .", { cwd, stdio: "inherit", timeout: 30_000 });
-			fixed++;
+			_fixed++;
 		} catch {
 			console.log("  \x1b[33mBiome had issues (some may be unfixable)\x1b[0m");
 		}
@@ -70,7 +74,7 @@ export async function runFix(cwd: string, opts: { ai?: boolean; dryRun?: boolean
 		const { execSync } = await import("node:child_process");
 		try {
 			execSync("npx eslint --fix src/", { cwd, stdio: "inherit", timeout: 30_000 });
-			fixed++;
+			_fixed++;
 		} catch {
 			console.log("  \x1b[33mESLint had issues (some may be unfixable)\x1b[0m");
 		}
@@ -101,7 +105,9 @@ export async function runFix(cwd: string, opts: { ai?: boolean; dryRun?: boolean
 	const scoreColor = delta.scoreDelta > 0 ? "32" : delta.scoreDelta < 0 ? "31" : "2";
 	const arrow = delta.scoreDelta > 0 ? "\u2191" : delta.scoreDelta < 0 ? "\u2193" : "=";
 	console.log("");
-	console.log(`  \x1b[1mScore:\x1b[0m \x1b[2m${beforeReport.grade} ${beforeReport.score}\x1b[0m \u2192 \x1b[${afterReport.score >= 75 ? "32" : afterReport.score >= 60 ? "33" : "31"}m${afterReport.grade} ${afterReport.score}\x1b[0m \x1b[${scoreColor}m(${arrow}${Math.abs(delta.scoreDelta)})\x1b[0m`);
+	console.log(
+		`  \x1b[1mScore:\x1b[0m \x1b[2m${beforeReport.grade} ${beforeReport.score}\x1b[0m \u2192 \x1b[${afterReport.score >= 75 ? "32" : afterReport.score >= 60 ? "33" : "31"}m${afterReport.grade} ${afterReport.score}\x1b[0m \x1b[${scoreColor}m(${arrow}${Math.abs(delta.scoreDelta)})\x1b[0m`,
+	);
 
 	if (delta.fixed.length > 0) {
 		console.log(`  \x1b[32m${delta.fixed.length} issues fixed\x1b[0m`);

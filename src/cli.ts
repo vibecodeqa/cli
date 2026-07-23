@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /** vibe-check — code health scanner for the AI coding era. */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runExplain } from "./commands/explain.js";
 import { runFix } from "./commands/fix.js";
@@ -248,7 +249,9 @@ async function printResults(
 	} else {
 		const gc = color(grade);
 		console.log("");
-		console.log(`  ${gc}\x1b[1m${grade}\x1b[0m ${gc}${score}/100\x1b[0m  \x1b[2m${checks.length} checks · ${totalIssues} issues · ${report.meta.duration}ms\x1b[0m`);
+		console.log(
+			`  ${gc}\x1b[1m${grade}\x1b[0m ${gc}${score}/100\x1b[0m  \x1b[2m${checks.length} checks · ${totalIssues} issues · ${report.meta.duration}ms\x1b[0m`,
+		);
 		if (trend) {
 			const historyDir = join(outputDir, "history");
 			const { loadHistory } = await import("./history.js");
@@ -286,7 +289,10 @@ async function printResults(
 
 		if (!flags.ciMode) {
 			const weakest = checks
-				.filter((c) => { const det = c.details as Record<string, unknown>; return !det.skipped && !det.comingSoon && c.score < 70; })
+				.filter((c) => {
+					const det = c.details as Record<string, unknown>;
+					return !det.skipped && !det.comingSoon && c.score < 70;
+				})
 				.sort((a, b) => a.score - b.score)
 				.slice(0, 3);
 			if (weakest.length > 0) {
@@ -294,7 +300,9 @@ async function printResults(
 				for (const c of weakest) {
 					const gc2 = color(c.grade);
 					const label = getCheckMeta(c.name).label || c.name;
-					console.log(`  ${gc2}${c.grade}\x1b[0m \x1b[2m${String(c.score).padStart(3)}\x1b[0m  ${label.padEnd(18)}\x1b[2m→ vcqa explain ${c.name}\x1b[0m`);
+					console.log(
+						`  ${gc2}${c.grade}\x1b[0m \x1b[2m${String(c.score).padStart(3)}\x1b[0m  ${label.padEnd(18)}\x1b[2m→ vcqa explain ${c.name}\x1b[0m`,
+					);
 				}
 				console.log("");
 			}
@@ -313,9 +321,8 @@ async function printResults(
 
 function getChangedFiles(cwd: string, base: string): Set<string> | null {
 	try {
-		const { execSync } = require("node:child_process") as typeof import("node:child_process");
-		const cmd = base === "HEAD" ? "git diff --name-only" : `git diff --name-only ${base}...HEAD`;
-		const stdout = execSync(cmd, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+		const args = base === "HEAD" ? ["diff", "--name-only"] : ["diff", "--name-only", `${base}...HEAD`];
+		const stdout = execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
 		if (!stdout) return new Set();
 		return new Set(stdout.split("\n").filter((f) => f.length > 0));
 	} catch {
@@ -334,10 +341,22 @@ async function writeOutputs(report: VibeReport, outputDir: string, flags: Parsed
 	// Save history
 	const historyDir = join(outputDir, "history");
 	mkdirSync(historyDir, { recursive: true });
-	writeFileSync(join(historyDir, `${report.timestamp}.json`), JSON.stringify({ score: report.score, grade: report.grade, timestamp: report.timestamp, checks: report.checks.map((c) => ({ name: c.name, score: c.score, issues: c.issues.length })) }));
+	writeFileSync(
+		join(historyDir, `${report.timestamp}.json`),
+		JSON.stringify({
+			score: report.score,
+			grade: report.grade,
+			timestamp: report.timestamp,
+			checks: report.checks.map((c) => ({ name: c.name, score: c.score, issues: c.issues.length })),
+		}),
+	);
 	const historyFiles = readdirSync(historyDir).sort();
 	for (const old of historyFiles.slice(0, historyFiles.length - 30)) {
-		try { unlinkSync(join(historyDir, old)); } catch { /* ignore */ }
+		try {
+			unlinkSync(join(historyDir, old));
+		} catch {
+			/* ignore */
+		}
 	}
 
 	// HTML report
@@ -373,13 +392,18 @@ async function handleUpload(report: VibeReport, cwd: string, quietMode: boolean)
 		return;
 	}
 	const repo = report.meta.repoUrl?.replace(/^https?:\/\/github\.com\//, "")?.replace(/\.git$/, "") || "";
-	if (!repo) { if (!quietMode) console.log("  \x1b[33m\u26a0 No git remote — can't upload\x1b[0m"); return; }
+	if (!repo) {
+		if (!quietMode) console.log("  \x1b[33m\u26a0 No git remote — can't upload\x1b[0m");
+		return;
+	}
 
 	let sha: string | undefined;
 	try {
 		const { execSync } = await import("node:child_process");
 		sha = execSync("git rev-parse HEAD", { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-	} catch { /* not a git repo */ }
+	} catch {
+		/* not a git repo */
+	}
 	try {
 		const res = await fetch("https://api.vibecodeqa.online/api/reports", {
 			method: "POST",
@@ -405,7 +429,10 @@ async function startWatch(cwd: string): Promise<void> {
 	const watchDirs = workspace.isMonorepo
 		? workspace.srcRoots.map((d) => join(cwd, d)).filter((d) => existsSync(d))
 		: ["src", "web/src"].map((d) => join(cwd, d)).filter((d) => existsSync(d));
-	if (watchDirs.length === 0) { console.log("  \x1b[31mNo src/ directory to watch\x1b[0m"); process.exit(1); }
+	if (watchDirs.length === 0) {
+		console.log("  \x1b[31mNo src/ directory to watch\x1b[0m");
+		process.exit(1);
+	}
 
 	console.log("  \x1b[2mWatching for changes... (Ctrl+C to stop)\x1b[0m\n");
 	let debounce: ReturnType<typeof setTimeout> | null = null;
@@ -419,8 +446,12 @@ async function startWatch(cwd: string): Promise<void> {
 				running = true;
 				try {
 					console.log(`  \x1b[2mChanged: ${filename} — re-scanning...\x1b[0m`);
-					await main().catch((err) => { console.error("scan error:", err); });
-				} finally { running = false; }
+					await main().catch((err) => {
+						console.error("scan error:", err);
+					});
+				} finally {
+					running = false;
+				}
 			}, 500);
 		});
 	}
@@ -446,8 +477,11 @@ function readKey(): Promise<string> {
 function openPath(target: string): void {
 	const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
 	import("node:child_process").then(({ spawn }) => {
-		try { spawn(cmd, [target], { detached: true, stdio: "ignore", shell: process.platform === "win32" }).unref(); }
-		catch { /* best-effort */ }
+		try {
+			spawn(cmd, [target], { detached: true, stdio: "ignore", shell: process.platform === "win32" }).unref();
+		} catch {
+			/* best-effort */
+		}
 	});
 }
 
@@ -456,7 +490,12 @@ async function promptNextAction(cwd: string, outputDir: string): Promise<void> {
 		"  \x1b[1m[m]\x1b[0m\x1b[2m monitor\x1b[0m   \x1b[1m[o]\x1b[0m\x1b[2m open report\x1b[0m   \x1b[1m[f]\x1b[0m\x1b[2m fix --ai\x1b[0m   \x1b[1m[enter]\x1b[0m\x1b[2m quit\x1b[0m  ",
 	);
 	let key: string;
-	try { key = await readKey(); } catch { process.stdout.write("\n"); return; }
+	try {
+		key = await readKey();
+	} catch {
+		process.stdout.write("\n");
+		return;
+	}
 	process.stdout.write("\n");
 	const k = key.toLowerCase();
 	if (k === "m") {
@@ -483,19 +522,28 @@ async function checkForUpdate(currentVersion: string): Promise<void> {
 		if (!latest || latest === currentVersion) return;
 		const cur = currentVersion.split(".").map(Number);
 		const lat = latest.split(".").map(Number);
-		const isNewer = lat[0] > cur[0] || (lat[0] === cur[0] && lat[1] > cur[1]) || (lat[0] === cur[0] && lat[1] === cur[1] && lat[2] > cur[2]);
+		const isNewer =
+			lat[0] > cur[0] || (lat[0] === cur[0] && lat[1] > cur[1]) || (lat[0] === cur[0] && lat[1] === cur[1] && lat[2] > cur[2]);
 		if (isNewer) {
 			console.log(`  \x1b[33mUpdate available: ${currentVersion} → ${latest}\x1b[0m  Run \x1b[1mnpx @vibecodeqa/cli@latest\x1b[0m\n`);
 		}
-	} catch { /* network error — silently ignore */ }
+	} catch {
+		/* network error — silently ignore */
+	}
 }
 
 // ── Main ──
 
 async function main() {
 	const args = process.argv.slice(2);
-	if (args.includes("--version") || args.includes("-v")) { console.log(VERSION); return; }
-	if (args.includes("--help") || args.includes("-h")) { printHelp(); return; }
+	if (args.includes("--version") || args.includes("-v")) {
+		console.log(VERSION);
+		return;
+	}
+	if (args.includes("--help") || args.includes("-h")) {
+		printHelp();
+		return;
+	}
 
 	if (args[0] === "init") {
 		await runInit(resolve(args.slice(1).find((a) => !a.startsWith("-")) || "."));
@@ -511,7 +559,10 @@ async function main() {
 		await runFix(resolve(path), { ai: aiMode, dryRun, checkFilter });
 		return;
 	}
-	if (args[0] === "explain") { await runExplain(args[1]); return; }
+	if (args[0] === "explain") {
+		await runExplain(args[1]);
+		return;
+	}
 	if (args[0] === "monitor") {
 		const { startMonitor } = await import("./monitor.js");
 		await startMonitor(resolve(args.slice(1).find((a) => !a.startsWith("-")) || "."));
@@ -532,16 +583,18 @@ async function main() {
 	const report = await scan(cwd, {
 		skipTests,
 		config,
-		onProgress: quietMode ? undefined : (check, result) => {
-			const det = result.details as Record<string, unknown>;
-			const premium = det.comingSoon;
-			const skipped = det.skipped;
-			const c = premium ? "\x1b[2m" : skipped ? "\x1b[2m" : color(result.grade);
-			const label = premium ? "soon" : skipped ? "skip" : result.grade;
-			const scoreStr = premium ? "PRO" : skipped ? "—" : `${result.score}/100`;
-			const issueStr = result.issues.length > 0 ? `  \x1b[2m${result.issues.length} issues\x1b[0m` : "";
-			console.log(`  ${check.padEnd(14)}${c}${label.padEnd(5)}${scoreStr}\x1b[0m  \x1b[2m${result.duration}ms\x1b[0m${issueStr}`);
-		},
+		onProgress: quietMode
+			? undefined
+			: (check, result) => {
+					const det = result.details as Record<string, unknown>;
+					const premium = det.comingSoon;
+					const skipped = det.skipped;
+					const c = premium ? "\x1b[2m" : skipped ? "\x1b[2m" : color(result.grade);
+					const label = premium ? "soon" : skipped ? "skip" : result.grade;
+					const scoreStr = premium ? "PRO" : skipped ? "—" : `${result.score}/100`;
+					const issueStr = result.issues.length > 0 ? `  \x1b[2m${result.issues.length} issues\x1b[0m` : "";
+					console.log(`  ${check.padEnd(14)}${c}${label.padEnd(5)}${scoreStr}\x1b[0m  \x1b[2m${result.duration}ms\x1b[0m${issueStr}`);
+				},
 	});
 
 	const { score, checks } = report;
@@ -562,7 +615,11 @@ async function main() {
 	let prevReport: VibeReport | undefined;
 	const prevReportPath = join(outputDir, "report.json");
 	if (existsSync(prevReportPath)) {
-		try { prevReport = JSON.parse(readFileSync(prevReportPath, "utf-8")); } catch { /* corrupt */ }
+		try {
+			prevReport = JSON.parse(readFileSync(prevReportPath, "utf-8"));
+		} catch {
+			/* corrupt */
+		}
 	}
 
 	await writeOutputs(report, outputDir, flags, prevReport);
@@ -596,7 +653,10 @@ async function main() {
 		checkForUpdate(VERSION).catch(() => {}); // ok — non-blocking, best-effort
 	}
 
-	if (watchMode) { await startWatch(cwd); return; }
+	if (watchMode) {
+		await startWatch(cwd);
+		return;
+	}
 
 	if (interactive && existsSync(join(cwd, ".git")) && !existsSync(join(cwd, ".github", "workflows", "vibecodeqa.yml"))) {
 		console.log(`  \x1b[2mTip: Add CI scanning with one line:\x1b[0m  \x1b[1m- uses: vibecodeqa/action@v1\x1b[0m`);

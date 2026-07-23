@@ -157,7 +157,7 @@ describe("runStandards", () => {
 		const lines250 = Array.from({ length: 250 }, (_, i) => `export const v${i} = ${i};`).join("\n");
 		const { dir, stack } = makeProject({ "src/a.ts": lines250 });
 		const result = runStandards(dir, stack);
-		expect(result.issues.filter(i => i.rule === "large-file")).toHaveLength(0);
+		expect(result.issues.filter((i) => i.rule === "large-file")).toHaveLength(0);
 		rmSync(dir, { recursive: true });
 	});
 });

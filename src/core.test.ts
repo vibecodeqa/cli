@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { scan, computeScore, CHECK_META, gradeFromScore } from "./core.js";
+import { CHECK_META, computeScore, gradeFromScore, scan } from "./core.js";
 
 const TMP = join(import.meta.dirname!, "__test_core__");
 
@@ -60,8 +60,13 @@ describe("core API", () => {
 		const origLog = console.log;
 		const origWrite = process.stdout.write;
 		let output = "";
-		console.log = (...args: unknown[]) => { output += args.join(" "); };
-		process.stdout.write = ((chunk: unknown) => { output += String(chunk); return true; }) as typeof process.stdout.write;
+		console.log = (...args: unknown[]) => {
+			output += args.join(" ");
+		};
+		process.stdout.write = ((chunk: unknown) => {
+			output += String(chunk);
+			return true;
+		}) as typeof process.stdout.write;
 		try {
 			await scan(TMP, { skipTests: true, checks: ["structure"] });
 		} finally {
@@ -78,9 +83,7 @@ describe("re-exports", () => {
 	});
 
 	it("computeScore works", () => {
-		const score = computeScore([
-			{ name: "testing", score: 80, grade: "B", details: {}, issues: [], duration: 0 },
-		]);
+		const score = computeScore([{ name: "testing", score: 80, grade: "B", details: {}, issues: [], duration: 0 }]);
 		expect(score).toBe(80);
 	});
 

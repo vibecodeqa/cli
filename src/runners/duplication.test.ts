@@ -71,8 +71,8 @@ describe("runDuplication", () => {
 		// Blocks that are only imports should not count as duplication
 		const imports = Array.from({ length: 8 }, (_, i) => `import { mod${i} } from './mod${i}';`).join("\n");
 		const dir = makeProject({
-			"src/a.ts": imports + "\nexport const a = 1;\n",
-			"src/b.ts": imports + "\nexport const b = 2;\n",
+			"src/a.ts": `${imports}\nexport const a = 1;\n`,
+			"src/b.ts": `${imports}\nexport const b = 2;\n`,
 		});
 		const result = await runDuplication(dir);
 		expect(result.issues.filter((i) => i.rule === "duplicate-code")).toHaveLength(0);

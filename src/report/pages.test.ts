@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
 import type { CheckResult, VibeReport } from "../types.js";
 
 // We test categoryPage indirectly through generatePages
@@ -48,7 +48,11 @@ describe("report generation", () => {
 
 		const report = makeReport(dir, [
 			{
-				name: "standards", score: 80, grade: "B", details: {}, duration: 10,
+				name: "standards",
+				score: 80,
+				grade: "B",
+				details: {},
+				duration: 10,
 				issues: [{ severity: "warning", message: "console.log found", file: "src/auth.ts", line: 2, rule: "no-console" }],
 			},
 		]);
@@ -64,7 +68,11 @@ describe("report generation", () => {
 		const dir = mkdtempSync(join(tmpdir(), "vcqa-report-"));
 		const report = makeReport(dir, [
 			{
-				name: "standards", score: 80, grade: "B", details: {}, duration: 10,
+				name: "standards",
+				score: 80,
+				grade: "B",
+				details: {},
+				duration: 10,
 				issues: [{ severity: "warning", message: "issue", file: "src/missing.ts", line: 5, rule: "test" }],
 			},
 		]);
@@ -82,7 +90,11 @@ describe("report generation", () => {
 
 		const report = makeReport(dir, [
 			{
-				name: "security", score: 50, grade: "C", details: {}, duration: 10,
+				name: "security",
+				score: 50,
+				grade: "C",
+				details: {},
+				duration: 10,
 				issues: [{ severity: "error", message: "XSS", file: "src/xss.ts", line: 1, rule: "CWE-79" }],
 			},
 		]);

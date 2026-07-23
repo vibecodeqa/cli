@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runFrontendHealth } from "./frontend-health.js";
 
@@ -20,20 +20,26 @@ describe("frontend-health", () => {
 	});
 
 	it("detects conflicting UI frameworks", () => {
-		writeFileSync(join(dir, "package.json"), JSON.stringify({
-			name: "test",
-			dependencies: { "@mui/material": "^5", tailwindcss: "^3" },
-		}));
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({
+				name: "test",
+				dependencies: { "@mui/material": "^5", tailwindcss: "^3" },
+			}),
+		);
 		writeFileSync(join(dir, "src", "App.tsx"), 'export function App() { return <div className="flex">hi</div>; }');
 		const result = runFrontendHealth(dir);
 		expect(result.issues.some((i) => i.rule === "framework-conflict")).toBe(true);
 	});
 
 	it("allows Tailwind + Radix (shadcn pattern)", () => {
-		writeFileSync(join(dir, "package.json"), JSON.stringify({
-			name: "test",
-			dependencies: { tailwindcss: "^3", "@radix-ui/react-dialog": "^1" },
-		}));
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({
+				name: "test",
+				dependencies: { tailwindcss: "^3", "@radix-ui/react-dialog": "^1" },
+			}),
+		);
 		writeFileSync(join(dir, "src", "App.tsx"), 'export function App() { return <div className="flex">hi</div>; }');
 		const result = runFrontendHealth(dir);
 		expect(result.issues.some((i) => i.rule === "framework-conflict")).toBe(false);
@@ -56,35 +62,46 @@ describe("frontend-health", () => {
 
 	it("passes images with dimensions", () => {
 		writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "test" }));
-		writeFileSync(join(dir, "src", "Hero.tsx"), 'export function Hero() { return <img src="/hero.jpg" width={800} height={400} alt="hero" />; }');
+		writeFileSync(
+			join(dir, "src", "Hero.tsx"),
+			'export function Hero() { return <img src="/hero.jpg" width={800} height={400} alt="hero" />; }',
+		);
 		const result = runFrontendHealth(dir);
 		expect(result.issues.some((i) => i.rule === "unoptimized-image")).toBe(false);
 	});
 
 	it("detects heavy imports", () => {
 		writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "test" }));
-		writeFileSync(join(dir, "src", "Utils.tsx"), 'import * as _ from "lodash";\nexport function X() { return <div>{_.get({}, "a")}</div>; }');
+		writeFileSync(
+			join(dir, "src", "Utils.tsx"),
+			'import * as _ from "lodash";\nexport function X() { return <div>{_.get({}, "a")}</div>; }',
+		);
 		const result = runFrontendHealth(dir);
 		expect(result.issues.some((i) => i.rule === "heavy-import")).toBe(true);
 	});
 
 	it("detects missing loading states", () => {
 		writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "test" }));
-		writeFileSync(join(dir, "src", "Data.tsx"), `
+		writeFileSync(
+			join(dir, "src", "Data.tsx"),
+			`
 import { useEffect, useState } from "react";
 export function Data() {
   const [data, setData] = useState(null);
   useEffect(() => { fetch("/api").then(r => r.json()).then(setData); }, []);
   return <div>{JSON.stringify(data)}</div>;
 }
-`);
+`,
+		);
 		const result = runFrontendHealth(dir);
 		expect(result.issues.some((i) => i.rule === "no-loading-state")).toBe(true);
 	});
 
 	it("passes when loading state exists", () => {
 		writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "test" }));
-		writeFileSync(join(dir, "src", "Data.tsx"), `
+		writeFileSync(
+			join(dir, "src", "Data.tsx"),
+			`
 import { useEffect, useState } from "react";
 export function Data() {
   const [data, setData] = useState(null);
@@ -93,7 +110,8 @@ export function Data() {
   if (loading) return <div>Loading...</div>;
   return <div>{JSON.stringify(data)}</div>;
 }
-`);
+`,
+		);
 		const result = runFrontendHealth(dir);
 		expect(result.issues.some((i) => i.rule === "no-loading-state")).toBe(false);
 	});

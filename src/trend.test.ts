@@ -1,9 +1,9 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { computeTrend, formatTrend, trendHTML } from "./trend.js";
 import type { VibeReport } from "./types.js";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 function makeReport(score: number, checks: { name: string; score: number; issues: number }[]): VibeReport {
 	return {
@@ -87,7 +87,11 @@ describe("computeTrend", () => {
 describe("formatTrend", () => {
 	it("formats improvement", () => {
 		const out = formatTrend({
-			scoreDelta: 5, checkDeltas: [], newIssues: 0, fixedIssues: 3, prevTimestamp: "2026-05-29T00:00:00Z",
+			scoreDelta: 5,
+			checkDeltas: [],
+			newIssues: 0,
+			fixedIssues: 3,
+			prevTimestamp: "2026-05-29T00:00:00Z",
 		});
 		expect(out).toContain("5 pts");
 		expect(out).toContain("improved");
@@ -96,7 +100,11 @@ describe("formatTrend", () => {
 
 	it("formats regression", () => {
 		const out = formatTrend({
-			scoreDelta: -3, checkDeltas: [], newIssues: 2, fixedIssues: 0, prevTimestamp: "2026-05-29T00:00:00Z",
+			scoreDelta: -3,
+			checkDeltas: [],
+			newIssues: 2,
+			fixedIssues: 0,
+			prevTimestamp: "2026-05-29T00:00:00Z",
 		});
 		expect(out).toContain("3 pts");
 		expect(out).toContain("declined");
@@ -116,8 +124,11 @@ describe("formatTrend", () => {
 describe("trendHTML", () => {
 	it("generates valid HTML", () => {
 		const html = trendHTML({
-			scoreDelta: 5, checkDeltas: [{ name: "lint", prev: 70, curr: 75, delta: 5 }],
-			newIssues: 0, fixedIssues: 2, prevTimestamp: "2026-05-29T00:00:00Z",
+			scoreDelta: 5,
+			checkDeltas: [{ name: "lint", prev: 70, curr: 75, delta: 5 }],
+			newIssues: 0,
+			fixedIssues: 2,
+			prevTimestamp: "2026-05-29T00:00:00Z",
 		});
 		expect(html).toContain("+5 pts");
 		expect(html).toContain("2 fixed");

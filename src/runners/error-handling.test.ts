@@ -14,7 +14,6 @@ function makeProject(files: Record<string, string>): string {
 	return dir;
 }
 
-
 describe("runErrorHandling", () => {
 	it("returns skipped when no source files", () => {
 		const dir = mkdtempSync(join(tmpdir(), "vcqa-erh-"));
@@ -47,7 +46,7 @@ describe("runErrorHandling", () => {
 
 	it("detects error info leakage to client", () => {
 		const dir = makeProject({
-			"app.ts": 'export function handler(req: any, res: any) {\n  try { doStuff(); } catch(err) { res.json({ error: err.stack }); }\n}\n',
+			"app.ts": "export function handler(req: any, res: any) {\n  try { doStuff(); } catch(err) { res.json({ error: err.stack }); }\n}\n",
 		});
 		const result = runErrorHandling(dir);
 		expect(result.issues.some((i) => i.rule === "error-info-leak")).toBe(true);

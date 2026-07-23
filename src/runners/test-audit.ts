@@ -156,11 +156,11 @@ export async function runTestAudit(cwd: string): Promise<CheckResult> {
 
 			// Count assertions and mocks in body
 			const assertCount =
-				(body.match(/\bexpect\s*\(/g) || []).length +
-				(body.match(/\bassert[.(]/g) || []).length +
-				(body.match(/\bshould\./g) || []).length;
+				(body.match(/\bexpect\s*\(/g) || []).length + (body.match(/\bassert[.(]/g) || []).length + (body.match(/\bshould\./g) || []).length;
 			const mockCount = (
-				body.match(/\b(vi\.fn|jest\.fn|vi\.mock|jest\.mock|vi\.spyOn|jest\.spyOn|sinon\.(stub|spy|mock)|\.mockResolvedValue|\.mockReturnValue|\.mockImplementation)\b/g) || []
+				body.match(
+					/\b(vi\.fn|jest\.fn|vi\.mock|jest\.mock|vi\.spyOn|jest\.spyOn|sinon\.(stub|spy|mock)|\.mockResolvedValue|\.mockReturnValue|\.mockImplementation)\b/g,
+				) || []
 			).length;
 
 			// 2. No assertions
@@ -181,7 +181,7 @@ export async function runTestAudit(cwd: string): Promise<CheckResult> {
 				/expect\s*\(\s*true\s*\)\s*\.toBe\s*\(\s*true\s*\)/,
 				/expect\s*\(\s*false\s*\)\s*\.toBe\s*\(\s*false\s*\)/,
 				/expect\s*\(\s*1\s*\)\s*\.toBe\s*\(\s*1\s*\)/,
-				/expect\s*\(\s*"[^"]*"\s*\)\s*\.toBe\s*\(\s*"[^"]*"\s*\)/,  // string literal == string literal
+				/expect\s*\(\s*"[^"]*"\s*\)\s*\.toBe\s*\(\s*"[^"]*"\s*\)/, // string literal == string literal
 				/expect\s*\(\s*null\s*\)\s*\.toBeNull\s*\(\s*\)/,
 				/expect\s*\(\s*undefined\s*\)\s*\.toBeUndefined\s*\(\s*\)/,
 			];
@@ -268,9 +268,7 @@ export async function runTestAudit(cwd: string): Promise<CheckResult> {
 	issues.push(...llmFindings);
 
 	const warningCount = issues.filter((i) => i.severity === "warning").length;
-	const score = totalTests === 0
-		? 100
-		: Math.max(10, 100 - warningCount * 12 - (issues.length - warningCount) * 3);
+	const score = totalTests === 0 ? 100 : Math.max(10, 100 - warningCount * 12 - (issues.length - warningCount) * 3);
 
 	return {
 		name: "test-audit",
@@ -319,7 +317,9 @@ function loadCache(cwd: string): AuditCache {
 			const data = JSON.parse(readFileSync(p, "utf-8"));
 			if (data.version === 1) return data;
 		}
-	} catch { /* corrupt */ }
+	} catch {
+		/* corrupt */
+	}
 	return { version: 1, files: {} };
 }
 
@@ -328,5 +328,7 @@ function saveCache(cwd: string, cache: AuditCache): void {
 		const dir = join(cwd, ".vibe-check");
 		if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 		writeFileSync(join(dir, "test-audit-cache.json"), JSON.stringify(cache));
-	} catch { /* can't write */ }
+	} catch {
+		/* can't write */
+	}
 }

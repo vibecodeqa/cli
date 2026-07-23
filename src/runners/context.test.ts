@@ -34,7 +34,7 @@ describe("runContext", () => {
 	it("flags files with too many imports", () => {
 		const imports = Array.from({ length: 20 }, (_, i) => `import { x${i} } from './mod${i}';`).join("\n");
 		const dir = makeProject({
-			"src/heavy.ts": imports + "\nexport const y = 1;\n",
+			"src/heavy.ts": `${imports}\nexport const y = 1;\n`,
 		});
 		const result = runContext(dir);
 		expect(result.issues.some((i) => i.rule === "heavy-imports")).toBe(true);

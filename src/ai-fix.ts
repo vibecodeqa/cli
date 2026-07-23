@@ -58,11 +58,7 @@ export function collectFixableIssues(
 }
 
 /** Fix issues using AI. Returns results for each attempted fix. */
-export async function aiFixIssues(
-	cwd: string,
-	issues: FixableIssue[],
-	opts: { dryRun: boolean },
-): Promise<AiFixResult[]> {
+export async function aiFixIssues(cwd: string, issues: FixableIssue[], opts: { dryRun: boolean }): Promise<AiFixResult[]> {
 	const apiKey = process.env.ANTHROPIC_API_KEY || "";
 	const proKey = process.env.VCQA_PRO_KEY || "";
 
@@ -105,9 +101,7 @@ export async function aiFixIssues(
 		const prompt = buildFixPrompt(issue, meta, numbered, issue.file);
 		process.stdout.write(`  ${issue.file}:${issue.line} \x1b[2m${issue.message.slice(0, 50)}\x1b[0m `);
 
-		const fix = apiKey
-			? await callAnthropicDirect(prompt, apiKey)
-			: await callVcqaProxy(prompt, proKey);
+		const fix = apiKey ? await callAnthropicDirect(prompt, apiKey) : await callVcqaProxy(prompt, proKey);
 
 		if (!fix) {
 			console.log("\x1b[33mskip\x1b[0m");

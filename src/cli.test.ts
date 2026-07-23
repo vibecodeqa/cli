@@ -284,10 +284,7 @@ describe("init command", () => {
 
 describe("config disabling checks", () => {
 	it("disabled checks are excluded from scoring", () => {
-		writeFileSync(
-			join(TMP, ".vcqa.json"),
-			JSON.stringify({ checks: { confusion: { enabled: false }, context: { enabled: false } } }),
-		);
+		writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ checks: { confusion: { enabled: false }, context: { enabled: false } } }));
 		const out = run("--skip-tests --json .");
 		const report = JSON.parse(out);
 		const confusion = report.checks.find((c: any) => c.name === "confusion");
@@ -300,10 +297,7 @@ describe("config disabling checks", () => {
 
 	it("per-check ignore filters issues from matching files", () => {
 		writeFileSync(join(TMP, "src", "gen.ts"), 'eval("bad");\n');
-		writeFileSync(
-			join(TMP, ".vcqa.json"),
-			JSON.stringify({ checks: { security: { ignore: ["src/gen.ts"] } } }),
-		);
+		writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ checks: { security: { ignore: ["src/gen.ts"] } } }));
 		const out = run("--skip-tests --json .");
 		const report = JSON.parse(out);
 		const sec = report.checks.find((c: any) => c.name === "security");

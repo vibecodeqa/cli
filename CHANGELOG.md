@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.45.1 (2026-07-23)
+
+### Fixes
+- **Fixed**: `--diff` was silently a no-op in the ESM build — `getChangedFiles` used `require("node:child_process")`, which throws in ESM and was swallowed by its catch, so diff filtering never applied. Now a static import, and the git call uses an argv array.
+- **Fixed**: `pnpm lint` is green again — regex `exec()` while-loops converted to `matchAll()` (noAssignInExpressions), mechanical style fixes applied. Complexity warnings remain as known refactor debt.
+- **Docs**: CLAUDE.md check/weight table corrected against `@vibecodeqa/schema` (Quality 30 incl. the 0.43.0 checks, Testing 13, AI Readiness 9).
+
 ## 0.45.0 (2026-07-23)
 
 ### Declarative stack gating (appliesTo)

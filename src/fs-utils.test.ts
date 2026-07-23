@@ -2,7 +2,16 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { collectSourceFiles, getProductionFiles, getTestFiles, readDeps, readEnvIgnoreNames, readSafe, setGlobalIgnoreNames, setGlobalSrcRoots } from "./fs-utils.js";
+import {
+	collectSourceFiles,
+	getProductionFiles,
+	getTestFiles,
+	readDeps,
+	readEnvIgnoreNames,
+	readSafe,
+	setGlobalIgnoreNames,
+	setGlobalSrcRoots,
+} from "./fs-utils.js";
 
 function makeProject(files: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-fs-"));
@@ -98,7 +107,9 @@ describe("collectSourceFiles", () => {
 		});
 		setGlobalIgnoreNames(["src/generated"]);
 		try {
-			const files = collectSourceFiles(dir).map((f) => f.path).sort();
+			const files = collectSourceFiles(dir)
+				.map((f) => f.path)
+				.sort();
 			expect(files).toEqual(["src/app.ts", "src/other/keep.ts"]);
 		} finally {
 			setGlobalIgnoreNames([]);

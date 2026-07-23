@@ -124,7 +124,12 @@ function checkCICD(cwd: string, has: HasFn, read: ReadFn): CategoryResult {
 					const lines = content.split("\n");
 					for (let li = 0; li < lines.length; li++) {
 						const trimLine = lines[li].trim();
-						if (trimLine.startsWith("run:") || trimLine.startsWith("run :") || trimLine.startsWith("- run:") || trimLine.startsWith("- run :")) {
+						if (
+							trimLine.startsWith("run:") ||
+							trimLine.startsWith("run :") ||
+							trimLine.startsWith("- run:") ||
+							trimLine.startsWith("- run :")
+						) {
 							const runBlock = lines.slice(li, Math.min(li + 10, lines.length)).join("\n");
 							if (pat.test(runBlock)) {
 								issues.push({
@@ -195,7 +200,8 @@ function checkSupplyChain(has: HasFn, read: ReadFn): CategoryResult {
 
 	// Lockfile committed
 	practices++;
-	const hasLockfile = has("pnpm-lock.yaml") || has("package-lock.json") || has("yarn.lock") || has("bun.lockb") || has("bun.lock") || has("pubspec.lock");
+	const hasLockfile =
+		has("pnpm-lock.yaml") || has("package-lock.json") || has("yarn.lock") || has("bun.lockb") || has("bun.lock") || has("pubspec.lock");
 	if (hasLockfile) {
 		followed++;
 	} else {
@@ -533,8 +539,8 @@ function checkMonitoring(cwd: string): CategoryResult {
 	if (isServer) {
 		practices++;
 		const allFiles = collectAllFiles(cwd);
-		const hasHealthEndpoint = allFiles.some(
-			(f) => /["'`]\/health["'`]|["'`]\/healthz["'`]|["'`]\/readyz["'`]|\.get\s*\(\s*["'`]\/health/.test(f.content),
+		const hasHealthEndpoint = allFiles.some((f) =>
+			/["'`]\/health["'`]|["'`]\/healthz["'`]|["'`]\/readyz["'`]|\.get\s*\(\s*["'`]\/health/.test(f.content),
 		);
 		if (hasHealthEndpoint) {
 			followed++;

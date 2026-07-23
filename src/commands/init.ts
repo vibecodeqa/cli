@@ -56,7 +56,7 @@ jobs:
 	) {
 		writeFileSync(
 			join(cwd, "biome.json"),
-			JSON.stringify(
+			`${JSON.stringify(
 				{
 					$schema: "https://biomejs.dev/schemas/2.0.0/schema.json",
 					formatter: { indentStyle: "tab", lineWidth: 120 },
@@ -65,7 +65,7 @@ jobs:
 				},
 				null,
 				"\t",
-			) + "\n",
+			)}\n`,
 		);
 		console.log(`  \x1b[32m+\x1b[0m biome.json`);
 		created++;
@@ -82,13 +82,13 @@ jobs:
 		const config = {
 			_comment: "vcqa config — docs: https://vibecodeqa.online/skills",
 			checks: checksConfig,
-			_checks_help: "Set { \"enabled\": false } to disable. Add \"ignore\": [\"generated/**\"] to skip files per-check.",
+			_checks_help: 'Set { "enabled": false } to disable. Add "ignore": ["generated/**"] to skip files per-check.',
 			ignore: [],
-			_ignore_help: "Global file patterns to skip: [\"vendor/**\", \"*.generated.ts\", \"proto/**\"]",
+			_ignore_help: 'Global file patterns to skip: ["vendor/**", "*.generated.ts", "proto/**"]',
 			failUnder: 60,
 			_failUnder_help: "Exit with code 1 if score below this. Overridden by --fail-under flag.",
 		};
-		writeFileSync(vcqaConfigPath, JSON.stringify(config, null, 2) + "\n");
+		writeFileSync(vcqaConfigPath, `${JSON.stringify(config, null, 2)}\n`);
 		console.log(`  \x1b[32m+\x1b[0m .vcqa.json`);
 		created++;
 	}
@@ -98,7 +98,7 @@ jobs:
 	if (existsSync(gitignorePath)) {
 		const content = readFileSync(gitignorePath, "utf-8");
 		if (!content.includes(".vibe-check")) {
-			writeFileSync(gitignorePath, content.trimEnd() + "\n.vibe-check/\n");
+			writeFileSync(gitignorePath, `${content.trimEnd()}\n.vibe-check/\n`);
 			console.log(`  \x1b[32m+\x1b[0m .gitignore (added .vibe-check/)`);
 			created++;
 		}

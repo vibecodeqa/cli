@@ -190,9 +190,7 @@ export function runReact(cwd: string): CheckResult {
 
 	// Error Boundary presence (moved here from error-handling — React-owned concern).
 	// Flat 5-point penalty, matching its historical weight; kept out of warnPenalty.
-	const hasErrorBoundary = allFiles.some(
-		(f) => f.content.includes("componentDidCatch") || f.content.includes("ErrorBoundary"),
-	);
+	const hasErrorBoundary = allFiles.some((f) => f.content.includes("componentDidCatch") || f.content.includes("ErrorBoundary"));
 
 	// Tailwind: inline style objects when TW is available (moved from standards).
 	let inlineStyles = 0;
@@ -237,7 +235,9 @@ export function runReact(cwd: string): CheckResult {
 			domManipulation,
 			hasErrorBoundary,
 			inlineStyles,
-			suggestion: !hasHooksPlugin ? "Install eslint-plugin-react-hooks for deeper React analysis: pnpm add -D eslint-plugin-react-hooks" : undefined,
+			suggestion: !hasHooksPlugin
+				? "Install eslint-plugin-react-hooks for deeper React analysis: pnpm add -D eslint-plugin-react-hooks"
+				: undefined,
 		},
 		issues,
 		duration: Date.now() - start,

@@ -84,7 +84,14 @@ function matchesIgnoreSubpath(relPath: string): boolean {
 /** Parse VCQA_IGNORE (comma/newline/whitespace separated segment names). */
 export function readEnvIgnoreNames(env: string | undefined): string[] {
 	if (!env) return [];
-	return [...new Set(env.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean))];
+	return [
+		...new Set(
+			env
+				.split(/[\s,]+/)
+				.map((s) => s.trim())
+				.filter(Boolean),
+		),
+	];
 }
 
 /**
@@ -95,9 +102,7 @@ export function readEnvIgnoreNames(env: string | undefined): string[] {
  */
 function pruneNestedRoots(dirs: string[]): string[] {
 	const seen = new Set<string>();
-	const uniq = dirs
-		.map((d) => d.replace(/\/+$/, ""))
-		.filter((d) => (seen.has(d) ? false : (seen.add(d), true)));
+	const uniq = dirs.map((d) => d.replace(/\/+$/, "")).filter((d) => (seen.has(d) ? false : (seen.add(d), true)));
 	return uniq.filter((d) => !uniq.some((other) => other !== d && `${d}/`.startsWith(`${other}/`)));
 }
 
@@ -174,7 +179,7 @@ function shouldIgnore(relPath: string): boolean {
 		// "*.generated.ts" matches "foo.generated.ts"
 		if (pattern.endsWith("/**")) {
 			const prefix = pattern.slice(0, -3);
-			return relPath.startsWith(prefix + "/") || relPath === prefix;
+			return relPath.startsWith(`${prefix}/`) || relPath === prefix;
 		}
 		if (pattern.startsWith("*")) {
 			return relPath.endsWith(pattern.slice(1));

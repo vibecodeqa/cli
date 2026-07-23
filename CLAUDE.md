@@ -113,12 +113,14 @@ Weights sum to 100 (Pro checks have weight 0).
 | Category | Checks | Weights |
 |---|---|---|
 | **Foundations** | structure, lint, types, type-safety, standards | 6+5+6+3+3 = 23 |
-| **Quality** | complexity, duplication, error-handling, react, accessibility, docs, best-practices | 5+5+3+3+4+3+3 = 26 |
-| **Testing** | testing | 15 |
+| **Quality** | complexity, duplication, error-handling, react, accessibility, docs, best-practices, frontend-health, env-validation, git-hygiene, memory-safety, styling, html-quality, container-health | 5+3+3+3+4+3+3+2+1+1+1+1+0+0 = 30 |
+| **Testing** | testing | 13 |
 | **Architecture** | architecture, performance | 5+4 = 9 |
 | **Security** | secrets, security, dependencies | 6+5+5 = 16 |
-| **AI Readiness** | confusion, context | 6+5 = 11 |
-| **AI Analysis** | doc-coherence, code-coherence, comment-staleness, dead-patterns, test-audit | 0+0+0+0+0 (PRO) |
+| **AI Readiness** | confusion, context | 4+5 = 9 |
+| **AI Analysis** | doc-coherence, code-coherence, comment-staleness, dead-patterns, test-audit, file-cohesion, design-consistency | all 0 (PRO) |
+
+Do not hand-edit weights here without checking `@vibecodeqa/schema`'s `CHECK_META` — the schema package is the source of truth; this table is a convenience copy.
 
 ## Supported stacks
 

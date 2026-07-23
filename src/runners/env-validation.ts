@@ -1,6 +1,6 @@
 /** Environment validation — checks .env hygiene, .env.example drift, and unsafe patterns. */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -17,13 +17,22 @@ export function runEnvValidation(cwd: string): CheckResult {
 	if (hasEnv) {
 		const gitignore = existsSync(join(cwd, ".gitignore")) ? readFileSync(join(cwd, ".gitignore"), "utf-8") : "";
 		if (!gitignore.includes(".env")) {
-			issues.push({ severity: "error", message: ".env not in .gitignore — secrets may be committed", file: ".gitignore", rule: "env-not-ignored" });
+			issues.push({
+				severity: "error",
+				message: ".env not in .gitignore — secrets may be committed",
+				file: ".gitignore",
+				rule: "env-not-ignored",
+			});
 		}
 	}
 
 	// Check .env.example exists when .env does
 	if (hasEnv && !hasExample) {
-		issues.push({ severity: "warning", message: "No .env.example — other developers won't know which vars are needed", rule: "no-env-example" });
+		issues.push({
+			severity: "warning",
+			message: "No .env.example — other developers won't know which vars are needed",
+			rule: "no-env-example",
+		});
 	}
 
 	// Check .env.example drift — vars in .env.example should match .env
@@ -34,12 +43,22 @@ export function runEnvValidation(cwd: string): CheckResult {
 
 		for (const key of exampleVars) {
 			if (!envVars.has(key)) {
-				issues.push({ severity: "info", message: `${exampleFile} has ${key} but .env doesn't — may be missing`, file: exampleFile, rule: "env-example-drift" });
+				issues.push({
+					severity: "info",
+					message: `${exampleFile} has ${key} but .env doesn't — may be missing`,
+					file: exampleFile,
+					rule: "env-example-drift",
+				});
 			}
 		}
 		for (const key of envVars) {
 			if (!exampleVars.has(key)) {
-				issues.push({ severity: "warning", message: `${key} in .env but not in ${exampleFile} — won't be documented for other developers`, file: exampleFile, rule: "env-example-drift" });
+				issues.push({
+					severity: "warning",
+					message: `${key} in .env but not in ${exampleFile} — won't be documented for other developers`,
+					file: exampleFile,
+					rule: "env-example-drift",
+				});
 			}
 		}
 	}
@@ -56,8 +75,19 @@ export function runEnvValidation(cwd: string): CheckResult {
 
 			// Check for values that look like they should be secret but have defaults
 			if (/^(DATABASE_URL|DB_PASSWORD|SECRET_KEY|JWT_SECRET|API_KEY|PRIVATE_KEY)=/i.test(line)) {
-				const value = line.split("=").slice(1).join("=").trim().replace(/^["']|["']$/g, "");
-				if (value && !value.startsWith("$") && !value.includes("${") && value.length < 20 && !/^(changeme|replace|todo|xxx|your[-_])/i.test(value)) {
+				const value = line
+					.split("=")
+					.slice(1)
+					.join("=")
+					.trim()
+					.replace(/^["']|["']$/g, "");
+				if (
+					value &&
+					!value.startsWith("$") &&
+					!value.includes("${") &&
+					value.length < 20 &&
+					!/^(changeme|replace|todo|xxx|your[-_])/i.test(value)
+				) {
 					issues.push({
 						severity: "warning",
 						message: `${line.split("=")[0]} appears to have a hardcoded value — use a placeholder in committed files`,
@@ -104,7 +134,9 @@ export function runEnvValidation(cwd: string): CheckResult {
 						});
 					}
 				}
-			} catch { /* ignore */ }
+			} catch {
+				/* ignore */
+			}
 		}
 	}
 
