@@ -8,7 +8,7 @@ ink/react (the `monitor` TUI) and @jscpd/core (duplication engine, ~100 KB).
 ```bash
 pnpm install        # install dev deps
 pnpm build          # tsc → dist/
-pnpm test           # vitest run (435 tests across 42 files)
+pnpm test           # vitest run (440+ tests across 43 files)
 pnpm lint           # biome check src/
 node dist/cli.js    # self-scan
 node dist/cli.js init               # set up CI workflow + configs
@@ -156,7 +156,7 @@ Tries dedicated tools first, falls back to built-in:
 ## Testing
 
 ```bash
-pnpm test                    # 435 tests across 42 files
+pnpm test                    # 440+ tests across 43 files
 pnpm test -- --reporter=verbose  # see all test names
 ```
 

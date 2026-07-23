@@ -1,0 +1,15 @@
+name: fixture_flutter_app
+description: Minimal Flutter fixture for vcqa's non-TS scan e2e test.
+publish_to: "none"
+version: 1.0.0
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
