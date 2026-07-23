@@ -155,10 +155,12 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		if (applies) {
 			const langOk = !applies.language || applies.language.includes(stack.language);
 			const fwOk = !applies.framework || applies.framework.includes(stack.framework);
-			if (!langOk || !fwOk) {
+			const compOk = !applies.component || applies.component.every((c) => stack.components?.includes(c));
+			if (!langOk || !fwOk || !compOk) {
 				const parts: string[] = [];
 				if (applies.framework) parts.push(`framework: ${applies.framework.join("/")}`);
 				if (applies.language) parts.push(`language: ${applies.language.join("/")}`);
+				if (applies.component) parts.push(`component: ${applies.component.join(" + ")}`);
 				const gated: CheckResult = {
 					name: runner.name,
 					score: 100,

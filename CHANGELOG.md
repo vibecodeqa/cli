@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.46.0 (2026-07-23)
+
+### Component detection (schema 0.3.0)
+- **Added**: `detectComponents` — the scan now recognizes infrastructure/data components and reports them in `meta.stack.components` (open vocabulary): `cloudflare-workers` / `cloudflare-pages` (wrangler config), `sqlite-d1` (D1 bindings or `migrations/*.sql`), `cloudflare-kv`, `cloudflare-r2`, `durable-objects`. Workspace-aware (checks package dirs too).
+- **Added**: central gating now honors `appliesTo.component` (conjunction — every listed component must be present), enabling component checks (`cloudflare-workers`, `sqlite-d1`) and composition checks (e.g. react + workers + d1) to come.
+- **Added**: `fixtures/worker-d1-app` e2e tripwire — a real Worker+D1+KV project must detect correctly and scan without runner crashes.
+
 ## 0.45.1 (2026-07-23)
 
 ### Fixes

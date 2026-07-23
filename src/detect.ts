@@ -5,7 +5,48 @@ import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node
 import { join } from "node:path";
 import type { StackInfo, WorkspaceInfo, WorkspacePackage } from "./types.js";
 
+/** Detect infrastructure/data components (open vocabulary — see schema's StackInfo.components).
+ *  Looks at the root and workspace package dirs for wrangler config and migration dirs. */
+export function detectComponents(cwd: string, workspace?: WorkspaceInfo): string[] {
+	const found = new Set<string>();
+	const dirs = [cwd, ...(workspace?.packages.map((p) => join(cwd, p.path)) ?? [])];
+	for (const dir of dirs) {
+		let wrangler = "";
+		for (const name of ["wrangler.toml", "wrangler.json", "wrangler.jsonc"]) {
+			const f = join(dir, name);
+			if (existsSync(f)) {
+				try {
+					wrangler = readFileSync(f, "utf-8");
+				} catch {
+					/* unreadable — skip */
+				}
+				break;
+			}
+		}
+		if (wrangler) {
+			found.add(wrangler.includes("pages_build_output_dir") ? "cloudflare-pages" : "cloudflare-workers");
+			if (/d1_databases/.test(wrangler)) found.add("sqlite-d1");
+			if (/kv_namespaces/.test(wrangler)) found.add("cloudflare-kv");
+			if (/r2_buckets/.test(wrangler)) found.add("cloudflare-r2");
+			if (/durable_objects/.test(wrangler)) found.add("durable-objects");
+		}
+		// SQL migrations without a wrangler binding still mean a SQLite-family DB in play
+		const mig = join(dir, "migrations");
+		if (!found.has("sqlite-d1") && existsSync(mig)) {
+			try {
+				if (readdirSync(mig).some((f) => f.endsWith(".sql"))) found.add("sqlite-d1");
+			} catch {
+				/* unreadable */
+			}
+		}
+	}
+	return [...found].sort();
+}
+
 export function detectStack(cwd: string, workspace?: WorkspaceInfo): StackInfo {
+	const components = detectComponents(cwd, workspace);
+	const withComponents = (stack: StackInfo): StackInfo =>
+		components.length > 0 ? { ...stack, components } : stack;
 	const has = (f: string) => existsSync(join(cwd, f));
 	const read = (f: string) => {
 		try {
@@ -32,14 +73,14 @@ export function detectStack(cwd: string, workspace?: WorkspaceInfo): StackInfo {
 		const hasTest = pubspec.includes("test:") || pubspec.includes("flutter_test:");
 		const hasAnalysis =
 			has("analysis_options.yaml") || workspace?.packages.some((p) => existsSync(join(cwd, p.path, "analysis_options.yaml")));
-		return {
+		return withComponents({
 			language: "dart",
 			framework: isFlutter ? "flutter" : "none",
 			bundler: "none",
 			testRunner: isFlutter ? (hasTest ? "flutter_test" : "none") : hasTest ? "dart_test" : "none",
 			linter: hasAnalysis ? "dart_analyze" : "none",
 			packageManager: "pub",
-		};
+		});
 	}
 
 	// ── Node.js/TypeScript detection ──
@@ -99,7 +140,7 @@ export function detectStack(cwd: string, workspace?: WorkspaceInfo): StackInfo {
 				? "yarn"
 				: "npm";
 
-	return { language, framework, bundler, testRunner, linter, packageManager };
+	return withComponents({ language, framework, bundler, testRunner, linter, packageManager });
 }
 
 /**

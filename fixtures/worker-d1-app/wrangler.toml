@@ -1,0 +1,12 @@
+name = "fixture-worker-d1"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fixture-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "11111111111111111111111111111111"
