@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { CHECK_META } from "./check-meta.js";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -51,7 +52,7 @@ describe("CLI flags", () => {
 		expect(report.score).toBeGreaterThanOrEqual(0);
 		expect(report.score).toBeLessThanOrEqual(100);
 		expect(report.checks).toBeInstanceOf(Array);
-		expect(report.checks.length).toBe(34);
+		expect(report.checks.length).toBe(Object.keys(CHECK_META).length);
 	}, 30_000);
 
 	it("nonexistent path exits with error", () => {
@@ -251,7 +252,7 @@ describe("init command", () => {
 		expect(Object.keys(config.checks)).toContain("security");
 		expect(Object.keys(config.checks)).toContain("confusion");
 		expect(Object.keys(config.checks)).toContain("context");
-		expect(Object.keys(config.checks).length).toBe(34);
+		expect(Object.keys(config.checks).length).toBe(Object.keys(CHECK_META).length);
 		// Should have help fields
 		expect(config._comment).toContain("vibecodeqa.online");
 		expect(config._checks_help).toContain("enabled");
@@ -271,7 +272,7 @@ describe("init command", () => {
 		const out = run("--skip-tests --json .");
 		const report = JSON.parse(out);
 		// Config should load without error and not disable any checks
-		expect(report.checks.length).toBe(34);
+		expect(report.checks.length).toBe(Object.keys(CHECK_META).length);
 		const disabled = report.checks.filter((c: any) => c.details.reason === "disabled in config");
 		expect(disabled).toHaveLength(0);
 	}, 30_000);
@@ -343,7 +344,7 @@ describe("report output", () => {
 	it("--json produces report with all checks and workspace info", () => {
 		const out = run("--skip-tests --json .");
 		const report = JSON.parse(out);
-		expect(report.checks.length).toBe(34);
+		expect(report.checks.length).toBe(Object.keys(CHECK_META).length);
 		expect(report.meta.workspace).toBeDefined();
 		expect(typeof report.meta.workspace.isMonorepo).toBe("boolean");
 		// Also verify report file was written

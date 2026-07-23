@@ -21,6 +21,20 @@ describe("worker+d1 fixture", () => {
 			(c) => typeof c.details.reason === "string" && (c.details.reason as string).startsWith("runner error:"),
 		);
 		expect(crashed.map((c) => `${c.name}: ${c.details.reason}`)).toEqual([]);
+
+		// The component-gated check RUNS here (clean fixture: no findings)…
+		const cfw = report.checks.find((c) => c.name === "cloudflare-workers");
+		expect(cfw?.details.skipped).toBeUndefined();
+		expect(cfw?.issues).toEqual([]);
+		expect([...(cfw?.details.bindingsDeclared as string[])].sort()).toEqual(["CACHE", "DB"]);
+	});
+
+	it("cloudflare-workers check is gated OFF for non-worker projects", { timeout: 120_000 }, async () => {
+		const flutterFixture = fileURLToPath(new URL("../fixtures/flutter-app/", import.meta.url));
+		const report = await scan(flutterFixture, { skipTests: true, checks: ["cloudflare-workers", "structure"] });
+		const cfw = report.checks.find((c) => c.name === "cloudflare-workers");
+		expect(cfw?.details.skipped).toBe(true);
+		expect(cfw?.details.reason).toContain("component");
 	});
 
 	it("does not detect components on a plain project", () => {

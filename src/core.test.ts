@@ -78,8 +78,8 @@ describe("core API", () => {
 });
 
 describe("re-exports", () => {
-	it("CHECK_META has 34 checks", () => {
-		expect(Object.keys(CHECK_META)).toHaveLength(34);
+	it("CHECK_META covers the whole runner registry (count sanity, >= 35)", () => {
+		expect(Object.keys(CHECK_META).length).toBeGreaterThanOrEqual(35);
 	});
 
 	it("computeScore works", () => {

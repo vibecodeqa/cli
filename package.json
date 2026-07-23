@@ -1,7 +1,7 @@
 {
 	"name": "@vibecodeqa/cli",
-	"version": "0.46.0",
-	"description": "Code health scanner for the AI coding era. 34 checks, zero config, full report.",
+	"version": "0.47.0",
+	"description": "Code health scanner for the AI coding era. Zero config, full report.",
 	"type": "module",
 	"bin": {
 		"vcqa": "./dist/cli.js",
@@ -57,7 +57,7 @@
 		"vitest": "^4.1.6"
 	},
 	"dependencies": {
-		"@vibecodeqa/schema": "^0.3.0",
+		"@vibecodeqa/schema": "^0.3.1",
 		"@jscpd/core": "^4.2.4",
 		"@secretlint/core": "^13.0.2",
 		"@secretlint/secretlint-rule-preset-recommend": "^13.0.2",

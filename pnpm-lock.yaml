@@ -18,8 +18,8 @@ importers:
         specifier: ^13.0.2
         version: 13.0.2
       '@vibecodeqa/schema':
-        specifier: ^0.3.0
-        version: 0.3.0
+        specifier: ^0.3.1
+        version: 0.3.1
       dependency-cruiser:
         specifier: ^17.4.3
         version: 17.4.3
@@ -270,8 +270,8 @@ packages:
   '@types/react@18.3.29':
     resolution: {integrity: sha512-ch0qJdr2JY0r04NXSprbK6TXOgnaJ1Tz23fm5W+z0/CBah6BSBc3n96h7K9GOtwh0HrilNWHIBzE1Ko4Dcw/Wg==}
 
-  '@vibecodeqa/schema@0.3.0':
-    resolution: {integrity: sha512-bxD13iJ2DZmAuFl5pHwc9Ajw8esgBrJHS+eK9+fwGOEFRtT9r7o0gvSwc1uwciGrQKh8iIeYMq85KTjK9wGlmQ==}
+  '@vibecodeqa/schema@0.3.1':
+    resolution: {integrity: sha512-OZIk0EJ4KfrSFYjlZYcKCUd+7D/9gBF5BkClHlDv7mg4KDP2xn028rhMz9f8R55gGdZdNw/NOv+dDxE1+GXgDA==}
     engines: {node: '>=20'}
 
   '@vitest/expect@4.1.6':
@@ -1108,7 +1108,7 @@ snapshots:
       '@types/prop-types': 15.7.15
       csstype: 3.2.3
 
-  '@vibecodeqa/schema@0.3.0':
+  '@vibecodeqa/schema@0.3.1':
     dependencies:
       zod: 3.25.76
 

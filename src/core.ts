@@ -15,6 +15,7 @@ import { readEnvIgnoreNames, setGlobalIgnore, setGlobalIgnoreNames, setGlobalSrc
 import { runAccessibility } from "./runners/accessibility.js";
 import { runArchitecture } from "./runners/architecture.js";
 import { runBestPractices } from "./runners/best-practices.js";
+import { runCloudflareWorkers } from "./runners/cloudflare-workers.js";
 import { runCodeCoherence } from "./runners/code-coherence.js";
 import { runCommentStaleness } from "./runners/comment-staleness.js";
 import { runComplexity } from "./runners/complexity.js";
@@ -111,6 +112,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		{ name: "architecture", fn: () => runArchitecture(resolvedCwd, workspace) },
 		{ name: "performance", fn: () => runPerformance(resolvedCwd) },
 		{ name: "container-health", fn: () => runContainerHealth(resolvedCwd) },
+		{ name: "cloudflare-workers", fn: () => runCloudflareWorkers(resolvedCwd, workspace) },
 		{ name: "confusion", fn: () => runConfusion(resolvedCwd) },
 		{ name: "context", fn: () => runContext(resolvedCwd) },
 		{ name: "doc-coherence", fn: () => runDocCoherence(resolvedCwd) },

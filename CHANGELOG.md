@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.47.0 (2026-07-23)
+
+### New check: cloudflare-workers (advisory, component-gated)
+- **Added**: the first component check, gated on `appliesTo { component: ["cloudflare-workers"] }` (schema 0.3.1). Audits wrangler config and worker code together: secrets committed in `[vars]` (error), bindings declared-but-unused (warning) and used-but-undeclared (error — production crash), cron triggers without a `scheduled()` handler (error), `node:` imports without `nodejs_compat` (error), stale/missing `compatibility_date` (warning), missing `main` entry (error). Workspace-aware; `details` carries structured `bindingsDeclared`/`bindingsUsed` for UI panels. Weight 0 while the rules bed in.
+- **Changed**: package description no longer hardcodes a check count.
+
 ## 0.46.0 (2026-07-23)
 
 ### Component detection (schema 0.3.0)
