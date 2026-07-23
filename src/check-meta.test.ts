@@ -30,7 +30,7 @@ describe("CHECK_META", () => {
 		"test-audit",
 	];
 
-	it("has metadata for all 25 checks", () => {
+	it("has metadata for all canonical checks", () => {
 		for (const name of allChecks) {
 			expect(CHECK_META[name]).toBeDefined();
 			expect(CHECK_META[name].label).toBeTruthy();
