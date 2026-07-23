@@ -45,8 +45,7 @@ export function detectComponents(cwd: string, workspace?: WorkspaceInfo): string
 
 export function detectStack(cwd: string, workspace?: WorkspaceInfo): StackInfo {
 	const components = detectComponents(cwd, workspace);
-	const withComponents = (stack: StackInfo): StackInfo =>
-		components.length > 0 ? { ...stack, components } : stack;
+	const withComponents = (stack: StackInfo): StackInfo => (components.length > 0 ? { ...stack, components } : stack);
 	const has = (f: string) => existsSync(join(cwd, f));
 	const read = (f: string) => {
 		try {
