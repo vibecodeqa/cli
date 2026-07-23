@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.47.1 (2026-07-23)
+
+### cloudflare-workers: false-positive fixes from first dogfood run
+- **Fixed**: `env.X` references satisfied by an `Env` interface/type (including intersection types like `type ProviderEnv = Env & {...}`) but absent from wrangler config are now **info** ("secret-binding" — the normal shape of `wrangler secret put` secrets, listed for audit), not errors. Only names declared *nowhere* (config, Env types, `.dev.vars`) remain errors — the true-typo case.
+- **Fixed**: `[vars]` secret detection now requires a credential-shaped value too — mode-selector vars like `AUTH_MODE = "cloudflare-access"` are no longer flagged.
+
 ## 0.47.0 (2026-07-23)
 
 ### New check: cloudflare-workers (advisory, component-gated)

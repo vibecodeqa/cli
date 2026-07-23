@@ -120,4 +120,26 @@ describe("runCloudflareWorkers", () => {
 		expect(runCloudflareWorkers(dir).issues.some((i) => i.rule === "missing-main")).toBe(true);
 		rmSync(dir, { recursive: true });
 	});
+
+	it("treats Env-type members missing from config as secrets (info), not errors", () => {
+		const dir = makeWorker({
+			"wrangler.toml": CLEAN_TOML,
+			"src/index.ts": `interface Env { CACHE: KVNamespace; API_TOKEN: string; }
+export default { fetch(r: Request, env: Env) { return new Response(env.API_TOKEN + env.CACHE); } };`,
+		});
+		const r = runCloudflareWorkers(dir);
+		expect(r.issues.some((i) => i.rule === "undeclared-binding")).toBe(false);
+		expect(r.issues.some((i) => i.rule === "secret-binding" && i.severity === "info" && i.message.includes("API_TOKEN"))).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("does not flag mode-selector vars like AUTH_MODE as committed secrets", () => {
+		const dir = makeWorker({
+			"wrangler.toml": `${CLEAN_TOML}\n[vars]\nAUTH_MODE = "cloudflare-access"\n`,
+			"src/index.ts": `export default { fetch(r: Request, env: Env) { return new Response(env.AUTH_MODE + env.CACHE); } };`,
+		});
+		const r = runCloudflareWorkers(dir);
+		expect(r.issues.filter((i) => i.rule === "secret-in-vars")).toEqual([]);
+		rmSync(dir, { recursive: true });
+	});
 });

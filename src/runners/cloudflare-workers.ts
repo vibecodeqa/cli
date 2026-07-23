@@ -7,7 +7,13 @@ import { dirname, join } from "node:path";
 import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
-const SECRETISH_KEY = /(KEY|TOKEN|SECRET|PASS|PWD|AUTH|CREDENTIAL)/i;
+const SECRETISH_KEY = /(KEY|TOKEN|SECRET|PASS|PWD|CREDENTIAL|_AUTH$|^AUTH_TOKEN)/i;
+/** A committed value only counts as a secret if it has credential-like shape. */
+function secretishValue(v: string): boolean {
+	if (v.length < 12) return false;
+	if (/^(https?:\/\/|true$|false$|\d+$)/.test(v)) return false;
+	return /[0-9]/.test(v) && /[a-zA-Z]/.test(v) && !/\s/.test(v);
+}
 const MAX_AGE_DAYS = 365;
 
 interface WranglerConfig {
@@ -91,6 +97,9 @@ export function runCloudflareWorkers(cwd: string, workspace?: WorkspaceInfo): Ch
 
 	const bindingsDeclared: string[] = [];
 	const bindingsUsed: string[] = [];
+	/** Names declared out-of-band: Env interface/type members in code (the developer's
+	 *  own contract — covers `wrangler secret put` secrets) and .dev.vars keys. */
+	const envTypeMembers = new Set<string>();
 	let compatibilityDate: string | null = null;
 
 	for (const cfg of configs) {
@@ -139,8 +148,7 @@ export function runCloudflareWorkers(cwd: string, workspace?: WorkspaceInfo): Ch
 			if (!kv) continue;
 			bindingsDeclared.push(kv[1]);
 			const [, key, value] = kv;
-			const looksPublic = /^(https?:\/\/|true|false|\d+$)/.test(value) || value.length < 9;
-			if (SECRETISH_KEY.test(key) && !looksPublic) {
+			if (SECRETISH_KEY.test(key) && secretishValue(value)) {
 				issues.push({
 					severity: "error",
 					message: `[vars] ${key} looks like a secret committed to config — use \`wrangler secret put ${key}\``,
@@ -159,6 +167,20 @@ export function runCloudflareWorkers(cwd: string, workspace?: WorkspaceInfo): Ch
 		// ── code-side analysis ──
 		const sources = workerSources(cfg.dir, main);
 		const code = sources.map((s) => s.content).join("\n");
+
+		// Env interface/type members — secrets set via `wrangler secret put` appear
+		// here but never in wrangler config; that is correct, not an error.
+		for (const m of code.matchAll(/(?:interface\s+\w*Env\w*(?:\s+extends[^{]+)?|type\s+\w*Env\w*\s*=[^{;]*?)\s*\{([^}]*)\}/g)) {
+			for (const mem of m[1].matchAll(/\b([A-Z][A-Z0-9_]{1,40})\s*\??:/g)) envTypeMembers.add(mem[1]);
+		}
+		const devVars = join(cfg.dir, ".dev.vars");
+		if (existsSync(devVars)) {
+			try {
+				for (const m of readFileSync(devVars, "utf-8").matchAll(/^([A-Z][A-Z0-9_]*)\s*=/gm)) envTypeMembers.add(m[1]);
+			} catch {
+				/* unreadable */
+			}
+		}
 
 		for (const m of code.matchAll(/\benv\.([A-Z][A-Z0-9_]{1,40})\b/g)) {
 			if (!bindingsUsed.includes(m[1])) bindingsUsed.push(m[1]);
@@ -205,10 +227,19 @@ export function runCloudflareWorkers(cwd: string, workspace?: WorkspaceInfo): Ch
 		}
 	}
 	for (const b of used) {
-		if (!declared.includes(b)) {
+		if (declared.includes(b)) continue;
+		if (envTypeMembers.has(b)) {
+			// In the code's Env contract but not in config — the normal shape of a
+			// `wrangler secret put` secret. Surface as info so the list is auditable.
+			issues.push({
+				severity: "info",
+				message: `env.${b} is in the Env type but not in wrangler config — expected for secrets (verify with \`wrangler secret list\`)`,
+				rule: "secret-binding",
+			});
+		} else {
 			issues.push({
 				severity: "error",
-				message: `Code references env.${b} but no binding/var declares it — crashes at runtime in production`,
+				message: `Code references env.${b} but nothing declares it (not in wrangler config or the Env type) — likely a typo, crashes at runtime`,
 				rule: "undeclared-binding",
 			});
 		}
