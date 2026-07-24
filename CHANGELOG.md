@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.51.0 (2026-07-24)
+
+### Fixed — dead-code analysis ran from the wrong directory and reported live code as unused
+- **Fixed**: knip was always run at the scan root. Its entry globs are relative to the directory holding its config, so a monorepo whose knip config lives in a package (`app/knip.config.ts`) gave knip **no reachable entry points** — it then called the entire package unreachable. On a real project this reported **42 live Cloudflare Pages Function modules as "unused files"** and 102 live exports as unused; a user acting on that would have deleted working production code. Knip now runs where its config lives (`knipRoots`), descending into workspace packages, with results path-prefixed back to the repo root. The same project now correctly reports **zero** dead code.
+- **Added**: `details.deadCodeConfigured` — false when nothing configures knip, so consumers can say the entry points were guessed instead of presenting the output as fact.
+
 ## 0.50.0 (2026-07-24)
 
 ### Markdown report tells the whole truth

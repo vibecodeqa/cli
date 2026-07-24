@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { setGlobalSrcRoots } from "../fs-utils.js";
-import { parseKnipJson, runPerformance } from "./performance.js";
+import { hasKnipConfig, knipRoots, parseKnipJson, runPerformance } from "./performance.js";
 
 function makeProject(files: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-perf-"));
@@ -118,5 +118,43 @@ describe("parseKnipJson", () => {
 	it("yields empty lists for a clean project", () => {
 		const r = parseKnipJson(JSON.stringify({ issues: [] }));
 		expect(r).toEqual({ unusedFiles: [], unusedExports: [], unusedTypes: [], unusedDeps: [] });
+	});
+});
+
+describe("knipRoots — run knip where its config lives", () => {
+	it("uses the cwd when it configures knip", () => {
+		const dir = makeProject({ "package.json": "{}", "knip.json": '{"entry":["src/index.ts"]}' });
+		expect(knipRoots(dir)).toEqual([{ dir, rel: "", configured: true }]);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("descends to the workspace package that owns the config", () => {
+		// Regression: a monorepo whose knip config lives in a package. Running at
+		// the root gave knip no entry points and it called 42 live Cloudflare
+		// Pages Function modules "unused files".
+		const dir = makeProject({ "package.json": "{}", "app/package.json": "{}", "app/knip.config.ts": "export default {};" });
+		const roots = knipRoots(dir, {
+			isMonorepo: true,
+			tool: "pnpm",
+			srcRoots: [],
+			packages: [{ name: "app", path: "app", hasSrc: true, hasRootCode: false, hasTests: false, hasLinter: false }],
+		});
+		expect(roots).toHaveLength(1);
+		expect(roots[0].rel).toBe("app");
+		expect(roots[0].configured).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("marks the result unconfigured when nothing configures knip", () => {
+		const dir = makeProject({ "package.json": "{}" });
+		const roots = knipRoots(dir);
+		expect(roots[0].configured).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("recognises a knip key in package.json", () => {
+		const dir = makeProject({ "package.json": '{"knip":{"entry":["a.ts"]}}' });
+		expect(hasKnipConfig(dir)).toBe(true);
+		rmSync(dir, { recursive: true });
 	});
 });

@@ -7,10 +7,10 @@
  *   4. CSS-in-JS overhead — detects runtime CSS solutions vs zero-runtime alternatives
  */
 
-import { existsSync, lstatSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getProductionFiles, readDeps } from "../fs-utils.js";
-import type { CheckResult, Issue } from "../types.js";
+import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
 
@@ -33,7 +33,7 @@ const HEAVY_DEPS: Record<string, { kb: number; alt: string }> = {
 	"date-fns": { kb: 40, alt: "import only needed functions: date-fns/format" },
 };
 
-export function runPerformance(cwd: string): CheckResult {
+export function runPerformance(cwd: string, workspace?: WorkspaceInfo): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 	const sourceFiles = getProductionFiles(cwd);
@@ -163,7 +163,7 @@ export function runPerformance(cwd: string): CheckResult {
 	let deadExports = 0;
 	let unusedFiles = 0;
 	let unusedDeps = 0;
-	const knipResult = tryKnip(cwd);
+	const knipResult = tryKnip(cwd, workspace);
 	if (knipResult) {
 		deadExports = knipResult.exports;
 		unusedFiles = knipResult.files;
@@ -260,6 +260,9 @@ export function runPerformance(cwd: string): CheckResult {
 						unusedFiles,
 						unusedDeps,
 						deadCodeTool: "knip",
+						// False when nothing configured knip — its entry points are then
+						// guesses and "unused" can mean "unreachable from a wrong start".
+						deadCodeConfigured: knipResult.configured,
 						// Item lists, not just counts — the Dead Code page needs the
 						// actual candidates (vibecodeqa/app#7). Capped so a pathological
 						// project cannot bloat the report.
@@ -366,14 +369,62 @@ export function parseKnipJson(stdout: string): KnipFindings | null {
 	return out;
 }
 
-function tryKnip(cwd: string): (KnipFindings & { files: number; exports: number; deps: number }) | null {
-	const { stdout } = run("npx knip --reporter json 2>/dev/null || true", cwd, 30_000);
-	const parsed = parseKnipJson(stdout);
-	if (!parsed) return null;
+const KNIP_CONFIGS = ["knip.json", "knip.jsonc", "knip.config.ts", "knip.config.js", "knip.config.mjs", ".knip.json"];
+
+/** Does this directory configure knip (file, or a `knip` key in package.json)? */
+export function hasKnipConfig(dir: string): boolean {
+	if (KNIP_CONFIGS.some((f) => existsSync(join(dir, f)))) return true;
+	try {
+		const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8"));
+		return typeof pkg.knip === "object" && pkg.knip !== null;
+	} catch {
+		return false;
+	}
+}
+
+/** Where knip should actually run.
+ *
+ *  Knip's answer is only as good as its entry points, and entry globs are
+ *  relative to the directory holding the config. Running at a monorepo root
+ *  whose config lives in a package means knip starts from nothing and calls the
+ *  whole package unreachable — which reported 42 live Cloudflare Pages Function
+ *  modules as "unused files" on a real project. So: run where the config is. */
+export function knipRoots(cwd: string, workspace?: WorkspaceInfo): { dir: string; rel: string; configured: boolean }[] {
+	if (hasKnipConfig(cwd)) return [{ dir: cwd, rel: "", configured: true }];
+	const pkgRoots = (workspace?.packages ?? [])
+		.map((p) => ({ dir: join(cwd, p.path), rel: p.path, configured: true }))
+		.filter((r) => hasKnipConfig(r.dir));
+	if (pkgRoots.length > 0) return pkgRoots;
+	// Nothing configures knip — run at the root, but mark it so consumers can
+	// say so rather than presenting unverified output as fact.
+	return [{ dir: cwd, rel: "", configured: false }];
+}
+
+function tryKnip(
+	cwd: string,
+	workspace?: WorkspaceInfo,
+): (KnipFindings & { files: number; exports: number; deps: number; configured: boolean }) | null {
+	const roots = knipRoots(cwd, workspace);
+	const merged: KnipFindings = { unusedFiles: [], unusedExports: [], unusedTypes: [], unusedDeps: [] };
+	let any = false;
+	let configured = true;
+	for (const root of roots) {
+		const { stdout } = run("npx knip --reporter json 2>/dev/null || true", root.dir, 60_000);
+		const parsed = parseKnipJson(stdout);
+		if (!parsed) continue;
+		any = true;
+		if (!root.configured) configured = false;
+		const prefix = (f: string) => (root.rel && f && !f.startsWith(root.rel) ? `${root.rel}/${f}` : f);
+		for (const key of ["unusedFiles", "unusedExports", "unusedTypes", "unusedDeps"] as const) {
+			for (const item of parsed[key]) merged[key].push({ ...item, file: prefix(item.file) });
+		}
+	}
+	if (!any) return null;
 	return {
-		...parsed,
-		files: parsed.unusedFiles.length,
-		exports: parsed.unusedExports.length + parsed.unusedTypes.length,
-		deps: parsed.unusedDeps.length,
+		...merged,
+		configured,
+		files: merged.unusedFiles.length,
+		exports: merged.unusedExports.length + merged.unusedTypes.length,
+		deps: merged.unusedDeps.length,
 	};
 }
