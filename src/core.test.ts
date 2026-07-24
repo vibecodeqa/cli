@@ -92,3 +92,30 @@ describe("re-exports", () => {
 		expect(gradeFromScore(50)).toBe("D");
 	});
 });
+
+describe("auditability", () => {
+	it("reports how many source files the scan walked", async () => {
+		const report = await scan(process.cwd(), { skipTests: true, checks: ["structure"] });
+		expect(report.meta.filesScanned).toBeGreaterThan(0);
+	}, 60_000);
+
+	it("attaches tool provenance to the check that shelled out", async () => {
+		// `types` runs tsc. Whatever the verdict, the report must record that the
+		// tool ran and where — otherwise the result cannot be checked.
+		const report = await scan(process.cwd(), { skipTests: true, checks: ["types"] });
+		const types = report.checks.find((c) => c.name === "types");
+		const runs = (types?.details as Record<string, unknown>).toolRuns as { command: string; cwd: string }[] | undefined;
+		expect(Array.isArray(runs)).toBe(true);
+		expect(runs?.length).toBeGreaterThan(0);
+		expect(runs?.[0].cwd).toBeTruthy();
+		expect(runs?.[0].command).toBeTruthy();
+	}, 120_000);
+
+	it("does not attach empty provenance to purely built-in checks", async () => {
+		// confusion is pure in-process analysis — an empty toolRuns array would be
+		// noise in every report.
+		const report = await scan(process.cwd(), { skipTests: true, checks: ["confusion"] });
+		const c = report.checks.find((x) => x.name === "confusion");
+		expect((c?.details as Record<string, unknown>).toolRuns).toBeUndefined();
+	}, 60_000);
+});

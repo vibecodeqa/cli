@@ -178,6 +178,20 @@ describe("output modes", () => {
 		expect(out).not.toContain("\x1b[");
 	}, 30_000);
 
+	it("--markdown reports coverage honestly: what ran, what did not, and why", () => {
+		const out = run("--skip-tests --markdown .");
+		// "Checks that ran (N of M)" — a reader must be able to see the product
+		// has more checks than the ones listed, or the report overstates coverage.
+		expect(out).toMatch(/### Checks that ran \(\d+ of \d+\)/);
+		expect(out).toContain("Not applicable to this project");
+		// Every skipped check must carry a reason, not just a name.
+		expect(out).toMatch(/\| react \| .*not applicable/);
+		// Category rollup with weights — where the score actually comes from.
+		expect(out).toContain("| Category | Score | Weight |");
+		// And a pointer to the detailed report, since markdown is the headline.
+		expect(out).toContain(".vibe-check/report/index.html");
+	}, 60_000);
+
 	it("--annotations emits GitHub Actions format", () => {
 		const out = run("--skip-tests --annotations .");
 		// Should contain ::warning or ::error annotations
