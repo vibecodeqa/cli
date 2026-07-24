@@ -254,7 +254,23 @@ export function runPerformance(cwd: string): CheckResult {
 			heavyDeps,
 			dynamicOpportunities,
 			cssInJsRuntime,
-			...(knipResult ? { deadExports, unusedFiles, unusedDeps, deadCodeTool: "knip" } : {}),
+			...(knipResult
+				? {
+						deadExports,
+						unusedFiles,
+						unusedDeps,
+						deadCodeTool: "knip",
+						// Item lists, not just counts — the Dead Code page needs the
+						// actual candidates (vibecodeqa/app#7). Capped so a pathological
+						// project cannot bloat the report.
+						deadCode: {
+							files: knipResult.unusedFiles.slice(0, 500),
+							exports: knipResult.unusedExports.slice(0, 1000),
+							types: knipResult.unusedTypes.slice(0, 500),
+							deps: knipResult.unusedDeps.slice(0, 200),
+						},
+					}
+				: {}),
 			...(bundleSizeKB > 0 ? { bundleSizeKB } : {}),
 		},
 		issues,
@@ -288,16 +304,76 @@ function dirSizeKB(dir: string, depth = 0): number {
 }
 
 /** Try running Knip for dead code detection. Returns counts or null if not available. */
-function tryKnip(cwd: string): { files: number; exports: number; deps: number } | null {
-	const { stdout } = run("npx knip --reporter json 2>/dev/null || true", cwd, 30_000);
+export interface DeadCodeItem {
+	/** File the finding belongs to (repo-relative, as Knip reports it). */
+	file: string;
+	/** Export/dependency name. Absent for whole-file findings. */
+	name?: string;
+	line?: number;
+	col?: number;
+}
+
+export interface KnipFindings {
+	unusedFiles: DeadCodeItem[];
+	unusedExports: DeadCodeItem[];
+	unusedTypes: DeadCodeItem[];
+	unusedDeps: DeadCodeItem[];
+}
+
+/** Parse Knip's JSON reporter. Modern Knip emits `{ issues: [ { file, exports[],
+ *  types[], dependencies[], files[] } ] }` — a per-file grouping, NOT the flat
+ *  top-level arrays an older shape used. Reading the old keys silently yielded
+ *  zero for every project, so both shapes are handled here. */
+export function parseKnipJson(stdout: string): KnipFindings | null {
+	let data: unknown;
 	try {
-		const data = JSON.parse(stdout);
-		return {
-			files: Array.isArray(data.files) ? data.files.length : 0,
-			exports: Array.isArray(data.exports) ? data.exports.length : 0,
-			deps: Array.isArray(data.dependencies) ? data.dependencies.length : 0,
-		};
+		data = JSON.parse(stdout);
 	} catch {
 		return null;
 	}
+	const out: KnipFindings = { unusedFiles: [], unusedExports: [], unusedTypes: [], unusedDeps: [] };
+	const asItems = (file: string, arr: unknown): DeadCodeItem[] =>
+		Array.isArray(arr)
+			? arr.map((e) =>
+					typeof e === "string"
+						? { file, name: e }
+						: {
+								file: typeof (e as { file?: string }).file === "string" ? (e as { file: string }).file : file,
+								name: (e as { name?: string }).name,
+								line: (e as { line?: number }).line,
+								col: (e as { col?: number }).col,
+							},
+				)
+			: [];
+
+	const record = data as Record<string, unknown>;
+	const issues = record.issues;
+	if (Array.isArray(issues)) {
+		for (const raw of issues) {
+			const entry = raw as Record<string, unknown>;
+			const file = typeof entry.file === "string" ? entry.file : "";
+			out.unusedFiles.push(...asItems(file, entry.files));
+			out.unusedExports.push(...asItems(file, entry.exports));
+			out.unusedTypes.push(...asItems(file, entry.types));
+			out.unusedDeps.push(...asItems(file, entry.dependencies), ...asItems(file, entry.devDependencies));
+		}
+		return out;
+	}
+	// Legacy flat shape.
+	out.unusedFiles.push(...asItems("", record.files));
+	out.unusedExports.push(...asItems("", record.exports));
+	out.unusedDeps.push(...asItems("", record.dependencies));
+	return out;
+}
+
+function tryKnip(cwd: string): (KnipFindings & { files: number; exports: number; deps: number }) | null {
+	const { stdout } = run("npx knip --reporter json 2>/dev/null || true", cwd, 30_000);
+	const parsed = parseKnipJson(stdout);
+	if (!parsed) return null;
+	return {
+		...parsed,
+		files: parsed.unusedFiles.length,
+		exports: parsed.unusedExports.length + parsed.unusedTypes.length,
+		deps: parsed.unusedDeps.length,
+	};
 }

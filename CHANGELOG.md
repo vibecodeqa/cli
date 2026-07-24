@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.49.0 (2026-07-24)
+
+### Fixed — dead-code detection reported zero for every project
+- **Fixed**: `tryKnip` parsed Knip's *legacy* top-level JSON shape (`{files, exports, dependencies}`), but modern Knip emits `{ issues: [ { file, exports[], types[], dependencies[], files[] } ] }`. Every key read was `undefined`, so `deadExports` / `unusedFiles` / `unusedDeps` were **silently 0 on every scan** where Knip was installed, and the dead-code score penalty never applied. Both shapes are now parsed (`parseKnipJson`, unit-tested). Self-scan went from 0 to 31 unused exports and 3 unused dependencies.
+- **Added**: `performance` details now carry the dead-code *items* (file, symbol, line), not just counts — `details.deadCode.{files,exports,types,deps}`, capped for report size. This is what the Monitor's Dead Code page consumes (vibecodeqa/app#7).
+- **Added**: `knip.json` for the CLI's own self-analysis (scopes to `src/`, ignores fixtures).
+
 ## 0.48.0 (2026-07-24)
 
 ### New check: sqlite-d1 (advisory, component-gated)
