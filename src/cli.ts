@@ -4,6 +4,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { getCheckMeta } from "./check-meta.js";
 import { runExplain } from "./commands/explain.js";
 import { runFix } from "./commands/fix.js";
 import { runInit } from "./commands/init.js";
@@ -197,12 +198,68 @@ function generateMarkdown(report: VibeReport, trend: TrendDelta | null, prevRepo
 		md += "\n\n";
 	}
 
-	md += "| Check | Score | Grade |\n|-------|-------|-------|\n";
-	for (const c of checks) {
+	// Stack + detected components — context for why a given check set applied.
+	const stack = report.meta.stack;
+	const stackBits = [stack.framework !== "none" && stack.framework !== "unknown" ? stack.framework : null, stack.language]
+		.filter(Boolean)
+		.join(" / ");
+	md += `**Stack:** ${stackBits}`;
+	if (stack.components && stack.components.length > 0) md += ` · **Components:** ${stack.components.join(", ")}`;
+	if (report.meta.workspace?.isMonorepo) md += ` · monorepo (${report.meta.workspace.tool})`;
+	md += "\n\n";
+
+	const ran = checks.filter((c) => {
 		const det = c.details as Record<string, unknown>;
-		if (det.skipped || det.comingSoon) continue;
+		return !det.skipped && !det.comingSoon;
+	});
+	const gated = checks.filter((c) => {
+		const det = c.details as Record<string, unknown>;
+		return det.skipped && !det.comingSoon;
+	});
+
+	// Category rollup — where the score actually comes from. A flat check list
+	// hides that Testing carries 13 points and html-quality carries none.
+	const byCategory = new Map<string, { score: number; weight: number; checks: number }>();
+	for (const c of ran) {
+		const meta = getCheckMeta(c.name);
+		if (meta.weight <= 0) continue;
+		const row = byCategory.get(meta.category) ?? { score: 0, weight: 0, checks: 0 };
+		row.score += c.score * meta.weight;
+		row.weight += meta.weight;
+		row.checks += 1;
+		byCategory.set(meta.category, row);
+	}
+	if (byCategory.size > 0) {
+		md += "| Category | Score | Weight |\n|----------|-------|--------|\n";
+		for (const [cat, row] of byCategory) {
+			const catScore = Math.round(row.score / row.weight);
+			const emoji = catScore >= 90 ? "🟢" : catScore >= 75 ? "🟡" : catScore >= 60 ? "🟠" : "🔴";
+			md += `| ${emoji} ${cat} | ${catScore}/100 | ${row.weight} |\n`;
+		}
+		md += "\n";
+	}
+
+	md += `### Checks that ran (${ran.length} of ${checks.length})\n\n`;
+	md += "| Check | Score | Grade |\n|-------|-------|-------|\n";
+	for (const c of ran) {
 		const emoji = c.score >= 90 ? "🟢" : c.score >= 75 ? "🟡" : c.score >= 60 ? "🟠" : "🔴";
 		md += `| ${emoji} ${c.name} | ${c.score}/100 | ${c.grade} |\n`;
+	}
+
+	// What did NOT run, and why. Without this the report reads as "the product
+	// has N checks and you passed them" rather than "N of M applied to you".
+	if (gated.length > 0) {
+		md += `\n<details>\n<summary><b>Not applicable to this project (${gated.length})</b> — these checks exist but were skipped</summary>\n\n`;
+		md += "| Check | Why it was skipped |\n|-------|--------------------|\n";
+		for (const c of gated) {
+			const reason = (c.details as Record<string, unknown>).reason;
+			md += `| ${c.name} | ${typeof reason === "string" ? reason : "not applicable"} |\n`;
+		}
+		md += "\n</details>\n";
+	}
+	const premium = checks.filter((c) => (c.details as Record<string, unknown>).comingSoon).length;
+	if (premium > 0) {
+		md += `\n*${premium} AI-analysis checks are advisory (Pro) and excluded from the score.*\n`;
 	}
 
 	const errors = checks.flatMap((c) => c.issues.filter((i) => i.severity === "error"));
@@ -217,7 +274,8 @@ function generateMarkdown(report: VibeReport, trend: TrendDelta | null, prevRepo
 		if (remaining > 0) md += `\n*...and ${remaining} more*\n`;
 	}
 
-	md += `\n---\n*vcqa v${report.version} · ${report.meta.duration}ms*\n`;
+	md += `\n---\n**Full report:** \`.vibe-check/report/index.html\` — per-category pages, every issue with file and line, architecture diagrams, file heatmap and trends. This summary is the headline only.\n`;
+	md += `\n*vcqa v${report.version} · ${report.meta.duration}ms*\n`;
 	return md;
 }
 

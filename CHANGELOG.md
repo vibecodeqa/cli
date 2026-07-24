@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.50.0 (2026-07-24)
+
+### Markdown report tells the whole truth
+The summary listed only the checks that ran, so a reader concluded the product had ~20 checks and that all of them passed. It now reports coverage honestly:
+- **Added**: a "Not applicable to this project" section (collapsed, so PR comments stay short) naming every gated check and *why* — `react: not applicable to this stack (requires framework: react)`, `sqlite-d1: requires component: sqlite-d1`, `container-health: no Dockerfile found`, and so on. The heading now reads "Checks that ran (21 of 36)".
+- **Added**: a category rollup with weights, so it is visible that Testing carries 13 points and advisory checks carry none — a flat check list hid where the score comes from.
+- **Added**: a stack/components line (`Components: cloudflare-workers`, monorepo tool) explaining which check set applied.
+- **Added**: a note that Pro AI-analysis checks are advisory and excluded from the score, and a pointer to the multi-page HTML report — the markdown is the headline, not the whole story.
+
 ## 0.49.0 (2026-07-24)
 
 ### Fixed — dead-code detection reported zero for every project
