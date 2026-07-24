@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.52.0 (2026-07-24)
+
+### Reports can now be audited — tool provenance and scan size
+A clean score was previously unfalsifiable: "the tool ran and found nothing", "the tool was never installed", and "the tool ran in the wrong directory" all produced identical output. The last one is not hypothetical — it reported 42 live modules as unused in 0.50.x.
+- **Added**: every delegated tool run is recorded and attached to the check that made it — `details.toolRuns[]` with the tool name, the **exact command**, the **directory it ran in**, ok/failed, whether the binary was missing, duration, and its output (capped at 8 KB). Instrumented in the shared `exec.ts` wrapper, so knip, gitleaks, tsc, eslint, npm audit, dart analyze and jscpd all get it without per-runner work.
+- **Added**: `meta.filesScanned` — how many source files the walk actually covered, so a result can be sanity-checked against project size.
+
 ## 0.51.0 (2026-07-24)
 
 ### Fixed — dead-code analysis ran from the wrong directory and reported live code as unused

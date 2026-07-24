@@ -11,7 +11,7 @@ import { resolve } from "node:path";
 import { CHECK_META, type CheckMeta, getCheckMeta } from "./check-meta.js";
 import { getCheckIgnore, isCheckEnabled, loadConfig, type VcqaConfig } from "./config.js";
 import { detectRepoUrl, detectStack, detectWorkspace } from "./detect.js";
-import { readEnvIgnoreNames, setGlobalIgnore, setGlobalIgnoreNames, setGlobalSrcRoots } from "./fs-utils.js";
+import { collectSourceFiles, readEnvIgnoreNames, setGlobalIgnore, setGlobalIgnoreNames, setGlobalSrcRoots } from "./fs-utils.js";
 import { runAccessibility } from "./runners/accessibility.js";
 import { runArchitecture } from "./runners/architecture.js";
 import { runBestPractices } from "./runners/best-practices.js";
@@ -30,6 +30,7 @@ import { runDocs } from "./runners/docs.js";
 import { runDuplication } from "./runners/duplication.js";
 import { runEnvValidation } from "./runners/env-validation.js";
 import { runErrorHandling } from "./runners/error-handling.js";
+import { startToolRecording, takeToolRuns } from "./runners/exec.js";
 import { runFileCohesion } from "./runners/file-cohesion.js";
 import { runFrontendHealth } from "./runners/frontend-health.js";
 import { runGitHygiene } from "./runners/git-hygiene.js";
@@ -180,6 +181,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		}
 
 		let result: CheckResult;
+		startToolRecording();
 		try {
 			const maybeResult = runner.fn();
 			result = maybeResult instanceof Promise ? await maybeResult : maybeResult;
@@ -192,6 +194,13 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 				issues: [],
 				duration: 0,
 			};
+		}
+
+		// Provenance: what this check actually shelled out to, where, and what came
+		// back. A report without this cannot be audited — see exec.ts.
+		const toolRuns = takeToolRuns();
+		if (toolRuns.length > 0) {
+			result.details = { ...result.details, toolRuns };
 		}
 
 		// Apply per-check ignore patterns
@@ -226,6 +235,9 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 			cwd: resolvedCwd,
 			node: process.version,
 			duration: Date.now() - start,
+			// What the scan actually looked at — so a reader can sanity-check the
+			// result against the size of their project instead of taking it on faith.
+			filesScanned: collectSourceFiles(resolvedCwd).length,
 			stack,
 			workspace,
 			repoUrl,
