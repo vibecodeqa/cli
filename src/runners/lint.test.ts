@@ -1,0 +1,66 @@
+import { describe, expect, it } from "vitest";
+import { parseBiomeLint, scoreLint } from "./lint.js";
+
+describe("parseBiomeLint", () => {
+	it("returns null on non-JSON (biome absent / crashed)", () => {
+		expect(parseBiomeLint("")).toBeNull();
+		expect(parseBiomeLint("biome: command not found")).toBeNull();
+		// Valid JSON but not a biome report → still null (no diagnostics array).
+		expect(parseBiomeLint('{"ok":true}')).toBeNull();
+	});
+
+	it("maps diagnostics to issues with severity, file and rule", () => {
+		const out = JSON.stringify({
+			diagnostics: [
+				{ severity: "error", description: "unused var", category: "lint/correctness/noUnusedVariables", location: { path: "src/a.ts" } },
+				{ severity: "warning", description: "use const", category: "lint/style/useConst", location: { path: { file: "src/b.ts" } } },
+			],
+		});
+		const issues = parseBiomeLint(out)!;
+		expect(issues).toHaveLength(2);
+		expect(issues[0]).toMatchObject({ severity: "error", file: "src/a.ts", rule: "lint/correctness/noUnusedVariables" });
+		// path can be an object form depending on biome version.
+		expect(issues[1]).toMatchObject({ severity: "warning", file: "src/b.ts" });
+	});
+
+	it("skips generated files (node_modules, .vibe-check)", () => {
+		const out = JSON.stringify({
+			diagnostics: [
+				{ severity: "error", description: "x", category: "lint/x", location: { path: "node_modules/foo/index.js" } },
+				{ severity: "error", description: "y", category: "lint/y", location: { path: ".vibe-check/report.json" } },
+				{ severity: "error", description: "z", category: "lint/z", location: { path: "src/keep.ts" } },
+			],
+		});
+		const issues = parseBiomeLint(out)!;
+		expect(issues.map((i) => i.file)).toEqual(["src/keep.ts"]);
+	});
+
+	it("returns [] for a clean project (empty diagnostics)", () => {
+		expect(parseBiomeLint('{"diagnostics":[]}')).toEqual([]);
+	});
+});
+
+describe("scoreLint", () => {
+	it("is 100/A when there are no issues", () => {
+		expect(scoreLint([])).toEqual({ score: 100, errors: 0, warnings: 0 });
+	});
+
+	it("penalizes errors more than warnings", () => {
+		const withErrors = scoreLint([
+			{ severity: "error", message: "a" },
+			{ severity: "error", message: "b" },
+		]);
+		const withWarnings = scoreLint([
+			{ severity: "warning", message: "a" },
+			{ severity: "warning", message: "b" },
+		]);
+		expect(withErrors.errors).toBe(2);
+		expect(withWarnings.warnings).toBe(2);
+		expect(withErrors.score).toBeLessThan(withWarnings.score);
+	});
+
+	it("never drops below 0", () => {
+		const many = Array.from({ length: 200 }, () => ({ severity: "error" as const, message: "x" }));
+		expect(scoreLint(many).score).toBeGreaterThanOrEqual(0);
+	});
+});

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.53.0 (2026-07-26)
+
+### Lint no longer gives up when a project configures no linter
+A project with no biome/eslint config, no lint script, and no linter in its deps previously scored lint **F/0 "no linter detected"** and produced no tool output — common for AI-generated apps. Lint now falls back to running **Biome's recommended rules with no config**, the same "works without install" approach already used for knip (dead code). Biome lints zero-config; ESLint can't (it errors without a config), so Biome is the fallback.
+- **Added**: zero-config Biome fallback in the lint runner — when nothing configures a linter (and lint isn't detected in CI or sibling packages), it runs `npx @biomejs/biome lint` and reports a real lint score with `details.zeroConfig: true` and an honest reason. The `@biomejs/biome` run shows up in `details.toolRuns[]` like any other delegated tool. On a real unlinted app this turned an empty "skipped" into a concrete **D 45 (456 issues)**.
+- **Changed**: the shared Biome JSON parsing and lint scoring were factored into `parseBiomeLint` / `scoreLint` (both unit-tested), used by the configured-Biome path and the fallback alike.
+
 ## 0.52.0 (2026-07-24)
 
 ### Reports can now be audited — tool provenance and scan size
