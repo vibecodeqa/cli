@@ -27,7 +27,9 @@ describe("core API", () => {
 		expect(report.timestamp).toBeDefined();
 		expect(report.meta.stack).toBeDefined();
 		expect(report.meta.duration).toBeGreaterThan(0);
-	}, 30_000);
+		// Full scan of a linter-less fixture now runs the zero-config Biome fallback
+		// (a second npx tool-fetch), so allow the same headroom as other full scans.
+	}, 60_000);
 
 	it("scan with checks filter only runs specified checks", async () => {
 		const report = await scan(TMP, { skipTests: true, checks: ["structure", "type-safety"] });

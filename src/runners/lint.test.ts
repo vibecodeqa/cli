@@ -38,6 +38,21 @@ describe("parseBiomeLint", () => {
 	it("returns [] for a clean project (empty diagnostics)", () => {
 		expect(parseBiomeLint('{"diagnostics":[]}')).toEqual([]);
 	});
+
+	it("collapses multiple parse errors in one file to a single issue", () => {
+		const out = JSON.stringify({
+			diagnostics: [
+				{ severity: "error", description: "parse 1", category: "parse", location: { path: "src/bad.ts" } },
+				{ severity: "error", description: "parse 2", category: "parse", location: { path: "src/bad.ts" } },
+				{ severity: "error", description: "parse 3", category: "parse", location: { path: "src/bad.ts" } },
+				{ severity: "warning", description: "real lint", category: "lint/style/useConst", location: { path: "src/bad.ts" } },
+			],
+		});
+		const issues = parseBiomeLint(out)!;
+		// One collapsed parse issue for the file + the one genuine lint warning.
+		expect(issues.filter((i) => i.rule === "parse")).toHaveLength(1);
+		expect(issues).toHaveLength(2);
+	});
 });
 
 describe("scoreLint", () => {

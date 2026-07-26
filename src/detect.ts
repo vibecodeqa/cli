@@ -291,7 +291,13 @@ function resolveGlob(cwd: string, pattern: string, packages: WorkspacePackage[])
 		if (!existsSync(baseDir) || !statSync(baseDir).isDirectory()) return;
 		for (const entry of readdirSync(baseDir)) {
 			const pkgDir = join(baseDir, entry);
-			if (!statSync(pkgDir).isDirectory()) continue;
+			// A broken symlink under the glob dir would make statSync throw and abort
+			// the whole scan — skip unreadable entries and symlinks like walkForPackages.
+			try {
+				if (lstatSync(pkgDir).isSymbolicLink() || !statSync(pkgDir).isDirectory()) continue;
+			} catch {
+				continue;
+			}
 			addPackage(`${base}/${entry}`, pkgDir, packages);
 		}
 	} else {

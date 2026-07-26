@@ -270,4 +270,14 @@ describe("isIgnoredPath — external-tool paths honor the scan's ignore", () => 
 		expect(isIgnoredPath("src/app.ts")).toBe(false);
 		setGlobalIgnoreNames([]);
 	});
+
+	it("treats hidden directories as ignored (mirrors the walker), but not . or ..", () => {
+		setGlobalIgnore(undefined);
+		setGlobalIgnoreNames([]);
+		expect(isIgnoredPath(".github/scripts/deploy.ts")).toBe(true);
+		expect(isIgnoredPath("src/.storybook/preview.ts")).toBe(true);
+		expect(isIgnoredPath("src/app.ts")).toBe(false);
+		// A leading "./" or ".." segment must not swallow the whole path.
+		expect(isIgnoredPath("./src/app.ts")).toBe(false);
+	});
 });

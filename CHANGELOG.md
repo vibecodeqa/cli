@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.53.1 (2026-07-26)
+
+### Fixed — bugs found auditing the 0.53.0 zero-config Biome lint fallback
+- **Fixed**: the fallback scored files the rest of the scan never looked at. The file walker skips hidden directories (`entry.startsWith(".")`), but Biome descends into `.github/`, `.storybook/`, etc., and `isIgnoredPath` (the filter meant to mirror the walker) didn't replicate the hidden-dir rule — so a `.github/scripts/deploy.ts` could drop the lint score of a repo whose `src/` is clean, contradicting `meta.filesScanned`. `isIgnoredPath` now also ignores any hidden path segment.
+- **Fixed**: a single unparseable file exploded into many `error`-severity diagnostics (Biome emits one `parse` error per failure *within* a file), sinking the whole lint score. Parse diagnostics are now collapsed to one issue per file.
+- **Fixed**: `detectLintInCI` matched a bare `check` token, so a workflow that merely said "Check out the code" or "sanity check" was awarded an unearned lint score of 70/B. It now matches real lint invocations (`biome`/`eslint`/`lint`) only.
+- **Fixed**: a broken symlink under a workspace glob directory (`packages/*`) made `statSync` throw out of `detectWorkspace` and abort the entire scan. `resolveGlob` now skips unreadable entries and symlinks like `walkForPackages` already did.
+
 ## 0.53.0 (2026-07-26)
 
 ### Lint no longer gives up when a project configures no linter

@@ -178,11 +178,20 @@ export function parseBiomeLint(stdout: string): Issue[] | null {
 	}
 	if (!Array.isArray(data.diagnostics)) return null;
 	const issues: Issue[] = [];
+	// Biome emits one `parse`-category error per parse failure *within* a file, so
+	// a single unparseable file can explode into many errors and sink the score.
+	// Collapse them to one issue per file — one "can't parse this file" signal.
+	const parseSeen = new Set<string>();
 	for (const d of data.diagnostics as Array<Record<string, any>>) {
 		// biome path can be a string or {file: "..."} depending on version.
 		const rawPath = d.location?.path;
 		const file = typeof rawPath === "string" ? rawPath : rawPath?.file || undefined;
 		if (file && (file.includes(".vibe-check/") || file.includes("node_modules/"))) continue;
+		if (d.category === "parse") {
+			const key = file ?? "";
+			if (parseSeen.has(key)) continue;
+			parseSeen.add(key);
+		}
 		issues.push({
 			severity: d.severity === "error" ? "error" : d.severity === "warning" ? "warning" : "info",
 			message: d.description || d.message || "lint issue",
@@ -201,7 +210,9 @@ function detectLintInCI(cwd: string): boolean {
 		for (const f of readdirSync(workflowDir)) {
 			if (!f.endsWith(".yml") && !f.endsWith(".yaml")) continue;
 			const content = readFileSync(join(workflowDir, f), "utf-8");
-			if (/\b(biome|eslint|lint|check)\b/i.test(content)) return true;
+			// Match real lint invocations only. A bare "check" matched step names and
+			// comments ("Check out the code", "sanity check"), awarding unearned credit.
+			if (/\b(biome|eslint|lint)\b/i.test(content)) return true;
 		}
 	} catch {
 		/* can't read workflows */
