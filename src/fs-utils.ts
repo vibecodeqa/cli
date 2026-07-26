@@ -189,6 +189,17 @@ function shouldIgnore(relPath: string): boolean {
 	});
 }
 
+/** Whether a path (relative to the scan root) is excluded by the active ignore
+ *  config — the same rules the file walker applies. External tools (biome, tsc,
+ *  eslint) scan the filesystem directly and don't know our ignore, so a runner
+ *  filters the paths they report through this to stay consistent with the walk. */
+export function isIgnoredPath(relPath: string): boolean {
+	if (shouldIgnore(relPath) || matchesIgnoreSubpath(relPath)) return true;
+	// Bare ignore names / skip-dirs match any path segment (the walker never
+	// descends into such a directory, so its files are never collected).
+	return relPath.split("/").some((seg) => SKIP_DIRS.has(seg) || _globalIgnoreNames.has(seg));
+}
+
 function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>, seen: Set<string>): void {
 	let entries: string[];
 	try {

@@ -6,6 +6,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isIgnoredPath } from "../fs-utils.js";
 import type { CheckResult, Issue, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
@@ -158,7 +159,11 @@ function runBiomeZeroConfig(cwd: string, target: string): Issue[] | null {
 	// fetches it, exactly like the knip dead-code path. Bounded + `|| true` so an
 	// offline/slow environment caps quickly and we keep the honest "no linter" skip.
 	const { stdout } = run(`npx @biomejs/biome lint ${target} --reporter=json 2>/dev/null || true`, cwd, 30_000);
-	return parseBiomeLint(stdout);
+	const issues = parseBiomeLint(stdout);
+	if (!issues) return null;
+	// Biome walks the filesystem itself and doesn't know the scan's ignore config,
+	// so drop any diagnostic for a path the scan is configured to exclude.
+	return issues.filter((i) => !i.file || !isIgnoredPath(i.file));
 }
 
 /** Parse Biome's `--reporter=json` output into issues, or null if it isn't valid

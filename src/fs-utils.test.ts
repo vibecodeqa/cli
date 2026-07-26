@@ -7,9 +7,11 @@ import {
 	collectSourceFiles,
 	getProductionFiles,
 	getTestFiles,
+	isIgnoredPath,
 	readDeps,
 	readEnvIgnoreNames,
 	readSafe,
+	setGlobalIgnore,
 	setGlobalIgnoreNames,
 	setGlobalSrcRoots,
 } from "./fs-utils.js";
@@ -248,5 +250,24 @@ describe("readDeps", () => {
 
 	it("returns empty for missing package.json", () => {
 		expect(readDeps("/tmp/nonexistent")).toEqual({});
+	});
+});
+
+describe("isIgnoredPath — external-tool paths honor the scan's ignore", () => {
+	it("matches config glob patterns and skip-dirs, leaves others alone", () => {
+		setGlobalIgnore(["src/vendor/**"]);
+		setGlobalIgnoreNames([]);
+		expect(isIgnoredPath("src/vendor/lib.ts")).toBe(true);
+		expect(isIgnoredPath("node_modules/foo/index.js")).toBe(true); // skip-dir segment
+		expect(isIgnoredPath("src/app.ts")).toBe(false);
+		setGlobalIgnore(undefined);
+	});
+
+	it("matches bare ignore names on any path segment", () => {
+		setGlobalIgnore(undefined);
+		setGlobalIgnoreNames(["generated"]);
+		expect(isIgnoredPath("src/generated/api.ts")).toBe(true);
+		expect(isIgnoredPath("src/app.ts")).toBe(false);
+		setGlobalIgnoreNames([]);
 	});
 });
