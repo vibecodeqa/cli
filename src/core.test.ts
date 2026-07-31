@@ -37,6 +37,15 @@ describe("core API", () => {
 		expect(report.checks.map((c) => c.name).sort()).toEqual(["structure", "type-safety"]);
 	}, 30_000);
 
+	it("exposes dead-code as a synthetic check without affecting score", async () => {
+		const report = await scan(TMP, { skipTests: true, checks: ["performance", "dead-code"] });
+		expect(report.checks.map((c) => c.name)).toEqual(["performance", "dead-code"]);
+		const deadCode = report.checks.find((c) => c.name === "dead-code");
+		expect(deadCode).toBeDefined();
+		expect((deadCode!.details as Record<string, unknown>).synthetic).toBe(true);
+		expect(report.score).toBe(report.checks.find((c) => c.name === "performance")?.score);
+	}, 60_000);
+
 	it("scan calls onProgress for each check", async () => {
 		const progress: string[] = [];
 		await scan(TMP, {

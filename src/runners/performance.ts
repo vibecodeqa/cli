@@ -323,6 +323,51 @@ export interface KnipFindings {
 	unusedDeps: DeadCodeItem[];
 }
 
+export function deadCodeCheckFromPerformance(performance: CheckResult): CheckResult {
+	const details = performance.details as Record<string, unknown>;
+	const deadCode = details.deadCode as Record<string, unknown> | undefined;
+	const unusedFiles = Number(details.unusedFiles) || 0;
+	const unusedDeps = Number(details.unusedDeps) || 0;
+	const deadExports = Number(details.deadExports) || 0;
+	const total = unusedFiles + unusedDeps + deadExports;
+	const issues = performance.issues.filter((i) => ["dead-files", "dead-exports", "unused-deps"].includes(i.rule ?? ""));
+
+	if (details.deadCodeTool !== "knip") {
+		return {
+			name: "dead-code",
+			score: 0,
+			grade: "F",
+			details: {
+				synthetic: true,
+				skipped: true,
+				reason: "Knip did not produce a parseable dead-code report",
+			},
+			issues: [],
+			duration: 0,
+		};
+	}
+
+	const score = total === 0 ? 100 : Math.max(0, 100 - Math.min(90, unusedFiles * 10 + unusedDeps * 8 + deadExports * 2));
+	return {
+		name: "dead-code",
+		score,
+		grade: gradeFromScore(score),
+		details: {
+			synthetic: true,
+			sourceCheck: "performance",
+			deadCodeTool: "knip",
+			deadCodeConfigured: details.deadCodeConfigured,
+			unusedFiles,
+			unusedDeps,
+			deadExports,
+			deadCode: deadCode ?? { files: [], exports: [], types: [], deps: [] },
+			toolRuns: details.toolRuns,
+		},
+		issues,
+		duration: 0,
+	};
+}
+
 /** Parse Knip's JSON reporter. Modern Knip emits `{ issues: [ { file, exports[],
  *  types[], dependencies[], files[] } ] }` — a per-file grouping, NOT the flat
  *  top-level arrays an older shape used. Reading the old keys silently yielded

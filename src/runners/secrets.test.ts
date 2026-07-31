@@ -1,12 +1,13 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runSecrets } from "./secrets.js";
 
-const TMP = join(import.meta.dirname!, "__test_secrets__");
+let TMP = "";
 
 function setup(files: Record<string, string>) {
-	rmSync(TMP, { recursive: true, force: true });
+	TMP = mkdtempSync(join(tmpdir(), "vcqa-secrets-"));
 	mkdirSync(join(TMP, "src"), { recursive: true });
 	for (const [path, content] of Object.entries(files)) {
 		const full = join(TMP, path);
@@ -16,7 +17,8 @@ function setup(files: Record<string, string>) {
 }
 
 function cleanup() {
-	rmSync(TMP, { recursive: true, force: true });
+	if (TMP) rmSync(TMP, { recursive: true, force: true });
+	TMP = "";
 }
 
 describe("runSecrets", () => {

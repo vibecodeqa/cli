@@ -64,6 +64,7 @@ src/
 │   ├── standards.ts    # Code smells, naming, large files
 │   ├── error-handling.ts  # Empty catch, floating promises, JSON.parse, infinite loops
 │   ├── react.ts        # Hooks rules, missing keys, Error Boundary, Tailwind inline styles
+│   ├── flutter.ts      # Flutter package health, widget/integration tests, generated Dart files
 │   ├── accessibility.ts   # img alt, click handlers, v-for key (Vue/Svelte SFC aware)
 │   ├── complexity.ts   # Cognitive complexity per function
 │   ├── duplication.ts  # jscpd CLI (opt-in) → @jscpd/core engine over our own tokenizer (maximal clones)
@@ -106,14 +107,34 @@ logic into the framework's own check (see `react.ts`) or gate the whole check.
 Stack-*adaptive* behavior driven by detection (e.g. `structure` requiring `pubspec.yaml`
 vs `package.json` by language) is fine; framework special-casing is not.
 
-## 36 Checks across 7 categories
+## Analyzer-platform specs
 
-Weights sum to 100 (Pro checks have weight 0).
+The analyzer-platform roadmap is implemented from these internal docs:
+
+- `docs/internal-analyzer-contract.md` — typed analyzer manifests, lifecycle,
+  settings, metrics, findings, and registry rules.
+- `docs/language-profiles.md` — source extensions, project markers, generated
+  files, toolchains, and rules for adding language support.
+- `docs/out-of-process-analyzers.md` — internal JSON-over-stdio analyzer
+  protocol for built-in adapters and future isolation work.
+
+These are internal implementation contracts, not a public plugin SDK. Do not add
+new framework/language support outside these boundaries.
+
+## Checks across 7 categories
+
+`@vibecodeqa/schema`'s `CHECK_META` is the source of truth. It currently defines
+37 canonical checks across 7 categories. The CLI may also emit derived/synthetic
+rows such as `dead-code` when a first-class page needs a clearer surface over data
+collected by another check; those rows must not change the weighted score unless
+they are promoted into `CHECK_META`.
+
+Weights sum to 100 (Pro checks and zero-weight platform checks have weight 0).
 
 | Category | Checks | Weights |
 |---|---|---|
 | **Foundations** | structure, lint, types, type-safety, standards | 6+5+6+3+3 = 23 |
-| **Quality** | complexity, duplication, error-handling, react, accessibility, docs, best-practices, frontend-health, env-validation, git-hygiene, memory-safety, styling, html-quality, container-health, cloudflare-workers | 5+3+3+3+4+3+3+2+1+1+1+1+0+0+0 = 30 |
+| **Quality** | complexity, duplication, error-handling, react, flutter, accessibility, docs, best-practices, frontend-health, env-validation, git-hygiene, memory-safety, styling, html-quality, container-health, cloudflare-workers | 5+3+3+3+0+4+3+3+2+1+1+1+1+0+0+0 = 30 |
 | **Testing** | testing | 13 |
 | **Architecture** | architecture, performance | 5+4 = 9 |
 | **Security** | secrets, security, dependencies, sqlite-d1 | 6+5+5+0 = 16 |

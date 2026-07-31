@@ -15,21 +15,19 @@ export function runTypeCheck(cwd: string, isDart = false, workspace?: WorkspaceI
 	const issues: Issue[] = [];
 
 	if (isDart) {
-		const { stdout } = run("dart analyze --format=machine 2>/dev/null || true", cwd, 30_000);
-		for (const line of stdout.split("\n")) {
-			const parts = line.split("|");
-			if (parts.length < 8 || parts[0] !== "ERROR") continue;
-			// dart analyze returns absolute paths — strip cwd prefix
-			let filePath = parts[3];
-			if (filePath.startsWith(cwd)) filePath = filePath.slice(cwd.length + 1);
-			else if (filePath.startsWith(`/private${cwd}`)) filePath = filePath.slice(`/private${cwd}`.length + 1);
-			issues.push({
-				severity: "error",
-				file: filePath,
-				line: parseInt(parts[4], 10) || undefined,
-				rule: parts[2],
-				message: parts[7],
-			});
+		const dartRoots =
+			workspace?.isMonorepo && workspace.packages.some((p) => existsSync(join(cwd, p.path, "pubspec.yaml")))
+				? workspace.packages
+						.filter((p) => existsSync(join(cwd, p.path, "pubspec.yaml")))
+						.map((p) => ({ cwd: join(cwd, p.path), prefix: p.path }))
+				: [{ cwd, prefix: "" }];
+		for (const root of dartRoots) {
+			parseDartAnalyzeErrors(
+				run("dart analyze --format=machine 2>/dev/null || true", root.cwd, 30_000).stdout,
+				root.cwd,
+				root.prefix,
+				issues,
+			);
 		}
 	} else {
 		const hasTsconfig =
@@ -78,6 +76,24 @@ export function runTypeCheck(cwd: string, isDart = false, workspace?: WorkspaceI
 		issues,
 		duration: Date.now() - start,
 	};
+}
+
+function parseDartAnalyzeErrors(stdout: string, runCwd: string, prefix: string, issues: Issue[]): void {
+	for (const line of stdout.split("\n")) {
+		const parts = line.split("|");
+		if (parts.length < 8 || parts[0] !== "ERROR") continue;
+		let filePath = parts[3];
+		if (filePath.startsWith(runCwd)) filePath = filePath.slice(runCwd.length + 1);
+		else if (filePath.startsWith(`/private${runCwd}`)) filePath = filePath.slice(`/private${runCwd}`.length + 1);
+		const file = prefix && filePath && !filePath.startsWith(`${prefix}/`) ? `${prefix}/${filePath}` : filePath;
+		issues.push({
+			severity: "error",
+			file,
+			line: parseInt(parts[4], 10) || undefined,
+			rule: parts[2],
+			message: parts[7],
+		});
+	}
 }
 
 function parseTscOutput(stdout: string, issues: Issue[]): void {

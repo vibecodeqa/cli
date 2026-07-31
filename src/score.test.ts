@@ -35,6 +35,12 @@ describe("computeScore", () => {
 		expect(result).toBe(80);
 	});
 
+	it("ignores synthetic checks in weight", () => {
+		const synthetic = check("dead-code", 0);
+		synthetic.details = { synthetic: true };
+		expect(computeScore([check("lint", 100), synthetic])).toBe(100);
+	});
+
 	it("testing carries the most weight", () => {
 		// All perfect except testing is 0
 		const checks = [

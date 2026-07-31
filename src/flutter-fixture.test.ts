@@ -32,6 +32,11 @@ describe("flutter fixture e2e", () => {
 		const react = report.checks.find((c) => c.name === "react");
 		expect(react?.details.skipped).toBe(true);
 		expect(react?.details.reason).toContain("not applicable");
+		const flutter = report.checks.find((c) => c.name === "flutter");
+		expect(flutter?.details.skipped).not.toBe(true);
+		expect(flutter?.details.packages).toEqual(
+			expect.arrayContaining([expect.objectContaining({ path: ".", kind: "app", widgetTests: 0 })]),
+		);
 
 		// All registered checks reported something
 		expect(report.checks.length).toBeGreaterThanOrEqual(34);

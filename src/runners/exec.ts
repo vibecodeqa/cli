@@ -27,6 +27,7 @@ export interface ToolRun {
 }
 
 const MAX_OUTPUT = 8000;
+const MAX_BUFFER = 64 * 1024 * 1024;
 
 let buffer: ToolRun[] = [];
 let recording = false;
@@ -66,6 +67,7 @@ export function run(cmd: string, cwd: string, timeout = 60_000): { stdout: strin
 			cwd,
 			timeout,
 			encoding: "utf-8",
+			maxBuffer: MAX_BUFFER,
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		record({

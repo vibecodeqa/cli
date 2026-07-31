@@ -6,6 +6,7 @@ import { CHECK_META } from "./check-meta.js";
 
 const CLI = join(import.meta.dirname!, "..", "dist", "cli.js");
 const TMP = join(import.meta.dirname!, "__test_cli__");
+const SYNTHETIC_CHECK_COUNT = 1; // dead-code is derived from performance and not in CHECK_META.
 
 function run(args: string): string {
 	try {
@@ -52,7 +53,7 @@ describe("CLI flags", () => {
 		expect(report.score).toBeGreaterThanOrEqual(0);
 		expect(report.score).toBeLessThanOrEqual(100);
 		expect(report.checks).toBeInstanceOf(Array);
-		expect(report.checks.length).toBe(Object.keys(CHECK_META).length);
+		expect(report.checks.length).toBe(Object.keys(CHECK_META).length + SYNTHETIC_CHECK_COUNT);
 	}, 30_000);
 
 	it("nonexistent path exits with error", () => {
@@ -286,7 +287,7 @@ describe("init command", () => {
 		const out = run("--skip-tests --json .");
 		const report = JSON.parse(out);
 		// Config should load without error and not disable any checks
-		expect(report.checks.length).toBe(Object.keys(CHECK_META).length);
+		expect(report.checks.length).toBe(Object.keys(CHECK_META).length + SYNTHETIC_CHECK_COUNT);
 		const disabled = report.checks.filter((c: any) => c.details.reason === "disabled in config");
 		expect(disabled).toHaveLength(0);
 	}, 30_000);
@@ -358,7 +359,7 @@ describe("report output", () => {
 	it("--json produces report with all checks and workspace info", () => {
 		const out = run("--skip-tests --json .");
 		const report = JSON.parse(out);
-		expect(report.checks.length).toBe(Object.keys(CHECK_META).length);
+		expect(report.checks.length).toBe(Object.keys(CHECK_META).length + SYNTHETIC_CHECK_COUNT);
 		expect(report.meta.workspace).toBeDefined();
 		expect(typeof report.meta.workspace.isMonorepo).toBe("boolean");
 		// Also verify report file was written

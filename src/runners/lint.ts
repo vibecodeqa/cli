@@ -51,28 +51,15 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 			/* eslint output parse failed */
 		}
 	} else if (stack.linter === "dart_analyze") {
-		const { stdout } = run("dart analyze --format=machine 2>/dev/null || true", cwd);
-		for (const line of stdout.split("\n")) {
-			const parts = line.split("|");
-			if (parts.length < 8) continue;
-			const severity = parts[0] === "ERROR" ? "error" : parts[0] === "WARNING" ? "warning" : "info";
-			// dart analyze returns absolute paths — strip cwd prefix
-			// macOS: /var/folders may resolve to /private/var/folders
-			let filePath = parts[3];
-			if (filePath.startsWith(cwd)) filePath = filePath.slice(cwd.length + 1);
-			else if (filePath.startsWith(`/private${cwd}`)) filePath = filePath.slice(`/private${cwd}`.length + 1);
-			else if (filePath.includes(cwd.split("/").pop()!)) {
-				// Last resort: find the cwd basename in the path
-				const idx = filePath.indexOf(cwd.split("/").pop()!);
-				if (idx >= 0) filePath = filePath.slice(idx + cwd.split("/").pop()!.length + 1);
-			}
-			issues.push({
-				severity,
-				message: parts[7],
-				file: filePath,
-				line: parseInt(parts[4], 10) || undefined,
-				rule: parts[2],
-			});
+		const dartRoots =
+			workspace?.isMonorepo && workspace.packages.some((p) => existsSync(join(cwd, p.path, "pubspec.yaml")))
+				? workspace.packages
+						.filter((p) => existsSync(join(cwd, p.path, "pubspec.yaml")))
+						.map((p) => ({ cwd: join(cwd, p.path), prefix: p.path }))
+				: [{ cwd, prefix: "" }];
+		for (const root of dartRoots) {
+			const { stdout } = run("dart analyze --format=machine 2>/dev/null || true", root.cwd);
+			parseDartAnalyze(stdout, root.cwd, root.prefix, issues, false);
 		}
 	} else {
 		// No root linter detected — check if linting is happening elsewhere
@@ -134,6 +121,30 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 		issues,
 		duration: Date.now() - start,
 	};
+}
+
+function parseDartAnalyze(stdout: string, runCwd: string, prefix: string, issues: Issue[], errorsOnly: boolean): void {
+	for (const line of stdout.split("\n")) {
+		const parts = line.split("|");
+		if (parts.length < 8) continue;
+		if (errorsOnly && parts[0] !== "ERROR") continue;
+		const severity = parts[0] === "ERROR" ? "error" : parts[0] === "WARNING" ? "warning" : "info";
+		let filePath = parts[3];
+		if (filePath.startsWith(runCwd)) filePath = filePath.slice(runCwd.length + 1);
+		else if (filePath.startsWith(`/private${runCwd}`)) filePath = filePath.slice(`/private${runCwd}`.length + 1);
+		else if (filePath.includes(runCwd.split("/").pop()!)) {
+			const idx = filePath.indexOf(runCwd.split("/").pop()!);
+			if (idx >= 0) filePath = filePath.slice(idx + runCwd.split("/").pop()!.length + 1);
+		}
+		const file = prefix && filePath && !filePath.startsWith(`${prefix}/`) ? `${prefix}/${filePath}` : filePath;
+		issues.push({
+			severity,
+			message: parts[7],
+			file,
+			line: parseInt(parts[4], 10) || undefined,
+			rule: parts[2],
+		});
+	}
 }
 
 /** Lint score from issue counts — diminishing penalty so a large count can't

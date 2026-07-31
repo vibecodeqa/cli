@@ -32,12 +32,13 @@ import { runEnvValidation } from "./runners/env-validation.js";
 import { runErrorHandling } from "./runners/error-handling.js";
 import { startToolRecording, takeToolRuns } from "./runners/exec.js";
 import { runFileCohesion } from "./runners/file-cohesion.js";
+import { runFlutter } from "./runners/flutter.js";
 import { runFrontendHealth } from "./runners/frontend-health.js";
 import { runGitHygiene } from "./runners/git-hygiene.js";
 import { runHtmlQuality } from "./runners/html-quality.js";
 import { runLint } from "./runners/lint.js";
 import { runMemorySafety } from "./runners/memory-safety.js";
-import { runPerformance } from "./runners/performance.js";
+import { deadCodeCheckFromPerformance, runPerformance } from "./runners/performance.js";
 import { runReact } from "./runners/react.js";
 import { runSecrets } from "./runners/secrets.js";
 import { runSecurity } from "./runners/security.js";
@@ -90,6 +91,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 
 	const srcRoots = workspace.isMonorepo ? workspace.srcRoots : undefined;
 	const skipTests = options.skipTests ?? false;
+	let performanceResult: CheckResult | null = null;
 
 	const allRunners: { name: string; fn: () => CheckResult | Promise<CheckResult> }[] = [
 		{ name: "structure", fn: () => runStructure(resolvedCwd, stack, workspace) },
@@ -101,6 +103,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		{ name: "duplication", fn: () => runDuplication(resolvedCwd) },
 		{ name: "error-handling", fn: () => runErrorHandling(resolvedCwd) },
 		{ name: "react", fn: () => runReact(resolvedCwd) },
+		{ name: "flutter", fn: () => runFlutter(resolvedCwd, workspace) },
 		{ name: "accessibility", fn: () => runAccessibility(resolvedCwd) },
 		{ name: "docs", fn: () => runDocs(resolvedCwd) },
 		{ name: "best-practices", fn: () => runBestPractices(resolvedCwd, workspace) },
@@ -112,7 +115,22 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		{ name: "security", fn: () => runSecurity(resolvedCwd) },
 		{ name: "dependencies", fn: () => runDependencies(resolvedCwd, stack) },
 		{ name: "architecture", fn: () => runArchitecture(resolvedCwd, workspace) },
-		{ name: "performance", fn: () => runPerformance(resolvedCwd, workspace) },
+		{
+			name: "performance",
+			fn: () => {
+				performanceResult = runPerformance(resolvedCwd, workspace);
+				return performanceResult;
+			},
+		},
+		{
+			name: "dead-code",
+			fn: () => {
+				if (!performanceResult) {
+					performanceResult = runPerformance(resolvedCwd, workspace);
+				}
+				return deadCodeCheckFromPerformance(performanceResult);
+			},
+		},
 		{ name: "container-health", fn: () => runContainerHealth(resolvedCwd) },
 		{ name: "cloudflare-workers", fn: () => runCloudflareWorkers(resolvedCwd, workspace) },
 		{ name: "sqlite-d1", fn: () => runSqliteD1(resolvedCwd, workspace) },

@@ -10,7 +10,7 @@ export function computeScore(checks: CheckResult[]): number {
 
 	for (const check of checks) {
 		const det = check.details as Record<string, unknown>;
-		if (det.skipped || det.comingSoon) continue;
+		if (det.skipped || det.comingSoon || det.synthetic) continue;
 		const meta = getCheckMeta(check.name);
 		totalWeight += meta.weight;
 		weightedSum += check.score * meta.weight;

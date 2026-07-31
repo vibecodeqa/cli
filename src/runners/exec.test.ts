@@ -61,7 +61,7 @@ describe("tool run provenance", () => {
 
 	it("caps captured output so one noisy tool cannot bloat the report", () => {
 		startToolRecording();
-		run("sh -c 'head -c 40000 /dev/zero | tr \"\\\\0\" \"x\"'", "/tmp");
+		run('sh -c \'head -c 40000 /dev/zero | tr "\\\\0" "x"\'', "/tmp");
 		const [r] = takeToolRuns();
 		expect(r.output.length).toBeLessThanOrEqual(8000);
 	});

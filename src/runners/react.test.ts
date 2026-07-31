@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { runReact } from "./react.js";
+import { parseReactEslintIssues, runReact } from "./react.js";
 
 function makeProject(files: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-react-"));
@@ -134,5 +134,57 @@ export function View({ items }: { items: string[] }) {
 		const result = runReact(dir);
 		expect(result.issues.some((i) => i.rule === "missing-key")).toBe(true);
 		rmSync(dir, { recursive: true });
+	});
+
+	it("emits structured React health categories and tooling state", () => {
+		const dir = makeProject({
+			"App.tsx": `import { useEffect } from "react";
+export function App({ items }: { items: string[] }) {
+  useEffect(() => {
+    document.querySelector("#root");
+  });
+  return <ul>{items.map((x, index) => <li key={index}>{x}</li>)}</ul>;
+}`,
+		});
+		const result = runReact(dir);
+		const details = result.details as any;
+		expect(details.metrics).toContainEqual({ id: "jsxFiles", label: "JSX/TSX files", value: 1 });
+		expect(details.tooling).toMatchObject({
+			eslintPluginReactHooks: false,
+			eslintPluginReact: false,
+			eslintPluginReactRefresh: false,
+			hooksCoveredByLint: false,
+		});
+		expect(details.categories).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: "effects", issues: 1 }),
+				expect.objectContaining({ id: "rendering", issues: 1 }),
+				expect.objectContaining({ id: "component-structure", issues: 1 }),
+				expect.objectContaining({ id: "error-boundary", issues: 1 }),
+				expect.objectContaining({ id: "compiler-readiness", issues: 0 }),
+			]),
+		);
+		rmSync(dir, { recursive: true });
+	});
+});
+
+describe("parseReactEslintIssues", () => {
+	it("keeps industry-standard React plugin diagnostics and drops generic lint", () => {
+		const stdout = JSON.stringify([
+			{
+				filePath: "/repo/src/App.tsx",
+				messages: [
+					{ severity: 2, message: "Hook is called conditionally", line: 5, ruleId: "react-hooks/rules-of-hooks" },
+					{ severity: 1, message: "Missing key", line: 8, ruleId: "react/jsx-key" },
+					{ severity: 1, message: "Fast refresh warning", line: 1, ruleId: "react-refresh/only-export-components" },
+					{ severity: 1, message: "Use const", line: 3, ruleId: "prefer-const" },
+				],
+			},
+		]);
+		expect(parseReactEslintIssues(stdout, "/repo")).toEqual([
+			{ severity: "error", message: "Hook is called conditionally", file: "src/App.tsx", line: 5, rule: "react-hooks/rules-of-hooks" },
+			{ severity: "warning", message: "Missing key", file: "src/App.tsx", line: 8, rule: "react/jsx-key" },
+			{ severity: "warning", message: "Fast refresh warning", file: "src/App.tsx", line: 1, rule: "react-refresh/only-export-components" },
+		]);
 	});
 });

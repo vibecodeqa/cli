@@ -115,9 +115,10 @@ async function scanSecretlint(files: ScanFile[], add: (iss: Issue) => void): Pro
 	}
 }
 
-/** Built-in fallback when gitleaks isn't installed: curated patterns first (nice
- *  names + LLM keys, winning dedup), then secretlint's broad ruleset augments. */
-async function scanFallback(cwd: string): Promise<Issue[]> {
+/** Built-in scan: curated patterns always run because they cover LLM/service key
+ *  formats that a local gitleaks version may not know yet. secretlint is only
+ *  needed when gitleaks is unavailable. */
+async function scanBuiltIn(cwd: string, includeSecretlint: boolean): Promise<Issue[]> {
 	const files = collectAllFiles(cwd, { extraExts: true }).filter((sf) => !sf.isTest && !sf.path.includes("__mock"));
 	const issues: Issue[] = [];
 	const seen = new Set<string>();
@@ -129,7 +130,7 @@ async function scanFallback(cwd: string): Promise<Issue[]> {
 		}
 	};
 	scanPatterns(files, add);
-	await scanSecretlint(files, add);
+	if (includeSecretlint) await scanSecretlint(files, add);
 	return issues;
 }
 
@@ -141,9 +142,7 @@ export async function runSecrets(cwd: string): Promise<CheckResult> {
 	const gitleaksResult = tryGitleaks(cwd, issues);
 	const tool = gitleaksResult ? "gitleaks" : "secretlint";
 
-	if (!gitleaksResult) {
-		issues.push(...(await scanFallback(cwd)));
-	}
+	issues.push(...(await scanBuiltIn(cwd, !gitleaksResult)));
 
 	// ── .env file audit ──
 	const envFiles = [".env", ".env.local", ".env.production", ".env.development"];
@@ -209,7 +208,9 @@ export async function runSecrets(cwd: string): Promise<CheckResult> {
 		details: {
 			secretsFound: issues.length,
 			tool,
-			suggestion: !gitleaksResult ? "Install gitleaks for deeper secret detection (800+ patterns): brew install gitleaks" : undefined,
+			suggestion: gitleaksResult
+				? "gitleaks scan ran; built-in LLM/service key patterns also checked"
+				: "Install gitleaks for deeper secret detection (800+ patterns): brew install gitleaks",
 		},
 		issues,
 		duration: Date.now() - start,

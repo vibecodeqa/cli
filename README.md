@@ -2,17 +2,17 @@
 
 **Code health scanner for the AI coding era.**
 
-One command. 34 checks. AI-powered fixes. Zero config.
+One command. Canonical checks. AI-powered fixes. Zero config.
 
 ```bash
 npx @vibecodeqa/cli
 ```
 
-![Grade](https://img.shields.io/badge/checks-34-blue) ![TypeScript](https://img.shields.io/badge/TypeScript-first-3178C6) ![License](https://img.shields.io/badge/license-MIT-green) ![npm](https://img.shields.io/npm/v/@vibecodeqa/cli)
+![Grade](https://img.shields.io/badge/checks-canonical-blue) ![TypeScript](https://img.shields.io/badge/TypeScript-first-3178C6) ![License](https://img.shields.io/badge/license-MIT-green) ![npm](https://img.shields.io/npm/v/@vibecodeqa/cli)
 
 ## What it does
 
-vcqa scans your codebase and produces a scored health report with actionable findings. Auto-detects your stack (React, Vue, Svelte, Flutter, monorepos) and runs 34 checks across 7 categories.
+vcqa scans your codebase and produces a scored health report with actionable findings. Auto-detects your stack (React, Vue, Svelte, Flutter, monorepos) and runs canonical checks across 7 categories.
 
 **Scan → See issues → AI fixes them → Score improves.**
 
@@ -56,7 +56,7 @@ npx @vibecodeqa/cli fix --ai --dry-run             # preview without applying
 
 Uses Claude to read your code context, understand the issue, and generate a targeted fix. Requires `ANTHROPIC_API_KEY`.
 
-## 34 Checks
+## Checks
 
 ### Foundations (23%)
 
@@ -76,6 +76,7 @@ Uses Claude to read your code context, understand the issue, and generate a targ
 | Duplication | 3% | Copy-pasted 6+ line blocks |
 | Error Handling | 3% | Empty catch, throw string, floating promises |
 | React Patterns | 3% | Conditional hooks, missing keys |
+| Flutter Health | — | Flutter package health, widget/integration tests, generated Dart files |
 | Accessibility | 4% | img alt, click handlers, form labels |
 | Docs | 3% | README quality, JSDoc coverage |
 | Best Practices | 3% | CI/CD, supply chain, repo hygiene |

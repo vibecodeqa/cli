@@ -56,14 +56,14 @@ export function detectStack(cwd: string, workspace?: WorkspaceInfo): StackInfo {
 	};
 
 	// ── Dart/Flutter detection ──
-	// Check root pubspec, OR workspace packages (melos monorepos have pubspec in packages, not root)
+	// Check root pubspec, OR workspace packages. Some Flutter repos are
+	// convention-only multi-package roots (app/, admin/, shared/) without melos.
 	let pubspec = read("pubspec.yaml");
-	if (!pubspec && workspace?.tool === "melos") {
+	if (!pubspec && workspace?.isMonorepo) {
 		for (const wp of workspace.packages) {
 			const ps = read(join(wp.path, "pubspec.yaml"));
 			if (ps) {
-				pubspec = ps;
-				break;
+				pubspec += `\n${ps}`;
 			}
 		}
 	}
@@ -362,6 +362,7 @@ function addPackage(relPath: string, pkgDir: string, packages: WorkspacePackage[
 	const hasLinter =
 		existsSync(join(pkgDir, "biome.json")) ||
 		existsSync(join(pkgDir, "biome.jsonc")) ||
+		existsSync(join(pkgDir, "analysis_options.yaml")) ||
 		existsSync(join(pkgDir, ".eslintrc.json")) ||
 		existsSync(join(pkgDir, ".eslintrc.js")) ||
 		existsSync(join(pkgDir, "eslint.config.js")) ||
@@ -458,6 +459,39 @@ function detectConventionalLayout(cwd: string): WorkspaceInfo {
 		if (packages.length > 0) {
 			return { isMonorepo: true, tool: "none", packages, srcRoots: buildSrcRoots(cwd, packages) };
 		}
+	}
+
+	// Convention-only package roots. This covers Flutter layouts like
+	// platform/app, platform/admin, platform/shared where each child owns a
+	// pubspec.yaml but the repo root has no melos.yaml or root pubspec.yaml.
+	const packages: WorkspacePackage[] = [];
+	for (const entry of readdirSync(cwd)) {
+		if (entry === "node_modules" || entry === ".git" || entry === "dist" || entry === "build" || entry.startsWith(".")) continue;
+		const full = join(cwd, entry);
+		try {
+			if (lstatSync(full).isSymbolicLink() || !statSync(full).isDirectory()) continue;
+		} catch {
+			continue;
+		}
+		if (existsSync(join(full, "package.json")) || existsSync(join(full, "pubspec.yaml"))) {
+			addPackage(entry, full, packages);
+			continue;
+		}
+		for (const child of readdirSync(full)) {
+			const childFull = join(full, child);
+			try {
+				if (lstatSync(childFull).isSymbolicLink() || !statSync(childFull).isDirectory()) continue;
+			} catch {
+				continue;
+			}
+			if (existsSync(join(childFull, "package.json")) || existsSync(join(childFull, "pubspec.yaml"))) {
+				addPackage(`${entry}/${child}`, childFull, packages);
+			}
+		}
+	}
+
+	if (packages.length >= 2) {
+		return { isMonorepo: true, tool: "none", packages, srcRoots: buildSrcRoots(cwd, packages) };
 	}
 
 	return none;

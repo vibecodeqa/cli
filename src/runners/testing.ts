@@ -10,7 +10,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, extname, join } from "node:path";
+import { basename, extname, join, relative } from "node:path";
 import { getProductionFiles, readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue, StackInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -43,6 +43,38 @@ interface CoverageData {
 	lines: number;
 	branches: number;
 	functions: number;
+}
+
+type TestCaseStatus = "passed" | "failed" | "skipped" | "todo" | "unknown";
+
+interface TestCaseReport {
+	name: string;
+	status: TestCaseStatus;
+	durationMs: number | null;
+	error?: string;
+}
+
+interface TestSuiteReport {
+	file: string;
+	status: TestCaseStatus;
+	durationMs: number | null;
+	passed: number;
+	failed: number;
+	skipped: number;
+	total: number;
+	tests: TestCaseReport[];
+}
+
+interface TestExecutionReport {
+	runner: string;
+	cwd: string;
+	passed: number;
+	failed: number;
+	total: number;
+	durationMs: number | null;
+	suites: TestSuiteReport[];
+	failures: (TestCaseReport & { file: string })[];
+	slowest: (TestCaseReport & { file: string })[];
 }
 
 // ── Classification rules ──
@@ -199,68 +231,258 @@ function detectE2E(cwd: string): { tool: string; configured: boolean } {
 
 // ── Combined test + coverage execution (single run) ──
 
+function packageRootFromSrcRoot(srcRoot: string): string {
+	const clean = srcRoot.replace(/^\/+|\/+$/g, "");
+	if (!clean) return "";
+	const parts = clean.split("/");
+	const leaf = parts.at(-1);
+	if (parts.length > 1 && leaf && ["src", "lib", "test", "tests", "__tests__", "e2e"].includes(leaf)) {
+		parts.pop();
+	}
+	if (parts.length === 1 && ["src", "lib", "test", "tests", "__tests__", "e2e"].includes(parts[0])) return "";
+	return parts.join("/");
+}
+
+function directRunnerFor(cwd: string): StackInfo["testRunner"] {
+	const deps = readDeps(cwd);
+	if (deps.vitest) return "vitest";
+	if (deps.jest) return "jest";
+	return "none";
+}
+
+function candidateRunRoots(cwd: string, srcRoots?: string[]): { cwd: string; runner: StackInfo["testRunner"] }[] {
+	if (!srcRoots || srcRoots.length === 0) {
+		const runner = directRunnerFor(cwd);
+		return runner === "none" ? [] : [{ cwd, runner }];
+	}
+
+	const packageRoots = new Set<string>();
+	for (const srcRoot of srcRoots) {
+		const pkg = packageRootFromSrcRoot(srcRoot);
+		if (!pkg) continue;
+		if (existsSync(join(cwd, pkg, "package.json"))) packageRoots.add(pkg);
+	}
+
+	const packageCandidates = [...packageRoots]
+		.map((rel) => ({ cwd: join(cwd, rel), runner: directRunnerFor(join(cwd, rel)) }))
+		.filter((r) => r.runner !== "none");
+	if (packageCandidates.length > 0) return packageCandidates;
+
+	const rootRunner = directRunnerFor(cwd);
+	return rootRunner === "none" ? [] : [{ cwd, runner: rootRunner }];
+}
+
+function coverageRoots(cwd: string, srcRoots?: string[]): string[] {
+	const roots = [cwd];
+	for (const srcRoot of srcRoots ?? []) {
+		const pkg = packageRootFromSrcRoot(srcRoot);
+		if (!pkg) continue;
+		const full = join(cwd, pkg);
+		if (!roots.includes(full)) roots.push(full);
+	}
+	return roots;
+}
+
+function firstJsonObject(stdout: string): unknown | null {
+	const start = stdout.indexOf("{");
+	if (start < 0) return null;
+
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+	for (let i = start; i < stdout.length; i++) {
+		const ch = stdout[i];
+		if (inString) {
+			if (escaped) {
+				escaped = false;
+			} else if (ch === "\\") {
+				escaped = true;
+			} else if (ch === '"') {
+				inString = false;
+			}
+			continue;
+		}
+		if (ch === '"') {
+			inString = true;
+			continue;
+		}
+		if (ch === "{") depth++;
+		if (ch === "}") {
+			depth--;
+			if (depth === 0) {
+				try {
+					return JSON.parse(stdout.slice(start, i + 1));
+				} catch {
+					return null;
+				}
+			}
+		}
+	}
+	return null;
+}
+
+function normalizeStatus(status: unknown): TestCaseStatus {
+	const s = String(status || "").toLowerCase();
+	if (s === "passed" || s === "failed" || s === "skipped" || s === "todo") return s;
+	if (s === "pending") return "skipped";
+	return "unknown";
+}
+
+function asDuration(v: unknown): number | null {
+	const n = Number(v);
+	return Number.isFinite(n) ? Math.max(0, Math.round(n * 10) / 10) : null;
+}
+
+function trimError(messages: unknown): string | undefined {
+	const list = Array.isArray(messages) ? messages : messages ? [messages] : [];
+	const text = list.map(String).join("\n").trim();
+	if (!text) return undefined;
+	return text.length > 4000 ? `${text.slice(0, 4000)}\n...truncated` : text;
+}
+
+function relativeTestFile(runCwd: string, file: unknown): string {
+	const path = String(file || "unknown");
+	if (!path || path === "unknown") return path;
+	if (!path.startsWith("/")) return path;
+	const rel = relative(runCwd, path).replace(/\\/g, "/");
+	return rel.startsWith("..") ? path : rel;
+}
+
+function readAssertionName(raw: Record<string, unknown>): string {
+	const full = String(raw.fullName || "").trim();
+	if (full) return full;
+	const title = String(raw.title || "").trim();
+	const ancestors = Array.isArray(raw.ancestorTitles) ? raw.ancestorTitles.map(String).filter(Boolean) : [];
+	return [...ancestors, title].filter(Boolean).join(" ");
+}
+
+function compactSuite(runCwd: string, raw: Record<string, unknown>): TestSuiteReport {
+	const assertions = Array.isArray(raw.assertionResults) ? (raw.assertionResults as Record<string, unknown>[]) : [];
+	const tests = assertions.map((a) => {
+		const status = normalizeStatus(a.status);
+		return {
+			name: readAssertionName(a),
+			status,
+			durationMs: asDuration(a.duration),
+			...(status === "failed" ? { error: trimError(a.failureMessages) } : {}),
+		};
+	});
+	const passed = tests.filter((t) => t.status === "passed").length;
+	const failed = tests.filter((t) => t.status === "failed").length;
+	const skipped = tests.filter((t) => t.status === "skipped" || t.status === "todo").length;
+	const start = Number(raw.startTime);
+	const end = Number(raw.endTime);
+	const suiteDuration = Number.isFinite(start) && Number.isFinite(end) && end >= start ? asDuration(end - start) : null;
+	return {
+		file: relativeTestFile(runCwd, raw.name),
+		status: failed > 0 ? "failed" : skipped > 0 && passed === 0 ? "skipped" : passed > 0 ? "passed" : normalizeStatus(raw.status),
+		durationMs: suiteDuration,
+		passed,
+		failed,
+		skipped,
+		total: tests.length,
+		tests,
+	};
+}
+
+export function parseTestExecutionReport(stdout: string, runCwd = ""): TestExecutionReport | null {
+	const data = firstJsonObject(stdout) as Record<string, unknown> | null;
+	if (!data) return null;
+	const suites = (Array.isArray(data.testResults) ? (data.testResults as Record<string, unknown>[]) : [])
+		.map((suite) => compactSuite(runCwd, suite))
+		.sort((a, b) => b.failed - a.failed || (b.durationMs ?? 0) - (a.durationMs ?? 0) || a.file.localeCompare(b.file));
+	const allTests = suites.flatMap((suite) => suite.tests.map((test) => ({ ...test, file: suite.file })));
+	return {
+		runner: "vitest",
+		cwd: runCwd,
+		passed: Number(data.numPassedTests) || 0,
+		failed: Number(data.numFailedTests) || 0,
+		total: Number(data.numTotalTests) || 0,
+		durationMs: null,
+		suites,
+		failures: allTests.filter((t) => t.status === "failed"),
+		slowest: allTests
+			.filter((t) => t.durationMs !== null)
+			.sort((a, b) => (b.durationMs ?? 0) - (a.durationMs ?? 0))
+			.slice(0, 25),
+	};
+}
+
+export function parseTestExecutionJson(stdout: string): { passed: number; failed: number; total: number } | null {
+	const report = parseTestExecutionReport(stdout);
+	if (!report) return null;
+	return { passed: report.passed, failed: report.failed, total: report.total };
+}
+
 function runTestsWithCoverage(
 	cwd: string,
 	stack: StackInfo,
-): { execution: { passed: number; failed: number; total: number } | null; coverage: CoverageData | null } {
-	if (stack.testRunner === "none") return { execution: null, coverage: null };
+	srcRoots?: string[],
+): { execution: { passed: number; failed: number; total: number } | null; coverage: CoverageData | null; reports: TestExecutionReport[] } {
+	if (stack.testRunner === "none") return { execution: null, coverage: null, reports: [] };
 
-	// Single command: run tests with JSON reporter AND coverage
-	const cmd =
-		stack.testRunner === "vitest"
-			? "npx vitest run --reporter=json --coverage 2>/dev/null || true"
-			: "npx jest --json --coverage --coverageReporters=json-summary 2>/dev/null || true";
-	const { stdout } = run(cmd, cwd, 120_000);
-
-	// Parse execution results from JSON output
+	const roots = candidateRunRoots(cwd, srcRoots);
 	let execution: { passed: number; failed: number; total: number } | null = null;
-	try {
-		const jsonStart = stdout.indexOf("{");
-		if (jsonStart >= 0) {
-			const data = JSON.parse(stdout.slice(jsonStart));
-			execution = {
-				passed: data.numPassedTests || 0,
-				failed: data.numFailedTests || 0,
-				total: data.numTotalTests || 0,
-			};
+	let coverage: CoverageData | null = null;
+	const reports: TestExecutionReport[] = [];
+
+	for (const root of roots) {
+		const cmd =
+			root.runner === "vitest"
+				? "npx vitest run --reporter=json --coverage 2>/dev/null || true"
+				: "npx jest --json --coverage --coverageReporters=json-summary 2>/dev/null || true";
+		const { stdout } = run(cmd, root.cwd, 120_000);
+		const report = parseTestExecutionReport(stdout, root.cwd);
+		const parsed = report ? { passed: report.passed, failed: report.failed, total: report.total } : null;
+		if (parsed) {
+			reports.push({ ...report!, runner: root.runner, durationMs: null });
+			execution = execution
+				? {
+						passed: execution.passed + parsed.passed,
+						failed: execution.failed + parsed.failed,
+						total: execution.total + parsed.total,
+					}
+				: parsed;
 		}
-	} catch {
-		/* parse failed */
+		coverage ??= readCoverageFile(root.cwd);
 	}
 
-	// Parse coverage from file
-	const coverage = readCoverageFile(cwd);
+	coverage ??= readCoverageFile(cwd, srcRoots);
 
-	return { execution, coverage };
+	return { execution, coverage, reports };
 }
 
-function readCoverageFile(cwd: string): CoverageData | null {
+function readCoverageFile(cwd: string, srcRoots?: string[]): CoverageData | null {
 	// Try JSON coverage-summary (vitest, jest, istanbul)
 	const searchPaths = ["coverage/coverage-summary.json", "test-results/coverage/coverage-summary.json"];
-	for (const p of searchPaths) {
-		const full = join(cwd, p);
-		if (existsSync(full)) {
-			try {
-				const summary = JSON.parse(readFileSync(full, "utf-8"));
-				if (summary?.total) {
-					return {
-						statements: summary.total.statements?.pct || 0,
-						lines: summary.total.lines?.pct || 0,
-						branches: summary.total.branches?.pct || 0,
-						functions: summary.total.functions?.pct || 0,
-					};
+	for (const root of coverageRoots(cwd, srcRoots)) {
+		for (const p of searchPaths) {
+			const full = join(root, p);
+			if (existsSync(full)) {
+				try {
+					const summary = JSON.parse(readFileSync(full, "utf-8"));
+					if (summary?.total) {
+						return {
+							statements: summary.total.statements?.pct || 0,
+							lines: summary.total.lines?.pct || 0,
+							branches: summary.total.branches?.pct || 0,
+							functions: summary.total.functions?.pct || 0,
+						};
+					}
+				} catch {
+					/* parse failed */
 				}
-			} catch {
-				/* parse failed */
 			}
 		}
 	}
 	// Try lcov.info (common output from c8, nyc, lcov)
 	const lcovPaths = ["coverage/lcov.info", "lcov.info"];
-	for (const p of lcovPaths) {
-		const full = join(cwd, p);
-		if (existsSync(full)) {
-			return parseLcov(readFileSync(full, "utf-8"));
+	for (const root of coverageRoots(cwd, srcRoots)) {
+		for (const p of lcovPaths) {
+			const full = join(root, p);
+			if (existsSync(full)) {
+				return parseLcov(readFileSync(full, "utf-8"));
+			}
 		}
 	}
 	return null;
@@ -469,12 +691,14 @@ export function runTesting(cwd: string, stack: StackInfo, skipExec: boolean, src
 	// 7. Execute tests + collect coverage (unless --skip-tests)
 	let execution: { passed: number; failed: number; total: number } | null = null;
 	let coverage: CoverageData | null = null;
+	let testReports: TestExecutionReport[] = [];
 
 	if (!skipExec) {
 		// Run tests ONCE with both coverage and JSON output
-		const combined = runTestsWithCoverage(cwd, stack);
+		const combined = runTestsWithCoverage(cwd, stack, srcRoots);
 		execution = combined.execution;
 		coverage = combined.coverage;
+		testReports = combined.reports;
 
 		if (execution) {
 			if (execution.failed > 0) {
@@ -483,7 +707,7 @@ export function runTesting(cwd: string, stack: StackInfo, skipExec: boolean, src
 		}
 	} else {
 		// --skip-tests: still try to read existing coverage reports
-		coverage = readCoverageFile(cwd);
+		coverage = readCoverageFile(cwd, srcRoots);
 	}
 
 	if (coverage) {
@@ -567,7 +791,14 @@ export function runTesting(cwd: string, stack: StackInfo, skipExec: boolean, src
 				mockRatio: quality.mockRatio,
 				snapshotRatio: quality.snapshotRatio,
 			},
+			...(skipExec
+				? {
+						executionSkipped: true,
+						executionSkipReason: "Scan ran with --skip-tests; existing coverage artifacts were read, but the test runner was not executed.",
+					}
+				: {}),
 			...(execution ? { passed: execution.passed, failed: execution.failed, total: execution.total } : {}),
+			...(testReports.length > 0 ? { testReports } : {}),
 			...(coverage
 				? { coverage: { stmts: coverage.statements, branches: coverage.branches, lines: coverage.lines, fns: coverage.functions } }
 				: {}),

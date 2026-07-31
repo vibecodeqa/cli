@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { setGlobalSrcRoots } from "../fs-utils.js";
 import type { StackInfo } from "../types.js";
-import { runTesting } from "./testing.js";
+import { parseTestExecutionJson, parseTestExecutionReport, runTesting } from "./testing.js";
 
 const tsStack: StackInfo = {
 	language: "typescript",
@@ -118,7 +118,24 @@ describe("runTesting", () => {
 		const result = runTesting(dir, tsStack, true); // skipExec=true
 		expect((result.details as any).coverage).toBeDefined();
 		expect((result.details as any).coverage.stmts).toBe(85);
+		expect((result.details as any).executionSkipped).toBe(true);
+		expect((result.details as any).executionSkipReason).toMatch(/--skip-tests/);
 		expect(result.score).toBeGreaterThan(0);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("reads coverage from a workspace package when root scope is scanned", () => {
+		const dir = makeProject({
+			"app/package.json": JSON.stringify({ devDependencies: { vitest: "^4" } }),
+			"app/src/app.ts": "export const x = 1;",
+			"app/src/app.test.ts":
+				"import { describe, it, expect } from 'vitest';\ndescribe('app', () => { it('works', () => { expect(1).toBe(1); }); });\n",
+			"app/coverage/coverage-summary.json": JSON.stringify({
+				total: { statements: { pct: 74 }, branches: { pct: 61 }, lines: { pct: 76 }, functions: { pct: 80 } },
+			}),
+		});
+		const result = runTesting(dir, tsStack, true, ["app"]);
+		expect((result.details as any).coverage).toMatchObject({ stmts: 74, branches: 61, lines: 76, fns: 80 });
 		rmSync(dir, { recursive: true });
 	});
 
@@ -134,6 +151,54 @@ describe("runTesting", () => {
 		expect((result.details as any).coverage).toBeDefined();
 		expect((result.details as any).coverage.lines).toBe(80);
 		rmSync(dir, { recursive: true });
+	});
+
+	it("parses vitest json when coverage text follows the json object", () => {
+		const output = [
+			"noise before json",
+			'{"numTotalTests":1616,"numPassedTests":1616,"numFailedTests":0,"testResults":[{"name":"x","status":"passed"}]}',
+			"% Coverage report from v8",
+		].join("\n");
+		expect(parseTestExecutionJson(output)).toEqual({ passed: 1616, failed: 0, total: 1616 });
+	});
+
+	it("compacts vitest json into suite and test drill-down data", () => {
+		const output = JSON.stringify({
+			numTotalTests: 2,
+			numPassedTests: 1,
+			numFailedTests: 1,
+			testResults: [
+				{
+					name: "/tmp/project/src/math.test.ts",
+					status: "failed",
+					startTime: 1000,
+					endTime: 1250,
+					assertionResults: [
+						{
+							ancestorTitles: ["math"],
+							title: "adds",
+							fullName: "math adds",
+							status: "passed",
+							duration: 2.25,
+							failureMessages: [],
+						},
+						{
+							ancestorTitles: ["math"],
+							title: "subtracts",
+							fullName: "math subtracts",
+							status: "failed",
+							duration: 9,
+							failureMessages: ["expected 1 to be 2"],
+						},
+					],
+				},
+			],
+		});
+		const report = parseTestExecutionReport(output, "/tmp/project");
+		expect(report).toMatchObject({ passed: 1, failed: 1, total: 2 });
+		expect(report?.suites[0]).toMatchObject({ file: "src/math.test.ts", failed: 1, total: 2, durationMs: 250 });
+		expect(report?.failures[0]).toMatchObject({ file: "src/math.test.ts", name: "math subtracts", error: "expected 1 to be 2" });
+		expect(report?.slowest[0]).toMatchObject({ name: "math subtracts", durationMs: 9 });
 	});
 
 	it("handles empty project", () => {

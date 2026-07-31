@@ -12,6 +12,7 @@ describe("CHECK_META", () => {
 		"duplication",
 		"error-handling",
 		"react",
+		"flutter",
 		"accessibility",
 		"docs",
 		"best-practices",

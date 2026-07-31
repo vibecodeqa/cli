@@ -103,7 +103,13 @@ export function readEnvIgnoreNames(env: string | undefined): string[] {
  */
 function pruneNestedRoots(dirs: string[]): string[] {
 	const seen = new Set<string>();
-	const uniq = dirs.map((d) => d.replace(/\/+$/, "")).filter((d) => (seen.has(d) ? false : (seen.add(d), true)));
+	const uniq = dirs
+		.map((d) => d.replace(/\/+$/, ""))
+		.filter((d) => {
+			if (seen.has(d)) return false;
+			seen.add(d);
+			return true;
+		});
 	return uniq.filter((d) => !uniq.some((other) => other !== d && `${d}/`.startsWith(`${other}/`)));
 }
 
