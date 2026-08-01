@@ -209,7 +209,11 @@ function findFlutterPackages(cwd: string, workspace?: WorkspaceInfo): FlutterPac
 			hasFlutterLints: hasPubspecKey(pubspec, "flutter_lints") || hasPubspecKey(pubspec, "very_good_analysis"),
 			hasFlutterTest,
 			hasIntegrationTestDep: hasPubspecKey(pubspec, "integration_test"),
-			hasSdkConstraint: /^\s*sdk:\s*["']?[^"'\n]+["']?\s*$/m.test(pubspec),
+			// A real Dart SDK constraint value looks like a version range (^, >, <, =,
+			// ~, or a digit). Requiring that avoids matching `sdk: flutter` under a
+			// `flutter:`/`flutter_test:` dependency, which every Flutter app has — that
+			// false match made `missing-sdk-constraint` dead code.
+			hasSdkConstraint: /^\s*sdk:\s*["']?[\^><=~\d]/m.test(pubspec),
 			sourceFiles: files.filter((f) => f.startsWith("lib/") && !isGeneratedDart(f)).length,
 			generatedFiles: files.filter(isGeneratedDart).length,
 			unitTests: testFiles.filter((f) => f.startsWith("test/") && !isWidgetTest(join(dir, f))).length,

@@ -118,10 +118,13 @@ async function scanSecretlint(files: ScanFile[], add: (iss: Issue) => void): Pro
 /** Built-in scan: curated patterns always run because they cover LLM/service key
  *  formats that a local gitleaks version may not know yet. secretlint is only
  *  needed when gitleaks is unavailable. */
-async function scanBuiltIn(cwd: string, includeSecretlint: boolean): Promise<Issue[]> {
+async function scanBuiltIn(cwd: string, includeSecretlint: boolean, alreadyFound: Issue[] = []): Promise<Issue[]> {
 	const files = collectAllFiles(cwd, { extraExts: true }).filter((sf) => !sf.isTest && !sf.path.includes("__mock"));
 	const issues: Issue[] = [];
-	const seen = new Set<string>();
+	// Seed the dedup set with what gitleaks already reported so a secret found by
+	// both tools at the same location isn't counted twice (built-in patterns now
+	// always run alongside gitleaks, not just as a fallback).
+	const seen = new Set<string>(alreadyFound.filter((i) => i.file).map((i) => `${i.file}:${i.line}`));
 	const add = (iss: Issue) => {
 		const key = `${iss.file}:${iss.line}`;
 		if (!seen.has(key)) {
@@ -142,7 +145,7 @@ export async function runSecrets(cwd: string): Promise<CheckResult> {
 	const gitleaksResult = tryGitleaks(cwd, issues);
 	const tool = gitleaksResult ? "gitleaks" : "secretlint";
 
-	issues.push(...(await scanBuiltIn(cwd, !gitleaksResult)));
+	issues.push(...(await scanBuiltIn(cwd, !gitleaksResult, issues)));
 
 	// ── .env file audit ──
 	const envFiles = [".env", ".env.local", ".env.production", ".env.development"];

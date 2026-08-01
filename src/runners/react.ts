@@ -131,7 +131,8 @@ function readExistingEslintConfigs(cwd: string): string {
 function detectReactLintConfig(cwd: string, deps: Record<string, string>) {
 	const config = readExistingEslintConfigs(cwd);
 	const mentions = (text: string) => config.includes(text);
-	const hooksConfigured = !!deps["eslint-plugin-react-hooks"] && (mentions("react-hooks") || mentions("reactCompiler") || mentions("react-compiler"));
+	const hooksConfigured =
+		!!deps["eslint-plugin-react-hooks"] && (mentions("react-hooks") || mentions("reactCompiler") || mentions("react-compiler"));
 	const reactConfigured = !!deps["eslint-plugin-react"] && mentions("react");
 	const refreshConfigured = !!deps["eslint-plugin-react-refresh"] && mentions("react-refresh");
 	const jsxA11yConfigured = !!deps["eslint-plugin-jsx-a11y"] && mentions("jsx-a11y");
@@ -273,10 +274,12 @@ export function runReact(cwd: string): CheckResult {
 			const opens = (trimmed.match(/\{/g) || []).length;
 			const closes = (trimmed.match(/\}/g) || []).length;
 
-			// Enter conditional: set depth to 1 on the opening brace
-			if (/\b(if|else|switch)\s*[\s(]/.test(trimmed) && opens > 0) {
-				condBraceDepth = 1;
-			} else if (condBraceDepth > 0) {
+			// Track conditional-block nesting by net brace delta. Entering a new
+			// conditional only when its block stays open past this line (opens >
+			// closes) — otherwise a self-contained `if (x) { foo(); }` (opens ==
+			// closes) would pin the depth at 1 and falsely flag every following hook.
+			const entersConditional = /\b(if|else|switch)\s*[\s(]/.test(trimmed) && opens > closes;
+			if (entersConditional || condBraceDepth > 0) {
 				condBraceDepth += opens - closes;
 				if (condBraceDepth < 0) condBraceDepth = 0;
 			}

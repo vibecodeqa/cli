@@ -337,6 +337,15 @@ function walkForPackages(cwd: string, dir: string, relBase: string, packages: Wo
 	}
 }
 
+/** readdirSync that returns [] instead of throwing on an unreadable dir. */
+function readSafeEntries(dir: string): string[] {
+	try {
+		return readdirSync(dir);
+	} catch {
+		return [];
+	}
+}
+
 /** Add a single package to the list, detecting its capabilities. */
 function addPackage(relPath: string, pkgDir: string, packages: WorkspacePackage[]): void {
 	// Accept packages with or without package.json (some workspaces use them loosely)
@@ -352,10 +361,11 @@ function addPackage(relPath: string, pkgDir: string, packages: WorkspacePackage[
 	}
 
 	const hasSrc = existsSync(join(pkgDir, "src")) || existsSync(join(pkgDir, "app")) || existsSync(join(pkgDir, "lib"));
-	// Some packages have code at root (no src/ dir) — check for .ts/.dart files
+	// Some packages have code at root (no src/ dir) — check for .ts/.dart files.
+	// Guard readdirSync: an unreadable package dir must not abort detection.
 	const hasRootCode =
 		!hasSrc &&
-		readdirSync(pkgDir).some(
+		readSafeEntries(pkgDir).some(
 			(f) => f.endsWith(".ts") || f.endsWith(".tsx") || f.endsWith(".js") || f.endsWith(".jsx") || f.endsWith(".dart"),
 		);
 	const hasTests = existsSync(join(pkgDir, "test")) || existsSync(join(pkgDir, "tests")) || existsSync(join(pkgDir, "__tests__")) || hasSrc; // tests often live alongside src in monorepos
@@ -477,7 +487,15 @@ function detectConventionalLayout(cwd: string): WorkspaceInfo {
 			addPackage(entry, full, packages);
 			continue;
 		}
-		for (const child of readdirSync(full)) {
+		// detectWorkspace runs outside the per-runner try/catch, so an unreadable
+		// child directory (EACCES) here would abort the whole scan — skip it.
+		let children: string[];
+		try {
+			children = readdirSync(full);
+		} catch {
+			continue;
+		}
+		for (const child of children) {
 			const childFull = join(full, child);
 			try {
 				if (lstatSync(childFull).isSymbolicLink() || !statSync(childFull).isDirectory()) continue;

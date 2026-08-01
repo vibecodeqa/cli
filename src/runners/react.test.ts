@@ -67,6 +67,40 @@ describe("runReact", () => {
 		rmSync(dir, { recursive: true });
 	});
 
+	// Regression: a self-contained single-line conditional `if (x) { foo(); }`
+	// must not leave the brace depth stuck, falsely flagging a following top-level
+	// hook as conditional.
+	it("does not flag a hook after a self-closing single-line conditional", () => {
+		const dir = makeProject({
+			"App.tsx": `import { useState } from "react";
+export function App() {
+  if (globalThis.DEBUG) { console.log("debug"); }
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(count + 1)}>{count}</button>;
+}`,
+		});
+		const result = runReact(dir);
+		expect(result.issues.some((i) => i.rule === "conditional-hook")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
+	// Sanity: a hook genuinely inside an open conditional block IS still flagged.
+	it("still flags a hook inside an open conditional block", () => {
+		const dir = makeProject({
+			"App.tsx": `import { useState } from "react";
+export function App({ on }) {
+  if (on) {
+    const [count, setCount] = useState(0);
+    return <span>{count}</span>;
+  }
+  return null;
+}`,
+		});
+		const result = runReact(dir);
+		expect(result.issues.some((i) => i.rule === "conditional-hook")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
 	it("scores 100 for clean React code", () => {
 		const dir = makeProject({
 			"App.tsx": `import { useState } from "react";
