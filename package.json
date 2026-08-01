@@ -61,7 +61,7 @@
 		"@secretlint/core": "^13.0.2",
 		"@secretlint/secretlint-rule-preset-recommend": "^13.0.2",
 		"@vibecodeqa/schema": "^0.4.2",
-		"dependency-cruiser": "^17.4.3",
+		"dependency-cruiser": "^18.1.0",
 		"ink": "^5.2.1",
 		"react": "^18.3.1"
 	}
