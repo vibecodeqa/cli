@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import type { VcqaConfig } from "./config.js";
-import defaultExclusions from "./data/default-exclusions.json" with { type: "json" };
+import { defaultExclusionPolicy as defaultExclusions } from "./exclusion-policy.js";
 import { readEnvIgnoreNames, readGitIgnoreDirectoryNames } from "./fs-utils.js";
 
 export type PolicyAction = "include" | "exclude" | "include-security-sensitive";

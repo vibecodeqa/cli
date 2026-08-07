@@ -2,8 +2,8 @@
 
 import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
-import defaultExclusions from "./data/default-exclusions.json" with { type: "json" };
 import { discoveryConventions } from "./discovery-conventions.js";
+import { defaultExclusionPolicy as defaultExclusions } from "./exclusion-policy.js";
 
 export interface SourceFile {
 	path: string; // relative to cwd

@@ -9,7 +9,8 @@
 	},
 	"exports": {
 		".": "./dist/cli.js",
-		"./core": "./dist/core.js"
+		"./core": "./dist/core.js",
+		"./exclusion-policy": "./dist/exclusion-policy.js"
 	},
 	"files": [
 		"dist",

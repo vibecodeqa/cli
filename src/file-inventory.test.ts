@@ -2,8 +2,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import defaultExclusions from "./data/default-exclusions.json" with { type: "json" };
 import { detectWorkspace } from "./detect.js";
+import {
+	defaultExclusionPolicySummary,
+	defaultExclusionReasonCodes,
+	defaultExclusionPolicy as defaultExclusions,
+	defaultExclusionTokens,
+} from "./exclusion-policy.js";
 import { buildFileInventory } from "./file-inventory.js";
 import { buildEffectiveScanPolicy, evaluatePath, scanPolicySummary } from "./scan-policy.js";
 
@@ -44,6 +49,13 @@ describe("effective scan policy and file inventory", () => {
 			(token) => !reasonTokens.some((known) => token === known || token.startsWith(`${known}/`)),
 		);
 
+		expect(defaultExclusionTokens()).toEqual(registryTokens);
+		expect(defaultExclusionReasonCodes()).toEqual(reasonEntries.map(([reason]) => reason).sort());
+		expect(defaultExclusionPolicySummary()).toMatchObject({
+			version: defaultExclusions.version,
+			directoryNames: defaultExclusions.directoryNames.length,
+			reasonCodes: defaultExclusionReasonCodes(),
+		});
 		expect(duplicateRegistryTokens).toEqual([]);
 		expect(unknownReasonCodes).toEqual([]);
 		expect(unreasonedTokens).toEqual([]);

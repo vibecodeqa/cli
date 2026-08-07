@@ -1,7 +1,8 @@
 # Exclusion Policy
 
 VCQA builds one `EffectiveScanPolicy` at scan startup. The versioned default
-exclusions live in `src/data/default-exclusions.json`; project/user inputs are
+exclusions live in `src/data/default-exclusions.json` and are exposed from the
+published package as `@vibecodeqa/cli/exclusion-policy`; project/user inputs are
 merged into that policy before file inventory and analyzer execution.
 
 Scanner code should apply that policy; it should not maintain analyzer-local
@@ -60,6 +61,20 @@ codes, precedence labels, and the security override mode. The summary is meant
 for UI display and auditability; detailed per-path evidence is available from
 `evaluatePath()`.
 
+App, MCP, and plugin consumers should read the shared registry from:
+
+```ts
+import {
+  defaultExclusionPolicy,
+  defaultExclusionPolicySummary,
+  defaultExclusionReasonCodes,
+} from "@vibecodeqa/cli/exclusion-policy";
+```
+
+Do not copy the registry into another package or UI bundle by hand. If a
+consumer needs the values, import the public module from the installed CLI
+package so the effective policy version stays auditable.
+
 ## What Belongs Here
 
 Add paths that are normally not product source:
@@ -87,7 +102,9 @@ them. Those belong in project-level config.
 
 ## Maintenance Rules
 
-- Add entries to `src/data/default-exclusions.json`, not to runner code.
+- Add entries to `src/data/default-exclusions.json`, not to runner code. The
+  public `@vibecodeqa/cli/exclusion-policy` export is the supported read surface
+  for apps and future plugins.
 - Include a reason category so the UI can eventually explain why a path was
   skipped.
 - Keep the registry defensible and cross-project. Standard generated/cache
@@ -120,6 +137,7 @@ enforces that boundary for scanner source files.
 
 ## Future Shape
 
-If multiple VCQA packages or plugins need to share this policy, extract it into
-a small versioned package such as `@vibecodeqa/exclusion-policy`. Until then,
-the CLI data file is the source of truth.
+If the app or plugin SDK needs independent release cadence later, extract the
+same module into a small versioned package such as
+`@vibecodeqa/exclusion-policy`. Until then, the CLI package export is the shared
+registry surface.
