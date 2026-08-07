@@ -1,6 +1,6 @@
 {
 	"name": "@vibecodeqa/cli",
-	"version": "0.54.2",
+	"version": "0.54.3",
 	"description": "Code health scanner for the AI coding era. Zero config, full report.",
 	"type": "module",
 	"bin": {
