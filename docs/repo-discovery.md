@@ -97,6 +97,33 @@ Rejected convention candidates are recorded under `workspace.discovery.evidence`
 with `kind = "rejected"`. They are intentionally not emitted as
 `ProjectContext` entries.
 
+## Static Site Context
+
+`FileInventory` also emits `StaticSiteContext[]` for HTML/static analyzers and
+UI evidence:
+
+```ts
+export interface StaticSiteContext {
+  rootPath: string;       // repo-root-relative site root, "." for the repo root
+  publicRoots: {
+    path: string;         // public/static root served from "/"
+    evidence: StaticSiteEvidence[];
+  }[];
+  outputRoots: {
+    path: string;         // generated publish/build output
+    evidence: StaticSiteEvidence[];
+  }[];
+  evidence: StaticSiteEvidence[];
+}
+```
+
+Discovery prefers config-backed evidence from Vite, Astro, Next.js, and
+Cloudflare Pages before falling back to plain static roots such as `site/` or
+`docs/`. HTML quality uses this context to resolve root-absolute links against
+the matched site root and its public roots. Output roots are reported as
+evidence, but remain generated/build output under the effective scan policy
+unless a future explicit include mode says otherwise.
+
 ## Discovery Sources
 
 Accepted deterministic sources:

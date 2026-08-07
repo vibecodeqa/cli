@@ -1,5 +1,5 @@
-import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, extname, join } from "node:path";
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, dirname, extname, join } from "node:path";
 import type { SourceFile } from "./fs-utils.js";
 import type { EffectiveScanPolicy } from "./scan-policy.js";
 import { evaluatePath } from "./scan-policy.js";
@@ -21,9 +21,36 @@ export interface InventoryFile {
 	projectPath?: string;
 }
 
+export interface StaticSiteEvidence {
+	source: "html-index" | "vite-config" | "astro-config" | "next-convention" | "cloudflare-pages" | "convention";
+	file?: string;
+	value?: string;
+	description: string;
+}
+
+export interface StaticSiteRoot {
+	path: string;
+	fullPath: string;
+	evidence: StaticSiteEvidence[];
+}
+
+export interface StaticSiteContext {
+	rootPath: string;
+	fullRootPath: string;
+	publicRoots: StaticSiteRoot[];
+	outputRoots: StaticSiteRoot[];
+	evidence: StaticSiteEvidence[];
+}
+
+interface StaticSiteCollector {
+	ensure: (rootPath: string, evidence: StaticSiteEvidence) => StaticSiteContext;
+	addRoot: (context: StaticSiteContext, kind: "publicRoots" | "outputRoots", path: string, evidence: StaticSiteEvidence) => void;
+}
+
 export interface FileInventory {
 	root: string;
 	files: InventoryFile[];
+	staticSites: StaticSiteContext[];
 	summary: {
 		totalFiles: number;
 		includedFiles: number;
@@ -31,6 +58,7 @@ export interface FileInventory {
 		ignoredDirectories: number;
 		generatedFiles: number;
 		securitySensitiveFiles: number;
+		staticSiteRoots: number;
 		byKind: Record<string, number>;
 	};
 }
@@ -41,9 +69,11 @@ export function buildFileInventory(cwd: string, workspace: WorkspaceInfo, policy
 	walk(cwd, "", workspace, policy, files, counts);
 	const byKind: Record<string, number> = {};
 	for (const file of files) byKind[file.kind] = (byKind[file.kind] ?? 0) + 1;
+	const staticSites = detectStaticSiteContexts(cwd, workspace, files);
 	return {
 		root: cwd,
 		files,
+		staticSites,
 		summary: {
 			totalFiles: counts.totalFiles,
 			includedFiles: files.length,
@@ -51,6 +81,7 @@ export function buildFileInventory(cwd: string, workspace: WorkspaceInfo, policy
 			ignoredDirectories: counts.ignoredDirectories,
 			generatedFiles: files.filter((file) => file.generated).length,
 			securitySensitiveFiles: files.filter((file) => file.securitySensitive).length,
+			staticSiteRoots: staticSites.length,
 			byKind,
 		},
 	};
@@ -196,7 +227,12 @@ function isConfigPath(path: string): boolean {
 		name === "analysis_options.yaml" ||
 		name === "pnpm-workspace.yaml" ||
 		name === "package-lock.json" ||
-		name === "wrangler.toml"
+		name.startsWith("vite.config.") ||
+		name.startsWith("astro.config.") ||
+		name.startsWith("next.config.") ||
+		name === "wrangler.toml" ||
+		name === "wrangler.json" ||
+		name === "wrangler.jsonc"
 	);
 }
 
@@ -219,6 +255,208 @@ export function readInventoryText(file: InventoryFile): string {
 	} catch {
 		return "";
 	}
+}
+
+function detectStaticSiteContexts(cwd: string, workspace: WorkspaceInfo, files: InventoryFile[]): StaticSiteContext[] {
+	const contexts = new Map<string, StaticSiteContext>();
+	const collector: StaticSiteCollector = {
+		ensure: (rootPath, evidence) => {
+			const clean = cleanRel(rootPath);
+			const existing = contexts.get(clean);
+			if (existing) {
+				addEvidence(existing.evidence, evidence);
+				return existing;
+			}
+			const context: StaticSiteContext = {
+				rootPath: clean,
+				fullRootPath: fullForRel(cwd, clean),
+				publicRoots: [],
+				outputRoots: [],
+				evidence: [evidence],
+			};
+			contexts.set(clean, context);
+			return context;
+		},
+		addRoot: (context, kind, path, evidence) => {
+			const clean = cleanRel(path);
+			const roots = context[kind];
+			const existing = roots.find((root) => root.path === clean);
+			if (existing) {
+				addEvidence(existing.evidence, evidence);
+				return;
+			}
+			roots.push({ path: clean, fullPath: fullForRel(cwd, clean), evidence: [evidence] });
+		},
+	};
+
+	addIndexHtmlStaticSites(files, collector);
+	addConfigBackedStaticSites(cwd, workspace, collector);
+	addConventionalStaticSites(cwd, collector);
+
+	return [...contexts.values()].sort((a, b) => a.rootPath.localeCompare(b.rootPath));
+}
+
+function addIndexHtmlStaticSites(files: InventoryFile[], collector: StaticSiteCollector): void {
+	for (const file of files) {
+		if (file.kind !== "html") continue;
+		if (!isIndexHtml(file.path)) continue;
+		const rootPath = cleanRel(dirname(file.path));
+		collector.ensure(rootPath, { source: "html-index", file: file.path, description: "Index HTML file marks a static site root" });
+	}
+}
+
+function addConfigBackedStaticSites(cwd: string, workspace: WorkspaceInfo, collector: StaticSiteCollector): void {
+	for (const project of workspace.projects ?? []) {
+		const rootPath = cleanRel(project.path);
+		const configFiles = project.configFiles;
+		addFrameworkStaticSite(cwd, rootPath, configFiles, "vite-config", "vite.config.", "Vite", collector);
+		addFrameworkStaticSite(cwd, rootPath, configFiles, "astro-config", "astro.config.", "Astro", collector);
+		addNextStaticSite(cwd, rootPath, configFiles, collector);
+		addCloudflarePagesStaticSite(cwd, rootPath, configFiles, collector);
+	}
+}
+
+function addConventionalStaticSites(cwd: string, collector: StaticSiteCollector): void {
+	for (const rootName of ["site", "docs", "website", "web", "public", "static"]) {
+		if (!existsSync(join(cwd, rootName))) continue;
+		if (!hasAnyStaticMarker(cwd, rootName)) continue;
+		collector.ensure(rootName, {
+			source: "convention",
+			value: rootName,
+			description: "Common static site directory contains static web markers",
+		});
+	}
+}
+
+function addFrameworkStaticSite(
+	cwd: string,
+	rootPath: string,
+	configFiles: string[],
+	source: "vite-config" | "astro-config",
+	configPrefix: string,
+	label: "Vite" | "Astro",
+	collector: StaticSiteCollector,
+): void {
+	const configFile = configFiles.find((file) => basename(file).startsWith(configPrefix));
+	if (!configFile) return;
+	const parsed = parseStaticConfigObject(readFile(cwd, configFile));
+	const context = collector.ensure(resolveProjectRel(rootPath, parsed.root ?? "."), {
+		source,
+		file: configFile,
+		value: parsed.root,
+		description: `${label} config declares or implies the site root`,
+	});
+	collector.addRoot(context, "publicRoots", resolveProjectRel(rootPath, parsed.publicDir ?? (label === "Vite" ? "public" : "public")), {
+		source,
+		file: configFile,
+		value: parsed.publicDir ?? "public",
+		description: label === "Vite" ? "Vite publicDir is served from the web root" : "Astro publicDir is copied unchanged to the web root",
+	});
+	collector.addRoot(context, "outputRoots", resolveProjectRel(rootPath, parsed.outDir ?? "dist"), {
+		source,
+		file: configFile,
+		value: parsed.outDir ?? "dist",
+		description: `${label} output directory is generated output`,
+	});
+}
+
+function addNextStaticSite(cwd: string, rootPath: string, configFiles: string[], collector: StaticSiteCollector): void {
+	const hasNext =
+		configFiles.some((file) => basename(file).startsWith("next.config.")) ||
+		existsSync(fullForRel(cwd, resolveProjectRel(rootPath, "next-env.d.ts")));
+	if (!hasNext) return;
+	const context = collector.ensure(rootPath, {
+		source: "next-convention",
+		description: "Next.js project root inferred from config or framework files",
+	});
+	collector.addRoot(context, "publicRoots", resolveProjectRel(rootPath, "public"), {
+		source: "next-convention",
+		value: "public",
+		description: "Next.js public directory is served from the web root",
+	});
+	collector.addRoot(context, "outputRoots", resolveProjectRel(rootPath, "out"), {
+		source: "next-convention",
+		value: "out",
+		description: "Next.js static export output",
+	});
+}
+
+function addCloudflarePagesStaticSite(cwd: string, rootPath: string, configFiles: string[], collector: StaticSiteCollector): void {
+	const configFile = configFiles.find((file) => ["wrangler.toml", "wrangler.json", "wrangler.jsonc"].includes(basename(file)));
+	if (!configFile) return;
+	const pagesOutput = parseCloudflarePagesOutput(readFile(cwd, configFile));
+	if (!pagesOutput) return;
+	const outputPath = resolveProjectRel(rootPath, pagesOutput);
+	const context = collector.ensure(outputPath, {
+		source: "cloudflare-pages",
+		file: configFile,
+		value: pagesOutput,
+		description: "Cloudflare Pages output directory is the static site root",
+	});
+	collector.addRoot(context, "outputRoots", outputPath, {
+		source: "cloudflare-pages",
+		file: configFile,
+		value: pagesOutput,
+		description: "Cloudflare Pages publishes this generated output directory",
+	});
+}
+
+function addEvidence(target: StaticSiteEvidence[], evidence: StaticSiteEvidence): void {
+	if (target.some((item) => item.source === evidence.source && item.file === evidence.file && item.value === evidence.value)) return;
+	target.push(evidence);
+}
+
+function cleanRel(path: string): string {
+	const clean = path.replace(/\\/g, "/").replace(/^\.\/|^\/+|\/+$/g, "");
+	return clean === "" || clean === "." ? "." : clean;
+}
+
+function fullForRel(cwd: string, relPath: string): string {
+	return relPath === "." ? cwd : join(cwd, relPath);
+}
+
+function resolveProjectRel(projectPath: string, relPath: string): string {
+	const cleanProject = cleanRel(projectPath);
+	const cleanRelPath = cleanRel(relPath);
+	if (cleanRelPath === ".") return cleanProject;
+	if (cleanRelPath.startsWith("/")) return cleanRel(cleanRelPath);
+	return cleanProject === "." ? cleanRelPath : cleanRel(join(cleanProject, cleanRelPath));
+}
+
+function isIndexHtml(path: string): boolean {
+	const name = basename(path).toLowerCase();
+	return name === "index.html" || name === "index.htm";
+}
+
+function readFile(cwd: string, relPath: string): string {
+	try {
+		return readFileSync(join(cwd, relPath), "utf-8");
+	} catch {
+		return "";
+	}
+}
+
+function parseStaticConfigObject(content: string): { root?: string; publicDir?: string; outDir?: string } {
+	return {
+		root: matchStringOption(content, "root"),
+		publicDir: matchStringOption(content, "publicDir"),
+		outDir: content.match(/\bbuild\s*:\s*\{[\s\S]*?\boutDir\s*:\s*["']([^"']+)["']/m)?.[1] ?? matchStringOption(content, "outDir"),
+	};
+}
+
+function matchStringOption(content: string, key: string): string | undefined {
+	return content.match(new RegExp(`\\b${key}\\s*:\\s*["']([^"']+)["']`, "m"))?.[1];
+}
+
+function parseCloudflarePagesOutput(content: string): string | undefined {
+	return (
+		content.match(/\bpages_build_output_dir\s*=\s*["']([^"']+)["']/)?.[1] ??
+		content.match(/["']pages_build_output_dir["']\s*:\s*["']([^"']+)["']/)?.[1]
+	);
+}
+
+function hasAnyStaticMarker(cwd: string, relPath: string): boolean {
+	return ["index.html", "index.htm", "robots.txt", "sitemap.xml"].some((name) => existsSync(join(cwd, relPath, name)));
 }
 
 function extractScript(content: string): string {

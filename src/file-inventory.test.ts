@@ -202,4 +202,57 @@ describe("effective scan policy and file inventory", () => {
 		expect(inventory.summary.ignoredDirectories).toBeGreaterThanOrEqual(2);
 		expect(inventory.summary.securitySensitiveFiles).toBe(1);
 	});
+
+	it("detects static site roots, public roots, and output roots with evidence", () => {
+		mkdirSync(join(dir, "apps", "web", "public"), { recursive: true });
+		mkdirSync(join(dir, "apps", "marketing", "static"), { recursive: true });
+		mkdirSync(join(dir, "apps", "next", "public"), { recursive: true });
+		mkdirSync(join(dir, "workers", "pages"), { recursive: true });
+		mkdirSync(join(dir, "site"), { recursive: true });
+		mkdirSync(join(dir, "docs"), { recursive: true });
+		mkdirSync(join(dir, "dist"), { recursive: true });
+		writeFileSync(join(dir, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n  - workers/*\n");
+		writeFileSync(join(dir, "package.json"), "{}");
+		writeFileSync(join(dir, "apps", "web", "package.json"), JSON.stringify({ name: "web" }));
+		writeFileSync(
+			join(dir, "apps", "web", "vite.config.ts"),
+			"export default { publicDir: 'public', build: { outDir: 'dist/client' } };\n",
+		);
+		writeFileSync(join(dir, "apps", "web", "index.html"), "<!doctype html><html></html>\n");
+		writeFileSync(join(dir, "apps", "web", "public", "robots.txt"), "User-agent: *\nAllow: /\n");
+		writeFileSync(join(dir, "apps", "marketing", "package.json"), JSON.stringify({ name: "marketing" }));
+		writeFileSync(join(dir, "apps", "marketing", "astro.config.mjs"), "export default { publicDir: 'static', outDir: 'build/site' };\n");
+		writeFileSync(join(dir, "apps", "marketing", "index.html"), "<!doctype html><html></html>\n");
+		writeFileSync(join(dir, "apps", "next", "package.json"), JSON.stringify({ name: "next" }));
+		writeFileSync(join(dir, "apps", "next", "next.config.mjs"), "export default {};\n");
+		writeFileSync(join(dir, "apps", "next", "index.html"), "<!doctype html><html></html>\n");
+		writeFileSync(join(dir, "workers", "pages", "package.json"), JSON.stringify({ name: "pages" }));
+		writeFileSync(join(dir, "workers", "pages", "wrangler.toml"), 'name = "pages"\npages_build_output_dir = "dist"\n');
+		writeFileSync(join(dir, "dist", "index.html"), "<!doctype html><html></html>\n");
+		writeFileSync(join(dir, "site", "index.html"), "<!doctype html><html></html>\n");
+		writeFileSync(join(dir, "docs", "index.html"), "<!doctype html><html></html>\n");
+
+		const inventory = buildFileInventory(dir, detectWorkspace(dir), buildEffectiveScanPolicy(dir, {}));
+		const byRoot = new Map(inventory.staticSites.map((site) => [site.rootPath, site]));
+
+		expect(inventory.summary.staticSiteRoots).toBeGreaterThanOrEqual(6);
+		expect(byRoot.get("apps/web")).toMatchObject({
+			publicRoots: [expect.objectContaining({ path: "apps/web/public" })],
+			outputRoots: [expect.objectContaining({ path: "apps/web/dist/client" })],
+			evidence: [expect.objectContaining({ source: "html-index" }), expect.objectContaining({ source: "vite-config" })],
+		});
+		expect(byRoot.get("apps/marketing")).toMatchObject({
+			publicRoots: [expect.objectContaining({ path: "apps/marketing/static" })],
+			outputRoots: [expect.objectContaining({ path: "apps/marketing/build/site" })],
+			evidence: [expect.objectContaining({ source: "html-index" }), expect.objectContaining({ source: "astro-config" })],
+		});
+		expect(byRoot.get("apps/next")?.publicRoots.map((root) => root.path)).toContain("apps/next/public");
+		expect(byRoot.get("workers/pages/dist")).toMatchObject({
+			outputRoots: [expect.objectContaining({ path: "workers/pages/dist" })],
+			evidence: [expect.objectContaining({ source: "cloudflare-pages" })],
+		});
+		expect(byRoot.get("site")?.evidence.some((item) => item.source === "convention")).toBe(true);
+		expect(byRoot.get("docs")?.evidence.some((item) => item.source === "convention")).toBe(true);
+		expect(inventory.files.some((file) => file.path === "dist/index.html")).toBe(false);
+	});
 });

@@ -199,6 +199,55 @@ describe("html-quality", () => {
 		expect(result.issues.filter((i) => i.rule === "broken-link")).toHaveLength(0);
 	});
 
+	it("resolves root-absolute links through config-backed public roots", async () => {
+		mkdirSync(join(dir, "apps", "web", "public", "assets"), { recursive: true });
+		writeFileSync(join(dir, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n");
+		writeFileSync(join(dir, "package.json"), "{}");
+		writeFileSync(join(dir, "apps", "web", "package.json"), JSON.stringify({ name: "web" }));
+		writeFileSync(
+			join(dir, "apps", "web", "vite.config.ts"),
+			"export default { publicDir: 'public', build: { outDir: 'dist/client' } };\n",
+		);
+		writeFileSync(join(dir, "apps", "web", "public", "robots.txt"), "User-agent: *\nAllow: /\n");
+		writeFileSync(join(dir, "apps", "web", "public", "sitemap.xml"), "<urlset></urlset>\n");
+		writeFileSync(join(dir, "apps", "web", "public", "assets", "app.css"), "body { color: black; }\n");
+		writeFileSync(
+			join(dir, "apps", "web", "index.html"),
+			`<!doctype html>
+<html lang="en">
+<head>
+<title>Config Backed Site</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<meta name="description" content="A config-backed static site">
+<meta property="og:title" content="Config Backed Site">
+<link rel="canonical" href="https://example.test/">
+<link rel="icon" href="/assets/app.css">
+</head>
+<body>
+<h1>Site</h1>
+<a href="/robots.txt">Robots</a>
+<a href="/assets/app.css">CSS</a>
+</body>
+</html>`,
+		);
+
+		const report = await scan(dir, { skipTests: true, checks: ["html-quality"] });
+		const html = report.checks[0]!;
+		const details = html.details as Record<string, any>;
+
+		expect(html.issues.filter((i) => i.rule === "broken-link")).toHaveLength(0);
+		expect(html.issues.filter((i) => i.rule === "missing-robots" || i.rule === "missing-sitemap")).toHaveLength(0);
+		expect(details.staticSites).toEqual([
+			expect.objectContaining({
+				rootPath: "apps/web",
+				publicRoots: ["apps/web/public"],
+				outputRoots: ["apps/web/dist/client"],
+				evidence: expect.arrayContaining([expect.objectContaining({ source: "vite-config" })]),
+			}),
+		]);
+	});
+
 	it("does not treat links inside script template literals as emitted anchors", () => {
 		writeFileSync(
 			join(dir, "index.html"),

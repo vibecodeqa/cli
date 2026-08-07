@@ -7,7 +7,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import type { FileInventory } from "../file-inventory.js";
+import type { FileInventory, StaticSiteContext } from "../file-inventory.js";
 import { inventoryFiles } from "../file-inventory.js";
 import { isIgnoredPath } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
@@ -43,6 +43,7 @@ export function runHtmlQuality(cwd: string, inventory?: FileInventory): CheckRes
 	const htmlFiles = inventory
 		? inventoryFiles(inventory, { kind: "html" }).map((file) => ({ path: file.path, fullPath: file.fullPath }))
 		: collectHtmlFiles(cwd);
+	const staticSites = inventory?.staticSites ?? [];
 	if (htmlFiles.length === 0) {
 		return {
 			name: "html-quality",
@@ -195,7 +196,7 @@ export function runHtmlQuality(cwd: string, inventory?: FileInventory): CheckRes
 
 			// Collect internal links for broken link check
 			if (isInternalHref(href)) {
-				const link = resolveInternalLink(cwd, file, href);
+				const link = resolveInternalLink(cwd, file, href, staticSites);
 				if (link) {
 					allLinks.push(link);
 				}
@@ -275,11 +276,21 @@ export function runHtmlQuality(cwd: string, inventory?: FileInventory): CheckRes
 	}
 
 	// SEO files
-	if (!existsSync(join(cwd, "robots.txt"))) {
-		issues.push({ severity: "info", message: "Missing robots.txt", rule: "missing-robots" });
-	}
-	if (!existsSync(join(cwd, "sitemap.xml"))) {
-		issues.push({ severity: "info", message: "Missing sitemap.xml", rule: "missing-sitemap" });
+	for (const site of htmlSiteContexts(cwd, htmlFiles, staticSites)) {
+		if (!staticRootFileExists(site, "robots.txt")) {
+			issues.push({
+				severity: "info",
+				message: site.rootPath === "." ? "Missing robots.txt" : `Missing robots.txt for static site root ${site.rootPath}`,
+				rule: "missing-robots",
+			});
+		}
+		if (!staticRootFileExists(site, "sitemap.xml")) {
+			issues.push({
+				severity: "info",
+				message: site.rootPath === "." ? "Missing sitemap.xml" : `Missing sitemap.xml for static site root ${site.rootPath}`,
+				rule: "missing-sitemap",
+			});
+		}
 	}
 
 	// Score
@@ -291,7 +302,16 @@ export function runHtmlQuality(cwd: string, inventory?: FileInventory): CheckRes
 		name: "html-quality",
 		score,
 		grade: gradeFromScore(score),
-		details: { htmlFiles: htmlFiles.length, source: inventory ? "file-inventory" : "legacy-walk" },
+		details: {
+			htmlFiles: htmlFiles.length,
+			source: inventory ? "file-inventory" : "legacy-walk",
+			staticSites: staticSites.map((site) => ({
+				rootPath: site.rootPath,
+				publicRoots: site.publicRoots.map((root) => root.path),
+				outputRoots: site.outputRoots.map((root) => root.path),
+				evidence: site.evidence,
+			})),
+		},
 		issues,
 		duration: Date.now() - start,
 	};
@@ -307,20 +327,45 @@ function isInternalHref(href: string): boolean {
 	);
 }
 
-function resolveInternalLink(cwd: string, file: HtmlInput, href: string): InternalLink | null {
+function resolveInternalLink(cwd: string, file: HtmlInput, href: string, staticSites: StaticSiteContext[] = []): InternalLink | null {
 	const cleanHref = href.split("#")[0]?.split("?")[0] ?? "";
 	if (!cleanHref) return null;
 
 	const isSiteRootAbsolute = cleanHref.startsWith("/");
-	const base = isSiteRootAbsolute ? detectSiteRoot(cwd, file.fullPath) : dirname(file.fullPath);
+	const site = isSiteRootAbsolute ? staticSiteForFile(file, staticSites) : undefined;
+	const base = isSiteRootAbsolute ? (site?.fullRootPath ?? detectSiteRoot(cwd, file.fullPath)) : dirname(file.fullPath);
 	const targetPath = isSiteRootAbsolute ? cleanHref.replace(/^\/+/, "") : cleanHref;
 	const target = join(base, targetPath);
+	const publicTargets = isSiteRootAbsolute ? (site?.publicRoots ?? []).map((root) => join(root.fullPath, targetPath)) : [];
 
 	return {
 		sourceFile: file.path,
 		href: cleanHref,
-		candidates: internalLinkCandidates(target, cleanHref),
+		candidates: [target, ...publicTargets].flatMap((candidate) => internalLinkCandidates(candidate, cleanHref)),
 	};
+}
+
+function staticSiteForFile(file: HtmlInput, staticSites: StaticSiteContext[]): StaticSiteContext | undefined {
+	const relPath = file.path.replace(/\\/g, "/");
+	const matching = staticSites.filter(
+		(site) => relPath === site.rootPath || relPath.startsWith(`${site.rootPath}/`) || site.rootPath === ".",
+	);
+	return matching.sort((a, b) => b.rootPath.length - a.rootPath.length)[0];
+}
+
+function htmlSiteContexts(cwd: string, htmlFiles: HtmlInput[], staticSites: StaticSiteContext[]): StaticSiteContext[] {
+	const matched = new Map<string, StaticSiteContext>();
+	for (const file of htmlFiles) {
+		const site = staticSiteForFile(file, staticSites);
+		if (site) matched.set(site.rootPath, site);
+	}
+	if (matched.size > 0) return [...matched.values()];
+	return [{ rootPath: ".", fullRootPath: cwd, publicRoots: [], outputRoots: [], evidence: [] }];
+}
+
+function staticRootFileExists(site: StaticSiteContext, fileName: string): boolean {
+	if (existsSync(join(site.fullRootPath, fileName))) return true;
+	return site.publicRoots.some((root) => existsSync(join(root.fullPath, fileName)));
 }
 
 function detectSiteRoot(cwd: string, htmlFile: string): string {
