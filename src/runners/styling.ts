@@ -14,10 +14,21 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles, readDeps } from "../fs-utils.js";
-import type { CheckResult, Issue } from "../types.js";
+import type { CheckResult, Issue, ProjectContext, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { runJSON } from "./exec.js";
+import {
+	cleanProjectPath,
+	depsForProjects,
+	filesForProjects,
+	frontendProjects,
+	projectContainsPath,
+	projectDetails,
+	projectSourceRoots,
+} from "./project-scope.js";
 
 // ── Stylelint delegation ──
 
@@ -26,7 +37,7 @@ interface StylelintResult {
 	warnings: { line: number; column: number; rule: string; severity: string; text: string }[];
 }
 
-function tryStylelint(cwd: string): Issue[] | null {
+function tryStylelint(cwd: string, context: { projectId?: string; projectPath?: string } = {}): Issue[] | null {
 	const deps = readDeps(cwd);
 	if (!deps.stylelint) return null;
 
@@ -49,6 +60,7 @@ function tryStylelint(cwd: string): Issue[] | null {
 		'npx stylelint --formatter json "**/*.{css,scss}" --ignore-pattern node_modules 2>/dev/null || true',
 		cwd,
 		30_000,
+		context,
 	);
 
 	if (!results || !Array.isArray(results)) return null;
@@ -69,6 +81,64 @@ function tryStylelint(cwd: string): Issue[] | null {
 	return issues;
 }
 
+function prefixIssues(issues: Issue[], projectPath: string): Issue[] {
+	const clean = cleanProjectPath(projectPath);
+	if (clean === ".") return issues;
+	return issues.map((issue) => {
+		if (!issue.file || issue.file.startsWith(`${clean}/`)) return issue;
+		return { ...issue, file: `${clean}/${issue.file}` };
+	});
+}
+
+function tryStylelintForProjects(
+	cwd: string,
+	projects: ProjectContext[] | null,
+): { issues: Issue[] | null; tool: "stylelint" | "built-in" } {
+	if (!projects) {
+		const issues = tryStylelint(cwd);
+		return { issues, tool: issues ? "stylelint" : "built-in" };
+	}
+	let ran = false;
+	const allIssues: Issue[] = [];
+	for (const project of projects) {
+		const projectDir = project.path === "." ? cwd : join(cwd, project.path);
+		const issues = tryStylelint(projectDir, { projectId: project.id, projectPath: project.path });
+		if (!issues) continue;
+		ran = true;
+		allIssues.push(...prefixIssues(issues, project.path));
+	}
+	return { issues: ran ? allIssues : null, tool: ran ? "stylelint" : "built-in" };
+}
+
+function hasTailwindProjectConfig(cwd: string, projects: ProjectContext[] | null): boolean {
+	const roots = projects?.map((project) => project.path) ?? ["."];
+	return roots.some((root) => {
+		const dir = root === "." ? cwd : join(cwd, root);
+		return (
+			existsSync(join(dir, "tailwind.config.js")) ||
+			existsSync(join(dir, "tailwind.config.ts")) ||
+			existsSync(join(dir, "tailwind.config.mjs"))
+		);
+	});
+}
+
+function tailwindThemeExtended(cwd: string, projects: ProjectContext[] | null): boolean {
+	const roots = projects?.map((project) => project.path) ?? ["."];
+	for (const root of roots) {
+		const dir = root === "." ? cwd : join(cwd, root);
+		for (const cfg of ["tailwind.config.js", "tailwind.config.ts", "tailwind.config.mjs"]) {
+			const path = join(dir, cfg);
+			if (!existsSync(path)) continue;
+			try {
+				if (readFileSync(path, "utf-8").includes("extend")) return true;
+			} catch {
+				/* ignore */
+			}
+		}
+	}
+	return false;
+}
+
 // ── Cross-file analysis (our unique value — no linter covers this) ──
 
 const TAILWIND_CLASS = /className\s*=\s*["'`][^"'`]*(?:flex|grid|p-|m-|text-|bg-|rounded|border|shadow|w-|h-)/;
@@ -79,12 +149,38 @@ const EMOTION_CSS = /@emotion|css\s*\(/;
 const HARDCODED_COLOR_JSX = /(?:color|backgroundColor|borderColor|fill|stroke)\s*:\s*['"]#[0-9a-fA-F]{3,8}/;
 const SPACING_PROP = /(?:margin|padding|gap|top|bottom|left|right|width|height|inset)\s*:\s*/;
 const MAGIC_PX = /(\d+)px/g;
+const STYLING_ERROR_PENALTY = 25;
+const STYLING_WARNING_PENALTY = 4;
+const STYLING_INFO_PENALTY = 1;
 
-export function runStyling(cwd: string): CheckResult {
+export function stylingScore(issues: Issue[], componentFiles: number) {
+	const errorCount = issues.filter((i) => i.severity === "error").length;
+	const warnCount = issues.filter((i) => i.severity === "warning").length;
+	const infoCount = issues.filter((i) => i.severity === "info").length;
+	const hardFailure = errorCount > 0;
+	const warningDensity = componentFiles > 0 ? warnCount / componentFiles : warnCount;
+	const warningPenalty = Math.min(warnCount * STYLING_WARNING_PENALTY, Math.round(warningDensity * 16), 45);
+	const infoPenalty = Math.min(infoCount * STYLING_INFO_PENALTY, 8);
+	const errorPenalty = Math.min(errorCount * STYLING_ERROR_PENALTY, 75);
+	const score = Math.max(0, 100 - errorPenalty - warningPenalty - infoPenalty);
+	return {
+		score,
+		errorCount,
+		warnCount,
+		infoCount,
+		hardFailure,
+		warningDensity: Math.round(warningDensity * 100) / 100,
+		penalties: { errors: errorPenalty, warnings: warningPenalty, info: infoPenalty },
+	};
+}
+
+export function runStyling(cwd: string, workspace?: WorkspaceInfo, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
-	const files = getProductionFiles(cwd);
-	const deps = readDeps(cwd);
+	const projects = frontendProjects(workspace);
+	const sourceRoots = projects ? projectSourceRoots(projects) : undefined;
+	const files = filesForProjects(inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd, sourceRoots), projects);
+	const deps = depsForProjects(cwd, projects);
 
 	const componentFiles = files.filter((f) => !f.isTest && /\.(tsx|jsx|vue|svelte)$/.test(f.path));
 	if (componentFiles.length === 0) {
@@ -92,27 +188,23 @@ export function runStyling(cwd: string): CheckResult {
 			name: "styling",
 			score: 0,
 			grade: "F",
-			details: { skipped: true, reason: "no component files found" },
+			details: { skipped: true, reason: "no component files found", projects: projectDetails(projects, componentFiles) },
 			issues: [],
 			duration: Date.now() - start,
 		};
 	}
 
 	// ── Phase 1: Delegate to Stylelint ──
-	let tool: "stylelint" | "built-in" = "built-in";
-	const stylelintIssues = tryStylelint(cwd);
+	const stylelint = tryStylelintForProjects(cwd, projects);
+	const tool = stylelint.tool;
+	const stylelintIssues = stylelint.issues;
 	if (stylelintIssues) {
-		tool = "stylelint";
 		issues.push(...stylelintIssues);
 	}
 
 	// ── Phase 2: Cross-file analysis (always runs — Stylelint can't do this) ──
 	const approaches = new Map<string, number>();
-	const hasTailwind =
-		existsSync(join(cwd, "tailwind.config.js")) ||
-		existsSync(join(cwd, "tailwind.config.ts")) ||
-		existsSync(join(cwd, "tailwind.config.mjs")) ||
-		!!deps.tailwindcss;
+	const hasTailwind = hasTailwindProjectConfig(cwd, projects) || !!deps.tailwindcss;
 
 	let inlineStyleCount = 0;
 	let classNameCount = 0;
@@ -123,9 +215,11 @@ export function runStyling(cwd: string): CheckResult {
 
 	// Scan CSS files for !important (only if Stylelint didn't already flag them)
 	if (!stylelintIssues) {
-		scanCssFiles(cwd, "src", (content) => {
-			importantCount += (content.match(/!important/g) || []).length;
-		});
+		for (const root of sourceRoots ?? ["src"]) {
+			scanCssFiles(cwd, root, (content) => {
+				importantCount += (content.match(/!important/g) || []).length;
+			});
+		}
 	}
 
 	for (const f of componentFiles) {
@@ -263,18 +357,7 @@ export function runStyling(cwd: string): CheckResult {
 
 	// Tailwind theme check
 	if (hasTailwind && componentFiles.length > 5) {
-		let hasThemeExtend = false;
-		for (const cfg of ["tailwind.config.js", "tailwind.config.ts", "tailwind.config.mjs"]) {
-			if (existsSync(join(cwd, cfg))) {
-				try {
-					if (readFileSync(join(cwd, cfg), "utf-8").includes("extend")) hasThemeExtend = true;
-				} catch {
-					/* ignore */
-				}
-				break;
-			}
-		}
-		if (!hasThemeExtend) {
+		if (!tailwindThemeExtended(cwd, projects)) {
 			issues.push({
 				severity: "info",
 				message: "No theme extension in tailwind.config — consider defining custom colors/spacing",
@@ -283,17 +366,27 @@ export function runStyling(cwd: string): CheckResult {
 		}
 	}
 
-	const errorCount = issues.filter((i) => i.severity === "error").length;
-	const warnCount = issues.filter((i) => i.severity === "warning").length;
-	const score = Math.max(0, 100 - errorCount * 20 - warnCount * 12);
+	const scoreModel = stylingScore(issues, componentFiles.length);
 
 	return {
 		name: "styling",
-		score,
-		grade: gradeFromScore(score),
+		score: scoreModel.score,
+		grade: gradeFromScore(scoreModel.score),
 		details: {
 			tool,
+			source: inventory ? "file-inventory" : "legacy-walk",
 			totalComponentFiles: componentFiles.length,
+			hardFailure: scoreModel.hardFailure,
+			scoring: {
+				errorFindings: scoreModel.errorCount,
+				warningFindings: scoreModel.warnCount,
+				infoFindings: scoreModel.infoCount,
+				warningDensity: scoreModel.warningDensity,
+				penalties: scoreModel.penalties,
+				note: scoreModel.hardFailure
+					? "Styling has hard lint/error findings."
+					: "Warning/info-only styling findings are treated as design-system consistency debt, not a hard failure.",
+			},
 			approaches: Object.fromEntries(approaches),
 			hasTailwind,
 			inlineStyleCount,
@@ -301,6 +394,10 @@ export function runStyling(cwd: string): CheckResult {
 			importantCount,
 			spacingValues: spacingValues.size,
 			stylelintIssues: stylelintIssues?.length ?? 0,
+			projects: projectDetails(projects, componentFiles)?.map((project) => ({
+				...project,
+				issues: issues.filter((issue) => issue.file && projectContainsPath(String(project.path), issue.file)).length,
+			})),
 			suggestion: !stylelintIssues
 				? "Install Stylelint for deeper CSS analysis (170+ rules): pnpm add -D stylelint stylelint-config-standard"
 				: undefined,

@@ -2,6 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { detectWorkspace } from "../detect.js";
+import { buildFileInventory } from "../file-inventory.js";
+import { buildEffectiveScanPolicy } from "../scan-policy.js";
 import { generateArchSVG, runArchitecture } from "./architecture.js";
 
 function makeProject(files: Record<string, string>): string {
@@ -14,6 +17,21 @@ function makeProject(files: Record<string, string>): string {
 		writeFileSync(full, content);
 	}
 	return dir;
+}
+
+function makeRepo(files: Record<string, string>): string {
+	const dir = mkdtempSync(join(tmpdir(), "vcqa-arch-"));
+	writeFileSync(join(dir, "package.json"), "{}");
+	for (const [name, content] of Object.entries(files)) {
+		const full = join(dir, name);
+		mkdirSync(join(full, ".."), { recursive: true });
+		writeFileSync(full, content);
+	}
+	return dir;
+}
+
+function inventory(dir: string) {
+	return buildFileInventory(dir, detectWorkspace(dir), buildEffectiveScanPolicy(dir, {}));
 }
 
 describe("runArchitecture", () => {
@@ -31,6 +49,31 @@ describe("runArchitecture", () => {
 		});
 		const result = await runArchitecture(dir);
 		expect(result.issues.some((i) => i.rule === "circular-dep")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("does not treat type-only import cycles as runtime circular dependencies", async () => {
+		const dir = makeProject({
+			"a.ts": `import type { B } from "./b.js";\nexport type A = { b?: B };\nexport const a = 1;`,
+			"b.ts": `import type { A } from "./a.js";\nexport type B = { a?: A };`,
+		});
+		const result = await runArchitecture(dir);
+		expect(result.issues.some((i) => i.rule === "circular-dep")).toBe(false);
+		expect(result.issues.some((i) => i.rule === "type-only-cycle")).toBe(true);
+		expect((result.details as Record<string, unknown>).typeOnlyEdgesIgnored).toBeGreaterThan(0);
+		expect((result.details as Record<string, unknown>).typeOnlyCycles).toBe(1);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("does not treat deferred dynamic imports as static runtime cycles", async () => {
+		const dir = makeProject({
+			"a.ts": `export async function loadB() { return import("./b.js"); }\nexport const a = 1;`,
+			"b.ts": `import { a } from "./a.js";\nexport const b = a;`,
+		});
+		const result = await runArchitecture(dir);
+		expect(result.issues.some((i) => i.rule === "circular-dep")).toBe(false);
+		expect(result.issues.some((i) => i.rule === "dynamic-import-cycle")).toBe(true);
+		expect((result.details as Record<string, unknown>).dynamicCycles).toBe(1);
 		rmSync(dir, { recursive: true });
 	});
 
@@ -52,6 +95,23 @@ describe("runArchitecture", () => {
 		});
 		const result = await runArchitecture(dir);
 		expect(result.score).toBe(100);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("uses FileInventory and excludes ignored/generated source", async () => {
+		const dir = makeRepo({
+			"src/app.ts": `import { helper } from "./helper.js";\nexport const app = helper;`,
+			"src/helper.ts": `export const helper = 1;`,
+			"dist/a.ts": `import { b } from "./b.js";\nexport const a = b;`,
+			"dist/b.ts": `import { a } from "./a.js";\nexport const b = a;`,
+			".claude/worktrees/agent-a/src/a.ts": `import { b } from "./b.js";\nexport const a = b;`,
+			".claude/worktrees/agent-a/src/b.ts": `import { a } from "./a.js";\nexport const b = a;`,
+		});
+		const result = await runArchitecture(dir, undefined, inventory(dir));
+		expect(result.details).toMatchObject({ totalModules: 2, source: "file-inventory" });
+		expect(Object.keys((result.details as any).graph)).toEqual(expect.arrayContaining(["src/app.ts", "src/helper.ts"]));
+		expect(result.issues.some((i) => i.file?.includes(".claude/worktrees") || i.file?.startsWith("dist/"))).toBe(false);
+		expect(result.issues.some((i) => i.rule === "circular-dep")).toBe(false);
 		rmSync(dir, { recursive: true });
 	});
 });

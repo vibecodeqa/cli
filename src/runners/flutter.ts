@@ -174,9 +174,17 @@ function packageIssues(pkg: FlutterPackage, rootAnalysis: boolean): Issue[] {
 
 function findFlutterPackages(cwd: string, workspace?: WorkspaceInfo): FlutterPackage[] {
 	const candidates = new Set<string>();
-	if (existsSync(join(cwd, "pubspec.yaml"))) candidates.add(".");
-	for (const pkg of workspace?.packages ?? []) {
-		if (existsSync(join(cwd, pkg.path, "pubspec.yaml"))) candidates.add(pkg.path);
+	const projectCandidates = (workspace?.projects ?? [])
+		.filter((project) => project.stack.language === "dart" || project.stack.framework === "flutter")
+		.map((project) => project.path)
+		.filter((path) => existsSync(join(cwd, path, "pubspec.yaml")));
+
+	for (const path of projectCandidates) candidates.add(path);
+	if (candidates.size === 0) {
+		if (existsSync(join(cwd, "pubspec.yaml"))) candidates.add(".");
+		for (const pkg of workspace?.packages ?? []) {
+			if (existsSync(join(cwd, pkg.path, "pubspec.yaml"))) candidates.add(pkg.path);
+		}
 	}
 	if (candidates.size === 0) {
 		for (const rel of findPubspecDirs(cwd, cwd, 2)) candidates.add(rel);

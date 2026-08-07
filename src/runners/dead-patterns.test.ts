@@ -1,4 +1,10 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { detectWorkspace } from "../detect.js";
+import { buildFileInventory } from "../file-inventory.js";
+import { buildEffectiveScanPolicy } from "../scan-policy.js";
 
 vi.mock("node:fs", async () => {
 	const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
@@ -20,6 +26,21 @@ function mockFiles(mod: typeof import("../fs-utils.js"), files: { path: string; 
 			isTest: false,
 		})),
 	);
+}
+
+function makeProject(files: Record<string, string>): string {
+	const dir = mkdtempSync(join(tmpdir(), "vcqa-dead-patterns-"));
+	writeFileSync(join(dir, "package.json"), "{}");
+	for (const [name, content] of Object.entries(files)) {
+		const full = join(dir, name);
+		mkdirSync(join(full, ".."), { recursive: true });
+		writeFileSync(full, content);
+	}
+	return dir;
+}
+
+function inventory(dir: string) {
+	return buildFileInventory(dir, detectWorkspace(dir), buildEffectiveScanPolicy(dir, {}));
 }
 
 describe("dead-patterns local heuristics", () => {
@@ -160,5 +181,22 @@ interface ConfigV1 { x: number; }`,
 		expect(Array.isArray(map)).toBe(true);
 		delete process.env.VCQA_PRO_KEY;
 		vi.restoreAllMocks();
+	});
+
+	it("uses FileInventory and excludes ignored/generated source", async () => {
+		process.env.VCQA_PRO_KEY = "test-key";
+		const { runDeadPatterns } = await import("./dead-patterns.js");
+		const dir = makeProject({
+			"src/app.ts": "export const app = 1;\n",
+			"dist/generated.ts": "export function generatedLegacy() { return true; }\n",
+			".claude/worktrees/agent-a/src/work.ts": "export function workLegacy() { return true; }\n",
+		});
+
+		const result = await runDeadPatterns(dir, inventory(dir));
+		expect(result.details).toMatchObject({ source: "file-inventory" });
+		expect(result.issues.some((i) => i.file?.startsWith("dist/") || i.file?.includes(".claude/worktrees"))).toBe(false);
+		expect(result.issues).toHaveLength(0);
+		delete process.env.VCQA_PRO_KEY;
+		rmSync(dir, { recursive: true });
 	});
 });

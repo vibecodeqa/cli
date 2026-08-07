@@ -10,6 +10,8 @@ Related specs:
 
 - `language-profiles.md` defines language facts, project markers, generated
   files, and toolchain defaults.
+- `repo-discovery.md` defines deterministic repo/project discovery and
+  package-scoped scanning. This is core infrastructure, not an LLM feature.
 - `out-of-process-analyzers.md` defines the internal process protocol for
   analyzers that do not run inside the CLI process.
 
@@ -22,6 +24,8 @@ Related specs:
 - Give framework analyzers a clear home without adding framework branches to
   generic runners.
 - Make settings, metrics, findings, tool provenance, and error states consistent.
+- Make repo and package discovery deterministic, auditable, and available
+  without LLM tokens.
 - Design the internal boundary so a future public plugin SDK can be added without
   rewriting the product.
 
@@ -31,6 +35,7 @@ Related specs:
 - No third-party plugin loading.
 - No remote plugin registry.
 - No arbitrary UI contribution model.
+- No LLM-dependent repo discovery or folder scanning.
 - No breaking report schema changes in the first migration.
 
 ## Terms
@@ -40,6 +45,8 @@ Related specs:
   semantics, such as React hooks, Flutter widget tests, or .NET test projects.
 - **Out-of-process analyzer**: an analyzer process launched by the CLI and
   connected through JSON over stdio.
+- **Project context**: a deterministic description of one package/project inside
+  the repo, including roots, stack, tool commands, and discovery evidence.
 - **Plugin SDK**: a later public third-party surface with manifests, trust,
   compatibility, conformance tests, and lifecycle rules.
 
@@ -75,6 +82,8 @@ export interface Analyzer {
 export interface AnalyzerContext {
   cwd: string;
   workspace: WorkspaceInfo;
+  projects?: ProjectContext[];
+  project?: ProjectContext;
   stack: StackInfo;
   config: VcqaConfig;
   settings: Record<string, unknown>;
@@ -96,6 +105,10 @@ export interface AnalyzerDetection {
 backward compatible. A derived/synthetic check, such as `dead-code`, must set
 `details.synthetic = true` and must not affect scoring unless it is promoted into
 `CHECK_META`.
+
+Repo-level analyzers receive the whole `projects` list. Project-scoped analyzers
+receive one `project` at a time and the scan engine aggregates their compatible
+results. This prevents every runner from inventing its own monorepo traversal.
 
 ## Registry
 
@@ -124,15 +137,16 @@ Registry requirements:
 For each analyzer:
 
 1. Build `AnalyzerContext`.
-2. Apply central `appliesTo` stack gating.
-3. Merge defaults and user settings.
-4. Start tool recording.
-5. Run the analyzer.
-6. Attach tool provenance from `exec.ts`.
-7. Apply per-check ignore filters.
-8. Validate output.
-9. Add normalized metrics when available.
-10. Preserve legacy `CheckResult.details` for current consumers.
+2. Select repo or project scope from the analyzer manifest.
+3. Apply central `appliesTo` stack gating.
+4. Merge defaults and user settings.
+5. Start tool recording.
+6. Run the analyzer.
+7. Attach package-tagged tool provenance from `exec.ts`.
+8. Apply per-check ignore filters.
+9. Validate output.
+10. Add normalized metrics when available.
+11. Preserve legacy `CheckResult.details` for current consumers.
 
 Analyzer failures must become auditable check results. A failed analyzer must not
 crash the entire scan unless the scan engine itself is corrupt.
@@ -189,9 +203,41 @@ export interface AnalyzerSnapshot {
 }
 ```
 
-Until the report schema gets a dedicated snapshot field, analyzers may emit
-metrics under `check.details.metrics`. App code must tolerate absence of this
-field while migration is incremental.
+Reports now carry normalized summaries under `meta.analyzerSnapshots[]`. The
+scan core builds these snapshots from every normalized check so dashboard and
+trend consumers do not need to parse bespoke `details` fields.
+
+Analyzers may still emit explicit metrics under `check.details.metrics`; the
+snapshot builder preserves those when present. When an analyzer has no explicit
+metrics, the builder derives conservative scalar metrics from stable detail
+fields and ignores bulky/debug fields such as `toolRuns`, graphs, SVGs, and
+free-form assessments.
+
+## Scoring And Applicability
+
+Check metadata declares default scoring semantics separately from numeric
+weight:
+
+- `available-scored`: the check is applicable and contributes to aggregate
+  score.
+- `available-unscored`: the check is applicable and advisory; findings are
+  visible, but score impact is zero.
+- `not-applicable`: the stack or repo shape is absent; the check is skipped and
+  excluded from score and issue counts in rollups.
+- `unavailable`: required product tier, plugin, license, or tool support is not
+  available; the check is rendered separately and excluded from score.
+
+The scan core writes runtime `details.scoreMode` and `details.scoreImpact` after
+central stack gating and result normalization. UI code must use those fields
+instead of inferring intent from `weight = 0`, `skipped`, or `comingSoon`.
+
+`available-unscored` checks are advisory even when they emit findings or a low
+numeric score. Normalized JSON reports keep `status: "passed"` for those checks
+unless the runner itself failed to execute. When advisory findings are present,
+the core also writes `details.advisoryFindings = true`. Consumers should treat
+`status: "failed"` as a scored quality-gate failure and use
+`details.advisoryFindings` plus `details.scoreImpact === false` for advisory
+attention states.
 
 ## Findings
 

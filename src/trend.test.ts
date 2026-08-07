@@ -46,6 +46,28 @@ describe("computeTrend", () => {
 		expect(trend!.newIssues).toBe(0);
 	});
 
+	it("tracks concrete introduced and fixed findings by fingerprint", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-trend-"));
+		const prev = makeReport(80, [{ name: "lint", score: 80, issues: 0 }]);
+		prev.checks[0].issues = [
+			{ severity: "warning", rule: "old", message: "Old issue", file: "src/a.ts" },
+			{ severity: "warning", rule: "same", message: "Same issue", file: "src/b.ts", line: 1 },
+		];
+		writeFileSync(join(dir, "report.json"), JSON.stringify(prev));
+
+		const curr = makeReport(81, [{ name: "lint", score: 81, issues: 0 }]);
+		curr.checks[0].issues = [
+			{ severity: "warning", rule: "same", message: "Same issue", file: "src/b.ts", line: 99 },
+			{ severity: "warning", rule: "new", message: "New issue", file: "src/c.ts" },
+		];
+
+		const trend = computeTrend(curr, dir)!;
+		expect(trend.newIssues).toBe(1);
+		expect(trend.fixedIssues).toBe(1);
+		expect(trend.introduced?.[0]).toMatchObject({ rule: "new", file: "src/c.ts" });
+		expect(trend.fixed?.[0]).toMatchObject({ rule: "old", file: "src/a.ts" });
+	});
+
 	it("detects regressions", () => {
 		const dir = mkdtempSync(join(tmpdir(), "vcqa-trend-"));
 		const prev = makeReport(90, [{ name: "lint", score: 90, issues: 1 }]);

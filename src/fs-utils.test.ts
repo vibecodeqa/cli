@@ -8,8 +8,10 @@ import {
 	getProductionFiles,
 	getTestFiles,
 	isIgnoredPath,
+	normalizeToolPath,
 	readDeps,
 	readEnvIgnoreNames,
+	readGitIgnoreDirectoryNames,
 	readSafe,
 	setGlobalIgnore,
 	setGlobalIgnoreNames,
@@ -75,7 +77,7 @@ describe("collectSourceFiles", () => {
 		rmSync(dir, { recursive: true });
 	});
 
-	it("skips hidden directories in source and all-file scans", () => {
+	it("skips explicit generated dot directories, but keeps meaningful repo config visible", () => {
 		const dir = makeProject({
 			"src/app.ts": "export const x = 1;",
 			".provision/demo/src/app.ts": "export const x = 1;",
@@ -85,7 +87,7 @@ describe("collectSourceFiles", () => {
 		const sourceFiles = collectSourceFiles(dir);
 		expect(sourceFiles.map((f) => f.path)).toEqual(["src/app.ts"]);
 		const allFiles = collectAllFiles(dir, { extraExts: true });
-		expect(allFiles.map((f) => f.path).sort()).toEqual(["package.json", "src/app.ts"]);
+		expect(allFiles.map((f) => f.path).sort()).toEqual([".github/workflows/build.ts", "package.json", "src/app.ts"]);
 		rmSync(dir, { recursive: true });
 	});
 
@@ -140,6 +142,16 @@ describe("readEnvIgnoreNames", () => {
 		expect(readEnvIgnoreNames("node_modules, .wrangler\n dist  dist")).toEqual(["node_modules", ".wrangler", "dist"]);
 		expect(readEnvIgnoreNames("")).toEqual([]);
 		expect(readEnvIgnoreNames(undefined)).toEqual([]);
+	});
+});
+
+describe("readGitIgnoreDirectoryNames", () => {
+	it("returns directory ignores but not file ignores", () => {
+		const dir = makeProject({
+			".gitignore": ["store/docs/", ".env", "package-lock.json", "!keep/", "# comment", "dist/"].join("\n"),
+		});
+		expect(readGitIgnoreDirectoryNames(dir)).toEqual(["store/docs", "dist"]);
+		rmSync(dir, { recursive: true });
 	});
 });
 
@@ -271,13 +283,38 @@ describe("isIgnoredPath — external-tool paths honor the scan's ignore", () => 
 		setGlobalIgnoreNames([]);
 	});
 
-	it("treats hidden directories as ignored (mirrors the walker), but not . or ..", () => {
+	it("ignores configured/generated dot directories, but not every hidden directory", () => {
 		setGlobalIgnore(undefined);
 		setGlobalIgnoreNames([]);
-		expect(isIgnoredPath(".github/scripts/deploy.ts")).toBe(true);
-		expect(isIgnoredPath("src/.storybook/preview.ts")).toBe(true);
+		expect(isIgnoredPath(".github/scripts/deploy.ts")).toBe(false);
+		expect(isIgnoredPath("src/.storybook/preview.ts")).toBe(false);
+		expect(isIgnoredPath(".claude/worktrees/copy.ts")).toBe(true);
+		expect(isIgnoredPath(".wrangler/tmp/bundle.ts")).toBe(true);
 		expect(isIgnoredPath("src/app.ts")).toBe(false);
 		// A leading "./" or ".." segment must not swallow the whole path.
 		expect(isIgnoredPath("./src/app.ts")).toBe(false);
+	});
+
+	it("matches default generated file patterns from policy data", () => {
+		setGlobalIgnore(undefined);
+		setGlobalIgnoreNames([]);
+		expect(isIgnoredPath("assets/store/screenshot-1-chat.html")).toBe(true);
+		expect(isIgnoredPath("src/app.min.js")).toBe(true);
+		expect(isIgnoredPath("pnpm-lock.yaml")).toBe(true);
+		expect(isIgnoredPath("src/app.ts")).toBe(false);
+	});
+});
+
+describe("normalizeToolPath", () => {
+	it("normalizes nested package paths to repo-root-relative paths", () => {
+		expect(normalizeToolPath("/repo", "/repo/agents/coder/web", "src/CopilotView.tsx")).toBe("agents/coder/web/src/CopilotView.tsx");
+	});
+
+	it("normalizes absolute paths inside the repo", () => {
+		expect(normalizeToolPath("/repo", "/repo/agents/coder/web", "/repo/store/console/src/App.tsx")).toBe("store/console/src/App.tsx");
+	});
+
+	it("keeps outside-repo paths unchanged", () => {
+		expect(normalizeToolPath("/repo", "/repo/agents/coder/web", "../../../../outside.ts")).toBe("../../../../outside.ts");
 	});
 });

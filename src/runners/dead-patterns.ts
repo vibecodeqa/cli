@@ -22,6 +22,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -59,7 +61,7 @@ interface Cluster {
 	hash: string;
 }
 
-export async function runDeadPatterns(cwd: string): Promise<CheckResult> {
+export async function runDeadPatterns(cwd: string, inventory?: FileInventory): Promise<CheckResult> {
 	const start = Date.now();
 	const proKey = process.env.VCQA_PRO_KEY || "";
 
@@ -80,7 +82,7 @@ export async function runDeadPatterns(cwd: string): Promise<CheckResult> {
 		};
 	}
 
-	const files = getProductionFiles(cwd);
+	const files = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 	const issues: Issue[] = [];
 
 	// ── Local heuristic checks ──
@@ -255,6 +257,7 @@ export async function runDeadPatterns(cwd: string): Promise<CheckResult> {
 		details: {
 			premium: true,
 			featureMap,
+			source: inventory ? "file-inventory" : "legacy-walk",
 			clustersAnalyzed: toAnalyze.length,
 			totalClusters: allClusters.length,
 			cacheHits,

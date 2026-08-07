@@ -2,7 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { detectWorkspace } from "../detect.js";
+import { buildFileInventory } from "../file-inventory.js";
 import { setGlobalSrcRoots } from "../fs-utils.js";
+import { buildEffectiveScanPolicy } from "../scan-policy.js";
 import { runCommentStaleness } from "./comment-staleness.js";
 
 function makeProject(files: Record<string, string>): string {
@@ -17,6 +20,10 @@ function makeProject(files: Record<string, string>): string {
 }
 
 afterEach(() => setGlobalSrcRoots(undefined));
+
+function inventory(dir: string) {
+	return buildFileInventory(dir, detectWorkspace(dir), buildEffectiveScanPolicy(dir, {}));
+}
 
 describe("runCommentStaleness", () => {
 	it("returns PRO placeholder without VCQA_PRO_KEY", () => {
@@ -134,6 +141,21 @@ describe("runCommentStaleness", () => {
 		expect(pairs).toBeDefined();
 		expect(pairs.length).toBeGreaterThan(0);
 		expect(pairs[0].comment).toContain("Adds two numbers");
+		delete process.env.VCQA_PRO_KEY;
+		rmSync(dir, { recursive: true });
+	});
+
+	it("uses FileInventory and excludes ignored/generated source", () => {
+		process.env.VCQA_PRO_KEY = "test";
+		const dir = makeProject({
+			"src/app.ts": "export const app = 1;\n",
+			"dist/generated.ts": "// TODO: generated output should not count\nexport const generated = 1;\n",
+			".claude/worktrees/agent-a/src/work.ts": "// TODO: agent worktree should not count\nexport const work = 1;\n",
+		});
+		const result = runCommentStaleness(dir, inventory(dir));
+		expect(result.details).toMatchObject({ filesScanned: 1, source: "file-inventory" });
+		expect(result.issues.some((i) => i.file?.startsWith("dist/") || i.file?.includes(".claude/worktrees"))).toBe(false);
+		expect(result.issues).toHaveLength(0);
 		delete process.env.VCQA_PRO_KEY;
 		rmSync(dir, { recursive: true });
 	});

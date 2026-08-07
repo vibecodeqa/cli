@@ -11,9 +11,20 @@
  *   8. DOM nesting violations (div in p, button in a)
  */
 
+import { join } from "node:path";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles, readDeps } from "../fs-utils.js";
-import type { CheckResult, Issue } from "../types.js";
+import type { CheckResult, Issue, ProjectContext, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
+import {
+	depsForProjects,
+	filesForProjects,
+	frontendProjects,
+	projectContainsPath,
+	projectDetails,
+	projectSourceRoots,
+} from "./project-scope.js";
 
 // UI framework conflicts
 const UI_FRAMEWORKS: { name: string; deps: string[] }[] = [
@@ -58,11 +69,66 @@ const NESTING_VIOLATIONS: { parent: string; child: string; message: string }[] =
 	{ parent: "<a", child: "<button", message: "button inside a — use one or the other" },
 ];
 
-export function runFrontendHealth(cwd: string): CheckResult {
+function activeUiFrameworks(deps: Record<string, string>): string[] {
+	return UI_FRAMEWORKS.filter((fw) => fw.deps.some((dep) => dep in deps)).map((fw) => fw.name);
+}
+
+function conflictingFrameworks(activeFrameworks: string[]): string[] {
+	const conflicts = activeFrameworks.filter((f) => f !== "Radix" && f !== "shadcn/ui" && f !== "DaisyUI");
+	return conflicts.length > 1 && !(conflicts.length === 2 && conflicts.includes("Tailwind") && conflicts.includes("shadcn/ui"))
+		? conflicts
+		: [];
+}
+
+function frameworkDetails(cwd: string, projects: ProjectContext[] | null): Array<Record<string, unknown>> {
+	if (!projects) return [];
+	return projects.map((project) => {
+		const projectDir = project.path === "." ? cwd : join(cwd, project.path);
+		const activeFrameworks = activeUiFrameworks({ ...readDeps(cwd), ...readDeps(projectDir) });
+		return {
+			id: project.id,
+			name: project.name,
+			path: project.path,
+			activeFrameworks,
+			conflicts: conflictingFrameworks(activeFrameworks),
+		};
+	});
+}
+
+function replaceExceptNewlines(value: string): string {
+	return value.replace(/[^\n]/g, " ");
+}
+
+function maskCommentsAndNonMarkupTemplates(content: string): string {
+	return content
+		.replace(/\{\/\*[\s\S]*?\*\/\}/g, (match) => replaceExceptNewlines(match))
+		.replace(/\/\*[\s\S]*?\*\//g, (match) => replaceExceptNewlines(match))
+		.replace(/(^|[^:])\/\/.*$/gm, (match, prefix: string) => `${prefix}${replaceExceptNewlines(match.slice(prefix.length))}`)
+		.replace(/`(?:\\[\s\S]|\$\{[\s\S]*?\}|[^`\\])*`/g, (match) => {
+			const hasMarkup = /<\/?[A-Za-z][\w:-]*(?:\s|>|\/)/.test(match);
+			return hasMarkup ? match : replaceExceptNewlines(match);
+		});
+}
+
+function tagPattern(tagStart: string): RegExp {
+	const tag = tagStart.replace(/^<\/?/, "");
+	return new RegExp(`<${tag}(?:\\s|>|/)`, "g");
+}
+
+function closingTagPattern(tagStart: string): RegExp {
+	const tag = tagStart.replace(/^<\/?/, "");
+	return new RegExp(`</${tag}\\s*>`, "g");
+}
+
+export function runFrontendHealth(cwd: string, workspace?: WorkspaceInfo, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
-	const files = getProductionFiles(cwd);
-	const deps = readDeps(cwd);
+	const projects = frontendProjects(workspace);
+	const files = filesForProjects(
+		inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd, projects ? projectSourceRoots(projects) : undefined),
+		projects,
+	);
+	const deps = depsForProjects(cwd, projects);
 
 	const componentFiles = files.filter((f) => !f.isTest && /\.(tsx|jsx|vue|svelte)$/.test(f.path));
 	if (componentFiles.length === 0) {
@@ -70,27 +136,35 @@ export function runFrontendHealth(cwd: string): CheckResult {
 			name: "frontend-health",
 			score: 0,
 			grade: "F",
-			details: { skipped: true, reason: "no component files found" },
+			details: { skipped: true, reason: "no component files found", projects: projectDetails(projects, componentFiles) },
 			issues: [],
 			duration: Date.now() - start,
 		};
 	}
 
 	// 1. Conflicting UI frameworks
-	const activeFrameworks: string[] = [];
-	for (const fw of UI_FRAMEWORKS) {
-		if (fw.deps.some((d) => d in deps)) {
-			activeFrameworks.push(fw.name);
+	const activeFrameworks = activeUiFrameworks(deps);
+	const projectFrameworks = frameworkDetails(cwd, projects);
+	if (projects) {
+		for (const project of projectFrameworks) {
+			const conflicts = project.conflicts as string[];
+			if (conflicts.length > 0) {
+				issues.push({
+					severity: "error",
+					message: `${project.path} has conflicting UI frameworks: ${conflicts.join(" + ")} — pick one`,
+					rule: "framework-conflict",
+				});
+			}
 		}
-	}
-	// Tailwind + Radix/shadcn is intentional (shadcn uses Tailwind)
-	const conflicts = activeFrameworks.filter((f) => f !== "Radix" && f !== "shadcn/ui" && f !== "DaisyUI");
-	if (conflicts.length > 1 && !(conflicts.length === 2 && conflicts.includes("Tailwind") && conflicts.includes("shadcn/ui"))) {
-		issues.push({
-			severity: "error",
-			message: `Conflicting UI frameworks: ${conflicts.join(" + ")} — pick one`,
-			rule: "framework-conflict",
-		});
+	} else {
+		const conflicts = conflictingFrameworks(activeFrameworks);
+		if (conflicts.length > 0) {
+			issues.push({
+				severity: "error",
+				message: `Conflicting UI frameworks: ${conflicts.join(" + ")} — pick one`,
+				rule: "framework-conflict",
+			});
+		}
 	}
 
 	// 2-8. Scan component files
@@ -98,7 +172,8 @@ export function runFrontendHealth(cwd: string): CheckResult {
 	let unoptimizedImages = 0;
 	let missingLoadingStates = 0;
 	for (const f of componentFiles) {
-		const lines = f.content.split("\n");
+		const scanContent = maskCommentsAndNonMarkupTemplates(f.content);
+		const lines = scanContent.split("\n");
 
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];
@@ -153,11 +228,11 @@ export function runFrontendHealth(cwd: string): CheckResult {
 
 			// DOM nesting violations (heuristic — not a full parser)
 			for (const v of NESTING_VIOLATIONS) {
-				if (trimmed.includes(v.child) && i > 0) {
+				if (tagPattern(v.child).test(trimmed) && i > 0) {
 					// Check previous 5 lines for unclosed parent
 					const context = lines.slice(Math.max(0, i - 5), i).join(" ");
-					const parentOpens = (context.match(new RegExp(v.parent.replace("<", "<"), "g")) || []).length;
-					const parentCloses = (context.match(new RegExp(v.parent.replace("<", "</"), "g")) || []).length;
+					const parentOpens = (context.match(tagPattern(v.parent)) || []).length;
+					const parentCloses = (context.match(closingTagPattern(v.parent)) || []).length;
 					if (parentOpens > parentCloses) {
 						issues.push({
 							severity: "warning",
@@ -217,9 +292,15 @@ export function runFrontendHealth(cwd: string): CheckResult {
 		grade: gradeFromScore(score),
 		details: {
 			componentFiles: componentFiles.length,
+			source: inventory ? "file-inventory" : "legacy-walk",
 			activeFrameworks,
+			projectFrameworks,
 			iconLibsUsed: [...iconLibsUsed],
 			unoptimizedImages,
+			projects: projectDetails(projects, componentFiles)?.map((project) => ({
+				...project,
+				issues: issues.filter((issue) => issue.file && projectContainsPath(String(project.path), issue.file)).length,
+			})),
 		},
 		issues,
 		duration: Date.now() - start,

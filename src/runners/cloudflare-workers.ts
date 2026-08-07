@@ -4,6 +4,8 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
@@ -42,7 +44,8 @@ function findConfigs(cwd: string, workspace?: WorkspaceInfo): WranglerConfig[] {
 }
 
 /** Worker source files under the config's dir (src/, functions/, plus the main entry). */
-function workerSources(dir: string, mainRel: string | null): { path: string; content: string }[] {
+function workerSources(dir: string, mainRel: string | null, inventory?: FileInventory): { path: string; content: string }[] {
+	if (inventory) return inventoryWorkerSources(dir, mainRel, inventory);
 	const out: { path: string; content: string }[] = [];
 	const seen = new Set<string>();
 	const pushFile = (p: string) => {
@@ -79,7 +82,21 @@ function workerSources(dir: string, mainRel: string | null): { path: string; con
 	return out;
 }
 
-export function runCloudflareWorkers(cwd: string, workspace?: WorkspaceInfo): CheckResult {
+function inventoryWorkerSources(dir: string, mainRel: string | null, inventory: FileInventory): { path: string; content: string }[] {
+	const mainPath = mainRel ? join(dir, mainRel) : "";
+	const mainDir = mainPath ? dirname(mainPath) : "";
+	return inventorySourceFiles(inventory).flatMap((file) => {
+		const inConfigDir = file.fullPath === dir || file.fullPath.startsWith(`${dir}/`);
+		if (!inConfigDir) return [];
+		const isMain = mainPath && file.fullPath === mainPath;
+		const inMainDir = mainDir && file.fullPath.startsWith(`${mainDir}/`);
+		const inWorkerRoot = ["src", "functions", "worker"].some((subdir) => file.fullPath.startsWith(`${join(dir, subdir)}/`));
+		if (!isMain && !inMainDir && !inWorkerRoot) return [];
+		return [{ path: file.fullPath, content: file.rawContent ?? file.content }];
+	});
+}
+
+export function runCloudflareWorkers(cwd: string, workspace?: WorkspaceInfo, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 	const configs = findConfigs(cwd, workspace);
@@ -165,7 +182,7 @@ export function runCloudflareWorkers(cwd: string, workspace?: WorkspaceInfo): Ch
 		}
 
 		// ── code-side analysis ──
-		const sources = workerSources(cfg.dir, main);
+		const sources = workerSources(cfg.dir, main, inventory);
 		const code = sources.map((s) => s.content).join("\n");
 
 		// Env interface/type members — secrets set via `wrangler secret put` appear
@@ -259,6 +276,7 @@ export function runCloudflareWorkers(cwd: string, workspace?: WorkspaceInfo): Ch
 			bindingsDeclared: declared,
 			bindingsUsed: used,
 			tool: "built-in",
+			source: inventory ? "file-inventory" : "legacy-walk",
 		},
 		issues,
 		duration: Date.now() - start,

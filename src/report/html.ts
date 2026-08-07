@@ -16,7 +16,17 @@ import { computeDelta } from "../delta.js";
 import type { CheckResult, VibeReport } from "../types.js";
 import { det, e, fileLink, gc } from "./components.js";
 import { FAVICON_SVG } from "./favicon.js";
-import { actionsPage, type CatScore, categoryPage, featureMapPage, filesPage, issuesPage, overviewPage, trendsPage } from "./pages.js";
+import {
+	actionsPage,
+	type CatScore,
+	categoryPage,
+	featureMapPage,
+	filesPage,
+	issuesPage,
+	overviewPage,
+	scanScopePage,
+	trendsPage,
+} from "./pages.js";
 import { CSS } from "./styles.js";
 
 export const GROUPS: { id: string; label: string; file: string; checks: string[] }[] = [
@@ -124,6 +134,7 @@ export function generatePages(report: VibeReport, historyDir?: string, prevRepor
 
 	// Compute delta from previous scan
 	const scanDelta = prevReport ? computeDelta(prevReport, report) : undefined;
+	pages.set("scan-scope.html", w("scan-scope", scanScopePage(report)));
 	pages.set("actions.html", w("actions", actionsPage(allChecks, fl, report.meta.stack.linter, scanDelta)));
 	pages.set("issues.html", w("issues", issuesPage(allChecks, totalIssues, fl)));
 	pages.set("files.html", w("files", filesPage(topFiles, fileIssues, fl)));
@@ -143,7 +154,7 @@ function sidebarScore(report: VibeReport): string {
 }
 
 function sidebarViews(totalIssues: number, fileCount: number): string {
-	return `<div class="side-section side-views"><div class="side-label" style="margin-top:0.3rem">Views</div><a class="side-check" href="issues.html">Issues <span style="color:var(--muted)">${totalIssues}</span></a><a class="side-check" href="files.html">Files <span style="color:var(--muted)">${fileCount}</span></a></div>`;
+	return `<div class="side-section side-views"><div class="side-label" style="margin-top:0.3rem">Views</div><a class="side-check" href="scan-scope.html">Scan Scope</a><a class="side-check" href="issues.html">Issues <span style="color:var(--muted)">${totalIssues}</span></a><a class="side-check" href="files.html">Files <span style="color:var(--muted)">${fileCount}</span></a></div>`;
 }
 
 // ── Page wrapper ──
@@ -154,6 +165,7 @@ function wrap(proj: string, currentId: string, report: VibeReport, totalIssues: 
 	const navItems = [
 		{ id: "overview", label: "Overview", file: "index.html" },
 		{ id: "checks", label: "Checks", file: GROUPS[0].file, active: isCheckPage },
+		{ id: "scan-scope", label: "Scan Scope", file: "scan-scope.html" },
 		{ id: "feature-map", label: "Feature Map", file: "feature-map.html" },
 		{ id: "trends", label: "Trends", file: "trends.html" },
 		{ id: "actions", label: "Actions", file: "actions.html" },

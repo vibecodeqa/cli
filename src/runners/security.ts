@@ -1,8 +1,10 @@
 /** Security analysis — beyond secrets, checks for vulnerable code patterns. */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { getProductionFiles, readDeps } from "../fs-utils.js";
+import { isAbsolute, join } from "node:path";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
+import { getProductionFiles, isIgnoredPath, normalizeToolPath, readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
@@ -298,7 +300,154 @@ const PATTERNS: SecurityPattern[] = [
 	},
 ];
 
-export function runSecurity(cwd: string): CheckResult {
+function findSecureCookieHelpers(files: { rawContent?: string; content: string }[]): Set<string> {
+	const helpers = new Set<string>();
+	const declaration = /\b(?:export\s+)?(?:function|const)\s+([A-Za-z_$][\w$]*)\b/g;
+	for (const sf of files) {
+		const content = sf.rawContent || sf.content;
+		for (const match of content.matchAll(declaration)) {
+			const name = match[1];
+			const body = content.slice(match.index ?? 0, (match.index ?? 0) + 1600);
+			if (/\bSet-Cookie\b|cookie/i.test(body) && /\bHttpOnly\b/i.test(body) && /\bSecure\b/i.test(body) && /\bSameSite\b/i.test(body)) {
+				helpers.add(name);
+			}
+		}
+	}
+	return helpers;
+}
+
+function contextWindow(lines: string[], lineIndex: number): string {
+	return lines.slice(Math.max(0, lineIndex - 4), Math.min(lines.length, lineIndex + 5)).join("\n");
+}
+
+function isLocalDevContext(file: string, context: string): boolean {
+	return (
+		/(?:^|[/\\])(?:test|tests|__tests__|fixtures|dev|local)(?:[/\\]|$)|(?:\.test|\.spec)\.[^.]+$/i.test(file) ||
+		/\b(?:localhost|127\.0\.0\.1|0\.0\.0\.0|createServer|listen\s*\(|test-job|dev server|local dev)\b/i.test(context)
+	);
+}
+
+function referencesHelper(line: string, helpers: Set<string>): boolean {
+	for (const helper of helpers) {
+		if (new RegExp(`\\b${helper.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(line)) return true;
+	}
+	return false;
+}
+
+function credentialedCorsContext(context: string): boolean {
+	return /Access-Control-Allow-Credentials["']?\s*[:,]\s*["']?true/i.test(context) || /\bcredentials\s*:\s*["']include["']/i.test(context);
+}
+
+function publicMetadataContext(context: string): boolean {
+	return /\b(?:llms\.txt|skills\.json|\.well-known|metadata|manifest|public docs?|static metadata)\b/i.test(context);
+}
+
+interface BrowserStorageClassification {
+	severity?: Issue["severity"];
+	message?: string;
+	suppress?: boolean;
+}
+
+function browserStorageCall(line: string): { store: "localStorage" | "sessionStorage"; key?: string; value: string } | null {
+	const match = /\b(localStorage|sessionStorage)\.setItem\s*\(\s*([^,]+)\s*,\s*(.*)/.exec(line);
+	if (!match) return null;
+	const keyMatch = /^\s*["'`]([^"'`]+)["'`]/.exec(match[2]);
+	return {
+		store: match[1] as "localStorage" | "sessionStorage",
+		key: keyMatch?.[1],
+		value: match[3] || "",
+	};
+}
+
+function isSensitiveStorageKey(key: string): boolean {
+	return /(?:^|[:._-])(?:access|auth|bearer|credential|jwt|oauth|password|refresh|secret|session|token)(?:$|[:._-])/i.test(key);
+}
+
+function isUiPreferenceStorageKey(key: string): boolean {
+	return /(?:^|[:._-])(?:appearance|drawer|filter|font|fontsize|font-size|language|last-route|lastroute|layout|locale|onboarding|preference|preferences|prefs|route|sidebar|sort|tab|text-scale|textscale|theme|timezone|tour|ui|view)(?:$|[:._-])/i.test(
+		key,
+	);
+}
+
+function hasSensitiveStorageValue(value: string): boolean {
+	return /\b(?:accessToken|apiKey|auth|bearer|credential|jwt|password|refreshToken|secret|session|token)\b/i.test(value);
+}
+
+function classifyBrowserStorageLine(line: string): BrowserStorageClassification | null {
+	const call = browserStorageCall(line);
+	if (!call) return null;
+	const sensitiveKey = call.key ? isSensitiveStorageKey(call.key) : false;
+	const uiPreferenceKey = call.key ? isUiPreferenceStorageKey(call.key) : false;
+	const sensitiveValue = hasSensitiveStorageValue(call.value);
+
+	if (uiPreferenceKey && !sensitiveValue) return { suppress: true };
+	if (!sensitiveKey && !sensitiveValue) return null;
+
+	const storageName = call.store === "localStorage" ? "localStorage" : "sessionStorage";
+	const persistence = call.store === "localStorage" ? "persistent browser storage" : "browser session storage";
+	return {
+		severity: call.store === "localStorage" ? "error" : "warning",
+		message: `Auth/session-like key or value in ${storageName} (${persistence}) — accessible to XSS. Prefer HttpOnly cookies`,
+	};
+}
+
+function contextualizePatternIssue(
+	pattern: SecurityPattern,
+	line: string,
+	file: string,
+	context: string,
+	secureCookieHelpers: Set<string>,
+): Pick<Issue, "severity" | "message"> | null {
+	if (
+		pattern.name === "token in localStorage key" ||
+		pattern.name === "token var in localStorage" ||
+		pattern.name === "JSON with token in localStorage" ||
+		pattern.name === "secret in localStorage" ||
+		pattern.name === "token in sessionStorage"
+	) {
+		const storageClassification = classifyBrowserStorageLine(line);
+		if (storageClassification?.suppress) return null;
+		if (storageClassification?.severity && storageClassification.message) {
+			return {
+				severity: storageClassification.severity,
+				message: storageClassification.message,
+			};
+		}
+	}
+
+	if (pattern.name === "cookie without Secure") {
+		if (/\bSecure\b/i.test(line) || referencesHelper(line, secureCookieHelpers)) return null;
+		if (isLocalDevContext(file, context)) {
+			return {
+				severity: "info",
+				message: "Local/dev cookie may omit Secure flag — verify this path is not served over production HTTPS",
+			};
+		}
+	}
+
+	if (pattern.name === "CORS wildcard with credentials" || pattern.name === "CORS wildcard header") {
+		if (credentialedCorsContext(context)) {
+			return {
+				severity: "warning",
+				message: "Credentialed CORS uses wildcard origin — browsers reject this and it may expose API intent incorrectly",
+			};
+		}
+		if (publicMetadataContext(context)) {
+			return {
+				severity: "info",
+				message: "Public metadata endpoint uses wildcard CORS without credentials",
+			};
+		}
+		return {
+			severity: "info",
+			message: "Wildcard CORS without credentials — verify the response is intentionally public",
+		};
+	}
+
+	return { severity: pattern.severity, message: pattern.message };
+}
+
+export function runSecurity(cwd: string, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 	let tool: "built-in" | "eslint-plugin-security" = "built-in";
@@ -313,7 +462,8 @@ export function runSecurity(cwd: string): CheckResult {
 		}
 	}
 
-	const sourceFiles = getProductionFiles(cwd);
+	const sourceFiles = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
+	const secureCookieHelpers = findSecureCookieHelpers(sourceFiles);
 
 	if (sourceFiles.length === 0) {
 		return {
@@ -353,9 +503,11 @@ export function runSecurity(cwd: string): CheckResult {
 
 			for (const p of PATTERNS) {
 				if (p.pattern.test(line)) {
+					const contextualIssue = contextualizePatternIssue(p, line, sf.path, contextWindow(lines, i), secureCookieHelpers);
+					if (!contextualIssue) continue;
 					issues.push({
-						severity: p.severity,
-						message: p.message,
+						severity: contextualIssue.severity,
+						message: contextualIssue.message,
 						file: sf.path,
 						line: i + 1,
 						rule: p.cwe || p.name,
@@ -386,9 +538,13 @@ export function runSecurity(cwd: string): CheckResult {
 			if (!trimmed.includes("localStorage.setItem")) continue;
 			const alreadyCaught = issues.some((iss) => iss.file === sf.path && iss.line === i + 1 && iss.rule === "CWE-922");
 			if (!alreadyCaught) {
+				const storageClassification = classifyBrowserStorageLine(trimmed);
+				if (storageClassification?.suppress) continue;
 				issues.push({
-					severity: "info",
-					message: "localStorage.setItem in auth-related file — verify no tokens/secrets are persisted client-side",
+					severity: storageClassification?.severity || "info",
+					message:
+						storageClassification?.message ||
+						"Ambiguous localStorage.setItem in auth-related file — verify no tokens/secrets are persisted client-side",
 					file: sf.path,
 					line: i + 1,
 					rule: "CWE-922",
@@ -480,6 +636,28 @@ function tryEslintPluginSecurity(cwd: string): Issue[] | null {
 		30_000,
 	);
 
+	return parseEslintSecurityJson(stdout, cwd, cwd);
+}
+
+function pathMetadata(repoCwd: string, toolCwd: string, rawPath: string): { file?: string; details: Record<string, string> } {
+	const repoRelativePath = normalizeToolPath(repoCwd, toolCwd, rawPath);
+	const outsideRepo = repoRelativePath.startsWith("../") || repoRelativePath === ".." || isAbsolute(repoRelativePath);
+	return {
+		file: outsideRepo ? undefined : repoRelativePath,
+		details: {
+			...(outsideRepo ? {} : { repoRelativePath }),
+			toolRelativePath: rawPath,
+			toolCwd,
+			pathStatus: outsideRepo ? "outside-repo" : "normalized",
+		},
+	};
+}
+
+function withPathDetails(issue: Issue, details: Record<string, string>): Issue {
+	return { ...issue, details } as Issue;
+}
+
+export function parseEslintSecurityJson(stdout: string, repoCwd: string, toolCwd: string): Issue[] | null {
 	try {
 		const files = JSON.parse(stdout) as {
 			filePath: string;
@@ -487,16 +665,22 @@ function tryEslintPluginSecurity(cwd: string): Issue[] | null {
 		}[];
 		const issues: Issue[] = [];
 		for (const file of files) {
-			const relPath = file.filePath.replace(`${cwd}/`, "");
+			const path = pathMetadata(repoCwd, toolCwd, file.filePath);
+			if (path.file && isIgnoredPath(path.file)) continue;
 			for (const msg of file.messages) {
 				if (!msg.ruleId?.startsWith("security/")) continue;
-				issues.push({
-					severity: msg.severity === 2 ? "error" : "warning",
-					message: `[eslint-plugin-security] ${msg.message}`,
-					file: relPath,
-					line: msg.line,
-					rule: msg.ruleId,
-				});
+				issues.push(
+					withPathDetails(
+						{
+							severity: msg.severity === 2 ? "error" : "warning",
+							message: `[eslint-plugin-security] ${msg.message}`,
+							file: path.file,
+							line: msg.line,
+							rule: msg.ruleId,
+						},
+						path.details,
+					),
+				);
 			}
 		}
 		return issues.length > 0 ? issues : null;

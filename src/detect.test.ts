@@ -126,6 +126,9 @@ describe("detectWorkspace", () => {
 		expect(ws.packages).toHaveLength(2);
 		expect(ws.packages.map((p) => p.name).sort()).toEqual(["@org/cli", "@org/sdk"]);
 		expect(ws.srcRoots.some((r) => r.includes("packages/sdk/src"))).toBe(true);
+		expect(ws.discovery?.mode).toBe("manifest");
+		expect(ws.projects?.map((p) => p.path).sort()).toEqual([".", "packages/cli", "packages/sdk"]);
+		expect(ws.projects?.find((p) => p.path === "packages/sdk")?.evidence.some((e) => e.file === "pnpm-workspace.yaml")).toBe(true);
 	});
 
 	it("detects npm workspaces with explicit paths", () => {
@@ -193,6 +196,66 @@ describe("detectWorkspace", () => {
 		expect(ws.isMonorepo).toBe(true);
 		expect(ws.tool).toBe("none");
 		expect(ws.packages).toHaveLength(2);
+		expect(ws.discovery?.mode).toBe("convention");
+		expect(ws.projects?.map((p) => p.path).sort()).toEqual([".", "client", "server"]);
+		expect(ws.projects?.find((p) => p.path === "server")?.kind).toBe("service");
+	});
+
+	it("creates project contexts with package-local stack and config evidence", () => {
+		setup({
+			"pnpm-workspace.yaml": "packages:\n  - apps/*\n  - packages/*\n",
+			"package.json": JSON.stringify({ devDependencies: { typescript: "^5" } }),
+			"pnpm-lock.yaml": "",
+			"apps/web/package.json": JSON.stringify({ name: "web", dependencies: { react: "^19" }, devDependencies: { eslint: "^9" } }),
+			"apps/web/eslint.config.js": "export default [];\n",
+			"apps/web/src/App.tsx": "",
+			"packages/core/package.json": JSON.stringify({ name: "core", devDependencies: { "@biomejs/biome": "^2" } }),
+			"packages/core/biome.json": "{}",
+			"packages/core/tsconfig.json": "{}",
+			"packages/core/src/index.ts": "",
+		});
+		const ws = detectWorkspace(TMP);
+		const web = ws.projects?.find((p) => p.path === "apps/web");
+		const core = ws.projects?.find((p) => p.path === "packages/core");
+		expect(web?.kind).toBe("app");
+		expect(web?.stack.framework).toBe("react");
+		expect(web?.stack.linter).toBe("eslint");
+		expect(web?.configFiles).toContain("apps/web/eslint.config.js");
+		expect(web?.confidence).toBeGreaterThan(0.8);
+		expect(web?.toolCommands.lint?.[0]).toMatchObject({ tool: "eslint", cwd: "apps/web" });
+		expect(core?.kind).toBe("library");
+		expect(core?.stack.linter).toBe("biome");
+		expect(core?.srcRoots).toEqual(["packages/core/src"]);
+		expect(core?.toolCommands.typecheck?.[0]).toMatchObject({ tool: "tsc", cwd: "packages/core" });
+	});
+
+	it("detects convention-only projects from supported markers without a root manifest", () => {
+		setup({
+			"workers/host/package.json": JSON.stringify({ name: "host", devDependencies: { typescript: "^5", vitest: "^4" } }),
+			"workers/host/tsconfig.json": "{}",
+			"workers/host/src/index.ts": "",
+			"workers/api/tsconfig.json": "{}",
+			"workers/api/src/index.ts": "",
+			"workers/tmp/readme.md": "not a project",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.tool).toBe("none");
+		expect(ws.discovery?.mode).toBe("convention");
+		expect(ws.projects?.map((p) => p.path).sort()).toEqual([".", "workers/api", "workers/host"]);
+		expect(ws.projects?.find((p) => p.path === "workers/api")?.stack.language).toBe("typescript");
+		expect(ws.projects?.find((p) => p.path === "workers/api")?.toolCommands.typecheck?.[0]).toMatchObject({
+			tool: "tsc",
+			cwd: "workers/api",
+		});
+		expect(ws.discovery?.evidence).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					kind: "rejected",
+					path: "workers/tmp",
+				}),
+			]),
+		);
 	});
 
 	it("handles pnpm-workspace.yaml with comments between entries", () => {

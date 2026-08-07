@@ -13,6 +13,8 @@
  *   4. Ambiguous abbreviations (auth, config, ctx, etc. outside conventional scope)
  */
 
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -100,11 +102,11 @@ const AMBIGUOUS_ABBREVS: Record<string, string> = {
 	ref: "reference (React ref? DB ref? pointer?)",
 };
 
-export function runConfusion(cwd: string): CheckResult {
+export function runConfusion(cwd: string, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 
-	const sourceFiles = getProductionFiles(cwd);
+	const sourceFiles = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 	const files = sourceFiles.map((sf) => ({ path: sf.path, base: sf.base, content: sf.content, exports: extractExports(sf.content) }));
 
 	if (files.length === 0) {
@@ -232,7 +234,7 @@ export function runConfusion(cwd: string): CheckResult {
 				if (groupPaths.length > 1) {
 					exportCollisions++;
 					issues.push({
-						severity: "error",
+						severity: "warning",
 						message: `Export collision: "${name}" exported from ${groupPaths.length} files — LLMs may reference the wrong one`,
 						file: groupPaths.join(", "),
 						rule: "export-collision",
@@ -271,7 +273,14 @@ export function runConfusion(cwd: string): CheckResult {
 		name: "confusion",
 		score,
 		grade: gradeFromScore(score),
-		details: { fileConfusability, genericNames, exportCollisions, ambiguousAbbrevs, filesScanned: files.length },
+		details: {
+			fileConfusability,
+			genericNames,
+			exportCollisions,
+			ambiguousAbbrevs,
+			filesScanned: files.length,
+			source: inventory ? "file-inventory" : "legacy-walk",
+		},
 		issues,
 		duration: Date.now() - start,
 	};

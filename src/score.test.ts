@@ -41,6 +41,14 @@ describe("computeScore", () => {
 		expect(computeScore([check("lint", 100), synthetic])).toBe(100);
 	});
 
+	it("normalizes non-finite check scores before aggregation", () => {
+		const bad = check("testing", Number.NaN);
+		const result = computeScore([bad, check("lint", 100)]);
+		expect(Number.isFinite(result)).toBe(true);
+		expect(result).toBeGreaterThanOrEqual(0);
+		expect(result).toBeLessThanOrEqual(100);
+	});
+
 	it("testing carries the most weight", () => {
 		// All perfect except testing is 0
 		const checks = [

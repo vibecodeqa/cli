@@ -4,6 +4,7 @@
  * to display "what changed since last scan."
  */
 
+import { readIssueFingerprint } from "./issue-fingerprint.js";
 import type { Issue, VibeReport } from "./types.js";
 
 export interface DeltaIssue {
@@ -36,8 +37,7 @@ export interface ScanDelta {
 
 /** Fingerprint an issue for stable matching (ignores line numbers which shift after edits). */
 function issueKey(check: string, iss: Issue): string {
-	const file = typeof iss.file === "string" ? iss.file.split(":")[0] : "";
-	return `${check}|${iss.rule || ""}|${file}|${iss.message}`;
+	return readIssueFingerprint(check, iss);
 }
 
 /** Compute a structured delta between two scan reports. */

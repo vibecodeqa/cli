@@ -1,20 +1,27 @@
 /** Error handling check — detects poor error handling patterns. */
 
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
-import type { CheckResult, Issue } from "../types.js";
+import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
+import { filesForProjects, nonOverlappingProjects, projectContainsPath, projectSourceRoots } from "./project-scope.js";
 
-export function runErrorHandling(cwd: string): CheckResult {
+export function runErrorHandling(cwd: string, workspace?: WorkspaceInfo, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
-	const files = getProductionFiles(cwd);
+	const projects = nonOverlappingProjects(workspace);
+	const files = filesForProjects(
+		inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd, projects ? projectSourceRoots(projects) : undefined),
+		projects,
+	);
 
 	if (files.length === 0) {
 		return {
 			name: "error-handling",
 			score: 100,
 			grade: "A",
-			details: { skipped: true, reason: "no source files" },
+			details: { skipped: true, reason: "no source files", projects: [] },
 			issues: [],
 			duration: Date.now() - start,
 		};
@@ -31,7 +38,7 @@ export function runErrorHandling(cwd: string): CheckResult {
 			const line = lines[i].trim();
 			if (line.startsWith("//") || line.startsWith("*")) continue;
 			// Skip suppressed lines (// ok, // intentional, eslint-disable, biome-ignore)
-			if (/\/\/\s*(?:ok|intentional|eslint-disable|biome-ignore)/.test(line)) continue;
+			if (/\/\/\s*(?:ok|intentional|best-effort|eslint-disable|biome-ignore)/.test(line)) continue;
 			// Skip string-only lines, metadata definitions, and return statements with string literals
 			if (/^\s*["'`].*["'`][,;]?\s*$/.test(lines[i])) continue;
 			if (/\b(?:message|description|risk|recommendation|name)\s*:\s*["']/.test(line)) continue;
@@ -42,7 +49,7 @@ export function runErrorHandling(cwd: string): CheckResult {
 				// Skip intentional one-liner try-catch for optional browser APIs
 				if (/try\s*\{.*(?:localStorage|sessionStorage|document\.).*\}\s*catch/.test(line)) continue;
 				emptyCatch++;
-				issues.push({ severity: "error", message: "Empty catch block", file: f.path, line: i + 1, rule: "empty-catch" });
+				issues.push({ severity: "warning", message: "Empty catch block", file: f.path, line: i + 1, rule: "empty-catch" });
 			}
 
 			if (/\bthrow\s+["'`]/.test(line)) {
@@ -222,7 +229,15 @@ export function runErrorHandling(cwd: string): CheckResult {
 			floatingPromises,
 			jsonParseUnsafe,
 			infiniteLoops,
+			source: inventory ? "file-inventory" : "legacy-walk",
 			tool: "built-in",
+			projects: projects?.map((project) => ({
+				id: project.id,
+				name: project.name,
+				path: project.path,
+				files: files.filter((file) => projectContainsPath(project.path, file.path)).length,
+				issues: issues.filter((issue) => issue.file && projectContainsPath(project.path, issue.file)).length,
+			})),
 		},
 		issues,
 		duration: Date.now() - start,

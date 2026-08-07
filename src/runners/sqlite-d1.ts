@@ -4,6 +4,8 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -18,8 +20,8 @@ const TEMPLATE_INTERP = /\$\{[^}]+\}/;
 const LOOP_HEAD = /\b(for\s*\(|for\s+(?:const|let|var)\b|while\s*\(|\.(?:map|forEach|flatMap)\s*\()/;
 
 /** Extract the argument text of a call starting just after its opening paren.
- *  Balanced-paren scan, quote-aware, capped so a pathological file can't hang. */
-function argText(src: string, openIdx: number): string {
+ *  Balanced-paren scan, quote/comment-aware, capped so a pathological file can't hang. */
+function callArgument(src: string, openIdx: number): { text: string; closeIdx: number } {
 	let depth = 1;
 	let quote: string | null = null;
 	const limit = Math.min(src.length, openIdx + 4000);
@@ -30,6 +32,14 @@ function argText(src: string, openIdx: number): string {
 			if (c === quote && prev !== "\\") quote = null;
 			continue;
 		}
+		if (c === "/" && src[i + 1] === "/") {
+			i = skipLineComment(src, i);
+			continue;
+		}
+		if (c === "/" && src[i + 1] === "*") {
+			i = skipBlockComment(src, i);
+			continue;
+		}
 		if (c === '"' || c === "'" || c === "`") {
 			quote = c;
 			continue;
@@ -37,10 +47,59 @@ function argText(src: string, openIdx: number): string {
 		if (c === "(") depth++;
 		else if (c === ")") {
 			depth--;
-			if (depth === 0) return src.slice(openIdx + 1, i);
+			if (depth === 0) return { text: src.slice(openIdx + 1, i), closeIdx: i };
 		}
 	}
-	return src.slice(openIdx + 1, limit);
+	return { text: src.slice(openIdx + 1, limit), closeIdx: limit };
+}
+
+function skipLineComment(src: string, start: number): number {
+	const end = src.indexOf("\n", start + 2);
+	return end === -1 ? src.length - 1 : end;
+}
+
+function skipBlockComment(src: string, start: number): number {
+	const end = src.indexOf("*/", start + 2);
+	return end === -1 ? src.length - 1 : end + 1;
+}
+
+function skipTrivia(src: string, start: number): number {
+	let i = start;
+	while (i < src.length) {
+		if (/\s/.test(src[i])) {
+			i++;
+			continue;
+		}
+		if (src[i] === "/" && src[i + 1] === "/") {
+			i = skipLineComment(src, i) + 1;
+			continue;
+		}
+		if (src[i] === "/" && src[i + 1] === "*") {
+			i = skipBlockComment(src, i) + 1;
+			continue;
+		}
+		return i;
+	}
+	return i;
+}
+
+function hasBindInMemberChain(src: string, start: number): boolean {
+	let i = start;
+	const limit = Math.min(src.length, start + 1200);
+	while (i < limit) {
+		i = skipTrivia(src, i);
+		if (src[i] !== ".") return false;
+		i++;
+		const nameStart = i;
+		while (/[A-Za-z0-9_$]/.test(src[i] ?? "")) i++;
+		const name = src.slice(nameStart, i);
+		i = skipTrivia(src, i);
+		if (name === "bind" && src[i] === "(") return true;
+		if (src[i] === "(") {
+			i = callArgument(src, i).closeIdx + 1;
+		}
+	}
+	return false;
 }
 
 /** True when the interpolations in a SQL template are all safe (identifiers the
@@ -68,6 +127,7 @@ function interpolationKind(sql: string): "value" | "identifier" | "fragment" | "
 	for (const m of sql.matchAll(/\$\{([^}]*)\}/g)) {
 		const name = m[1].trim();
 		const before = sql.slice(Math.max(0, m.index - 40), m.index);
+		if (/^[A-Z][A-Z0-9_]*$/.test(name) || /^["'][^"']*["']$/.test(name)) continue;
 		// The canonical dynamic-IN / dynamic-INSERT idiom: a generated `?, ?, ?` list.
 		if (/placeholder|marks|\bqs\b|question/i.test(name)) continue;
 		// Value positions — a bound parameter belongs here, nothing else.
@@ -78,6 +138,13 @@ function interpolationKind(sql: string): "value" | "identifier" | "fragment" | "
 		// doubled pairs, then count. This makes `ESCAPE '\'` read as open+close.
 		const quotesBefore = (sql.slice(0, m.index).replace(/''/g, "").match(/'/g) ?? []).length;
 		const insideLiteral = quotesBefore % 2 === 1;
+		// SQLite JSON path segments such as `'$.${key}'` are not SQL values. They
+		// still need validation/allow-listing, but they are closer to dynamic
+		// identifiers than injectable WHERE values.
+		if (insideLiteral && /\$\.[A-Za-z0-9_]*$/.test(before)) {
+			if (worst === "safe") worst = "identifier";
+			continue;
+		}
 		if (insideLiteral || /(?:=|<|>|<=|>=|<>|!=|\bLIKE\b|\bGLOB\b|\bLIMIT\b|\bOFFSET\b)\s*%?$/i.test(before)) {
 			return "value";
 		}
@@ -89,6 +156,16 @@ function interpolationKind(sql: string): "value" | "identifier" | "fragment" | "
 		worst = "fragment";
 	}
 	return worst;
+}
+
+function isLiteralOnlyConcatenation(arg: string): boolean {
+	const withoutComments = arg.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+	if (!/["']\s*\+|\+\s*["']/.test(withoutComments)) return false;
+	const stripped = withoutComments
+		.replace(/(["'])(?:\\.|(?!\1)[\s\S])*\1/g, "")
+		.replace(/\+/g, "")
+		.replace(/[(),;\s]/g, "");
+	return stripped.length === 0;
 }
 
 function lineOf(src: string, idx: number): number {
@@ -118,10 +195,10 @@ function migrationDirs(cwd: string, workspace?: WorkspaceInfo): { dir: string; f
 	return out;
 }
 
-export function runSqliteD1(cwd: string, workspace?: WorkspaceInfo): CheckResult {
+export function runSqliteD1(cwd: string, workspace?: WorkspaceInfo, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
-	const files = getProductionFiles(cwd).filter((f) => /\.(ts|tsx|js|jsx|mjs)$/.test(f.ext));
+	const files = (inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd)).filter((f) => /\.(ts|tsx|js|jsx|mjs)$/.test(f.ext));
 
 	let queries = 0;
 	let interpolated = 0;
@@ -138,7 +215,8 @@ export function runSqliteD1(cwd: string, workspace?: WorkspaceInfo): CheckResult
 		for (const m of src.matchAll(QUERY_CALL)) {
 			const method = m[1];
 			const openIdx = m.index + m[0].length - 1;
-			const arg = argText(src, openIdx);
+			const call = callArgument(src, openIdx);
+			const arg = call.text;
 			if (!SQL_SHAPE.test(arg)) continue;
 			queries++;
 			const line = lineOf(src, m.index);
@@ -160,7 +238,7 @@ export function runSqliteD1(cwd: string, workspace?: WorkspaceInfo): CheckResult
 				} else if (kind === "identifier") {
 					issues.push({
 						severity: "warning",
-						message: `Table/column name interpolated into SQL in .${method}() — safe only if it comes from a hard-coded allow-list, never from a request`,
+						message: `Table/column/JSON path interpolated into SQL in .${method}() — safe only if it comes from a hard-coded allow-list or validation, never directly from a request`,
 						file: f.path,
 						line,
 						rule: "sql-dynamic-identifier",
@@ -176,7 +254,7 @@ export function runSqliteD1(cwd: string, workspace?: WorkspaceInfo): CheckResult
 						snippet: arg.trim().slice(0, 120),
 					});
 				}
-			} else if (/["']\s*\+|\+\s*["']/.test(arg) && !isTemplate) {
+			} else if (/["']\s*\+|\+\s*["']/.test(arg) && !isTemplate && !isLiteralOnlyConcatenation(arg)) {
 				interpolated++;
 				issues.push({
 					severity: "error",
@@ -192,12 +270,12 @@ export function runSqliteD1(cwd: string, workspace?: WorkspaceInfo): CheckResult
 			if (method === "prepare" && /\?/.test(arg)) {
 				// Scan forward from the END of the prepare(...) call — a line window
 				// misses `.bind()` after a long multi-line SQL template.
-				const callEnd = openIdx + arg.length + 2;
+				const callEnd = call.closeIdx + 1;
 				const after = src
 					.slice(callEnd, callEnd + 1200)
 					.replace(/\/\*[\s\S]*?\*\//g, "")
 					.replace(/^\s*\/\/.*$/gm, "");
-				let bound = /^\s*\.\s*bind\s*\(/.test(after) || /\.bind\s*\(/.test(after.split(";")[0] ?? "");
+				let bound = hasBindInMemberChain(src, callEnd) || /^\s*\.\s*bind\s*\(/.test(after) || /\.bind\s*\(/.test(after.split(";")[0] ?? "");
 				// Statement-reuse idiom: `const insert = db.prepare(...)` bound later
 				// (often inside a batch). Look for `<var>.bind(` anywhere in the file.
 				if (!bound) {
@@ -316,6 +394,7 @@ export function runSqliteD1(cwd: string, workspace?: WorkspaceInfo): CheckResult
 			selectStar,
 			migrations: migrationCount,
 			tool: "built-in",
+			source: inventory ? "file-inventory" : "legacy-walk",
 		},
 		issues,
 		duration: Date.now() - start,

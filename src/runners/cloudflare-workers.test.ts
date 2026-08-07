@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { scan } from "../core.js";
 import { runCloudflareWorkers } from "./cloudflare-workers.js";
 
 function makeWorker(files: Record<string, string>): string {
@@ -140,6 +141,22 @@ export default { fetch(r: Request, env: Env) { return new Response(env.API_TOKEN
 		});
 		const r = runCloudflareWorkers(dir);
 		expect(r.issues.filter((i) => i.rule === "secret-in-vars")).toEqual([]);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("uses FileInventory through scan and omits generated worker outputs", async () => {
+		const dir = makeWorker({
+			"package.json": "{}",
+			"wrangler.toml": CLEAN_TOML.replace('main = "src/index.ts"', 'main = "dist/index.js"'),
+			"src/index.ts": `export default { fetch(r: Request, env: Env) { return new Response(String(env.CACHE)); } };`,
+			"dist/index.js": `import { Buffer } from "node:buffer"; export default { fetch(r, env) { return new Response(Buffer.from(env.CACHE).toString()); } };`,
+		});
+
+		const report = await scan(dir, { skipTests: true, checks: ["cloudflare-workers"] });
+		const result = report.checks[0]!;
+
+		expect(result.details).toMatchObject({ source: "file-inventory" });
+		expect(result.issues.some((issue) => issue.rule === "node-import-no-compat" && issue.file?.startsWith("dist/"))).toBe(false);
 		rmSync(dir, { recursive: true });
 	});
 });

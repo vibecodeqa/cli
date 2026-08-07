@@ -1,9 +1,13 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { scan } from "../core.js";
+import { detectWorkspace } from "../detect.js";
+import { buildFileInventory } from "../file-inventory.js";
 import { setGlobalSrcRoots } from "../fs-utils.js";
-import { hasKnipConfig, knipRoots, parseKnipJson, runPerformance } from "./performance.js";
+import { buildEffectiveScanPolicy } from "../scan-policy.js";
+import { deadCodeCheckFromPerformance, hasKnipConfig, knipRoots, parseKnipJson, runPerformance } from "./performance.js";
 
 function makeProject(files: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-perf-"));
@@ -13,6 +17,10 @@ function makeProject(files: Record<string, string>): string {
 		writeFileSync(full, content);
 	}
 	return dir;
+}
+
+function makeInventory(dir: string) {
+	return buildFileInventory(dir, detectWorkspace(dir), buildEffectiveScanPolicy(dir, {}));
 }
 
 afterEach(() => setGlobalSrcRoots(undefined));
@@ -60,7 +68,7 @@ describe("runPerformance", { timeout: 45_000 }, () => {
 			// genuinely clean project rather than one orphan file. Without this the
 			// result differs between a machine with Knip and one without.
 			"package.json": '{"main":"src/app.ts"}',
-			"src/app.ts": "export function greet(name: string) { return `Hello ${name}`; }\n",
+			"src/app.ts": "export function greet(name: string) { return 'Hello ' + name; }\n",
 		});
 		const result = runPerformance(dir);
 		expect(result.score).toBe(100);
@@ -82,6 +90,141 @@ describe("runPerformance", { timeout: 45_000 }, () => {
 		});
 		const result = runPerformance(dir);
 		expect(result.issues.some((i) => i.rule === "non-esm-dep")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("filters generated Knip findings before dead-code counts", () => {
+		const dir = makeProject({
+			"package.json": "{}",
+			"src/app.ts": "export const app = 1;\n",
+		});
+		const binDir = join(dir, "bin");
+		mkdirSync(binDir, { recursive: true });
+		const fakeNpx = join(binDir, "npx");
+		writeFileSync(
+			fakeNpx,
+			`#!/bin/sh
+cat <<'JSON'
+{"issues":[{"file":".claude/worktrees/agent-a/src/generated.ts","files":[{"name":".claude/worktrees/agent-a/src/generated.ts"}]},{"file":"src/dead.ts","files":[{"name":"src/dead.ts"}]}]}
+JSON
+`,
+		);
+		chmodSync(fakeNpx, 0o755);
+		const oldPath = process.env.PATH;
+		process.env.PATH = `${binDir}:${oldPath ?? ""}`;
+		try {
+			const result = runPerformance(dir);
+			const details = result.details as Record<string, any>;
+
+			expect(details.unusedFiles).toBe(1);
+			expect(details.excludedDeadCodeItems).toBe(1);
+			expect(details.deadCode.files).toEqual([expect.objectContaining({ file: "src/dead.ts" })]);
+		} finally {
+			process.env.PATH = oldPath;
+			rmSync(dir, { recursive: true });
+		}
+	});
+
+	it("normalizes Knip findings from package cwd to repo-root paths", () => {
+		const dir = makeProject({
+			"package.json": "{}",
+			"src/app.ts": "export const app = 1;\n",
+			"store/console/package.json": "{}",
+			"store/console/knip.json": '{"entry":["src/index.ts"]}',
+		});
+		const binDir = join(dir, "bin");
+		mkdirSync(binDir, { recursive: true });
+		const fakeNpx = join(binDir, "npx");
+		writeFileSync(
+			fakeNpx,
+			`#!/bin/sh
+cat <<'JSON'
+{"issues":[{"file":"src/dead.ts","files":[{"name":"src/dead.ts"}]},{"file":"../../agents/coder/web/src/orphan.ts","files":[{"name":"../../agents/coder/web/src/orphan.ts"}]}]}
+JSON
+`,
+		);
+		chmodSync(fakeNpx, 0o755);
+		const oldPath = process.env.PATH;
+		process.env.PATH = `${binDir}:${oldPath ?? ""}`;
+		try {
+			const result = runPerformance(dir, {
+				isMonorepo: true,
+				tool: "pnpm",
+				srcRoots: [],
+				packages: [{ name: "console", path: "store/console", hasSrc: true, hasRootCode: false, hasTests: false, hasLinter: false }],
+			});
+			const files = ((result.details as any).deadCode.files as any[]).map((item) => item.file);
+
+			expect(files).toEqual(["store/console/src/dead.ts", "agents/coder/web/src/orphan.ts"]);
+			expect((result.details as any).deadCode.files[0].details).toMatchObject({
+				repoRelativePath: "store/console/src/dead.ts",
+				toolRelativePath: "src/dead.ts",
+				toolCwd: join(dir, "store/console"),
+				pathStatus: "normalized",
+			});
+			expect((result.details as any).deadCode.files[1].details).toMatchObject({
+				repoRelativePath: "agents/coder/web/src/orphan.ts",
+				toolRelativePath: "../../agents/coder/web/src/orphan.ts",
+			});
+		} finally {
+			process.env.PATH = oldPath;
+			rmSync(dir, { recursive: true });
+		}
+	});
+
+	it("uses FileInventory through scan and omits generated source outputs", async () => {
+		const dir = makeProject({
+			"package.json": "{}",
+			"src/app.ts": "export const app = 1;\n",
+			"dist/index.ts": [
+				"export { a } from './a';",
+				"export { b } from './b';",
+				"export { c } from './c';",
+				"export { d } from './d';",
+			].join("\n"),
+			"dist/a.ts": "export const a = 1;\n",
+			"dist/b.ts": "export const b = 1;\n",
+			"dist/c.ts": "export const c = 1;\n",
+			"dist/d.ts": "export const d = 1;\n",
+		});
+
+		const report = await scan(dir, { skipTests: true, checks: ["performance"] });
+		const result = report.checks[0]!;
+
+		expect(result.details).toMatchObject({ source: "file-inventory", filesScanned: 1 });
+		expect(result.issues.some((issue) => issue.rule === "barrel-import" && issue.file?.startsWith("dist/"))).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("uses FileInventory directly and skips generated source and CSS outputs", () => {
+		const dir = makeProject({
+			"package.json": "{}",
+			"src/app.ts": "export const app = 1;\n",
+			"src/app.css": ".app { display: block; }\n",
+			"dist/index.ts": [
+				"export { a } from './a';",
+				"export { b } from './b';",
+				"export { c } from './c';",
+				"export { d } from './d';",
+			].join("\n"),
+			"dist/a.ts": "export const a = 1;\n",
+			"dist/b.ts": "export const b = 1;\n",
+			"dist/c.ts": "export const c = 1;\n",
+			"dist/d.ts": "export const d = 1;\n",
+			"dist/app.css": ".dist { width: 960px !important; }\n",
+			".claude/worktrees/agent-a/src/index.ts": [
+				"export { a } from './a';",
+				"export { b } from './b';",
+				"export { c } from './c';",
+				"export { d } from './d';",
+			].join("\n"),
+			".claude/worktrees/agent-a/src/app.css": ".agent { width: 960px !important; }\n",
+		});
+		const result = runPerformance(dir, undefined, makeInventory(dir));
+
+		expect(result.details).toMatchObject({ source: "file-inventory", filesScanned: 1 });
+		expect(result.issues.some((issue) => issue.file?.startsWith("dist/") || issue.file?.includes(".claude/worktrees"))).toBe(false);
+		expect(result.issues.some((issue) => issue.rule === "barrel-import" || issue.rule === "css-important")).toBe(false);
 		rmSync(dir, { recursive: true });
 	});
 });
@@ -156,5 +299,33 @@ describe("knipRoots — run knip where its config lives", () => {
 		const dir = makeProject({ "package.json": '{"knip":{"entry":["a.ts"]}}' });
 		expect(hasKnipConfig(dir)).toBe(true);
 		rmSync(dir, { recursive: true });
+	});
+});
+
+describe("deadCodeCheckFromPerformance", () => {
+	it("gates unconfigured Knip as low-confidence instead of a hard F", () => {
+		const result = deadCodeCheckFromPerformance({
+			name: "performance",
+			score: 85,
+			grade: "B",
+			details: {
+				deadCodeTool: "knip",
+				deadCodeConfigured: false,
+				deadCodeConfidence: "low",
+				unusedFiles: 20,
+				unusedDeps: 1,
+				deadExports: 100,
+				deadCode: { files: [], exports: [], types: [], deps: [] },
+			},
+			issues: [
+				{ severity: "info", rule: "dead-code-config-missing", message: "Knip is not configured" },
+				{ severity: "info", rule: "dead-files", message: "20 unused files detected by Knip" },
+			],
+			duration: 1,
+		});
+
+		expect(result.score).toBeGreaterThanOrEqual(60);
+		expect((result.details as Record<string, unknown>).deadCodeConfidence).toBe("low");
+		expect(result.issues.every((i) => i.severity !== "error")).toBe(true);
 	});
 });

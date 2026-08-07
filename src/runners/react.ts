@@ -3,9 +3,12 @@
  *  This runner catches patterns beyond what the plugin covers. */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { getProductionFiles, readDeps } from "../fs-utils.js";
-import type { CheckResult, Issue } from "../types.js";
+import { isAbsolute, join } from "node:path";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
+import type { SourceFile } from "../fs-utils.js";
+import { collectAllFiles, getProductionFiles, normalizeToolPath, readDeps } from "../fs-utils.js";
+import type { CheckResult, Issue, ProjectContext, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
 
@@ -41,6 +44,8 @@ const RULE_CATEGORY: Record<string, ReactCategoryId> = {
 	"missing-key": "rendering",
 	"index-key": "rendering",
 	"prop-spreading": "component-structure",
+	"react-dangerous-html": "rendering",
+	"react-dangerous-html-sanitized": "rendering",
 	"inline-handlers": "component-structure",
 	"direct-dom": "component-structure",
 	"prefer-tailwind": "component-structure",
@@ -149,12 +154,6 @@ function detectReactLintConfig(cwd: string, deps: Record<string, string>) {
 	};
 }
 
-function relFromCwd(filePath: string, cwd: string): string {
-	if (filePath.startsWith(`${cwd}/`)) return filePath.slice(cwd.length + 1);
-	if (filePath.startsWith(`/private${cwd}/`)) return filePath.slice(`/private${cwd}`.length + 1);
-	return filePath;
-}
-
 function isReactLintRule(rule: unknown): rule is string {
 	if (typeof rule !== "string") return false;
 	return (
@@ -168,7 +167,25 @@ function isReactLintRule(rule: unknown): rule is string {
 	);
 }
 
-export function parseReactEslintIssues(stdout: string, cwd: string): Issue[] | null {
+function pathMetadata(repoCwd: string, toolCwd: string, rawPath: string): { file?: string; details: Record<string, string> } {
+	const repoRelativePath = normalizeToolPath(repoCwd, toolCwd, rawPath);
+	const outsideRepo = repoRelativePath.startsWith("../") || repoRelativePath === ".." || isAbsolute(repoRelativePath);
+	return {
+		file: outsideRepo ? undefined : repoRelativePath,
+		details: {
+			...(outsideRepo ? {} : { repoRelativePath }),
+			toolRelativePath: rawPath,
+			toolCwd,
+			pathStatus: outsideRepo ? "outside-repo" : "normalized",
+		},
+	};
+}
+
+function withPathDetails(issue: Issue, details: Record<string, string>): Issue {
+	return { ...issue, details } as Issue;
+}
+
+export function parseReactEslintIssues(stdout: string, toolCwd: string, repoCwd = toolCwd): Issue[] | null {
 	let files: unknown;
 	try {
 		files = JSON.parse(stdout);
@@ -180,23 +197,34 @@ export function parseReactEslintIssues(stdout: string, cwd: string): Issue[] | n
 	for (const file of files as Array<Record<string, any>>) {
 		for (const msg of file.messages || []) {
 			if (!isReactLintRule(msg.ruleId)) continue;
-			issues.push({
-				severity: msg.severity === 2 ? "error" : msg.severity === 1 ? "warning" : "info",
-				message: msg.message || "React lint issue",
-				file: typeof file.filePath === "string" ? relFromCwd(file.filePath, cwd) : undefined,
-				line: typeof msg.line === "number" ? msg.line : undefined,
-				rule: msg.ruleId,
-			});
+			const path = typeof file.filePath === "string" ? pathMetadata(repoCwd, toolCwd, file.filePath) : undefined;
+			issues.push(
+				withPathDetails(
+					{
+						severity: msg.severity === 2 ? "error" : msg.severity === 1 ? "warning" : "info",
+						message: msg.message || "React lint issue",
+						file: path?.file,
+						line: typeof msg.line === "number" ? msg.line : undefined,
+						rule: msg.ruleId,
+					},
+					path?.details ?? { toolCwd, pathStatus: "missing-path" },
+				),
+			);
 		}
 	}
 	return issues;
 }
 
-function runReactEslint(cwd: string, enabled: boolean): { issues: Issue[]; ran: boolean; parsed: boolean } {
+function runReactEslint(
+	cwd: string,
+	enabled: boolean,
+	context: { projectId?: string; projectPath?: string } = {},
+	repoCwd = cwd,
+): { issues: Issue[]; ran: boolean; parsed: boolean } {
 	if (!enabled) return { issues: [], ran: false, parsed: false };
 	const target = existsSync(join(cwd, "src")) ? "src" : ".";
-	const { stdout } = run(`npx eslint ${target} --format json 2>/dev/null || true`, cwd, 60_000);
-	const parsed = parseReactEslintIssues(stdout, cwd);
+	const { stdout } = run(`npx eslint ${target} --format json 2>/dev/null || true`, cwd, 60_000, context);
+	const parsed = parseReactEslintIssues(stdout, cwd, repoCwd);
 	return { issues: parsed ?? [], ran: true, parsed: parsed !== null };
 }
 
@@ -221,32 +249,249 @@ function mapCallbackReturnsJsx(after: string, lines: string[], i: number): boole
 	return false;
 }
 
-export function runReact(cwd: string): CheckResult {
+function replaceExceptNewlines(value: string, replacement = " "): string {
+	return value.replace(/[^\n]/g, replacement);
+}
+
+function maskCommentsAndNonMarkupTemplates(content: string): string {
+	return content
+		.replace(/\{\/\*[\s\S]*?\*\/\}/g, (match) => replaceExceptNewlines(match))
+		.replace(/\/\*[\s\S]*?\*\//g, (match) => replaceExceptNewlines(match))
+		.replace(/(^|[^:])\/\/.*$/gm, (match, prefix: string) => `${prefix}${replaceExceptNewlines(match.slice(prefix.length))}`)
+		.replace(/`(?:\\[\s\S]|\$\{[\s\S]*?\}|[^`\\])*`/g, (match) => {
+			const hasMarkup = /<\/?[A-Za-z][\w:-]*(?:\s|>|\/)/.test(match);
+			return hasMarkup ? match : replaceExceptNewlines(match);
+		});
+}
+
+type SafeHtmlSourceKind = "html-sanitizer" | "markdown-renderer" | "terminal-renderer" | "trusted-types" | "inline-suppression";
+
+interface SafeHtmlBoundary {
+	name: string;
+	sourceKind: SafeHtmlSourceKind;
+	evidence: "direct-call" | "assigned-value" | "trusted-type" | "security-suppression";
+}
+
+interface DangerousHtmlContext {
+	file: string;
+	line: number;
+	expression: string;
+	classification: "raw" | "sanitized-tested" | "sanitized-untested";
+	sanitizer?: string;
+	sourceKind?: SafeHtmlSourceKind;
+	evidence?: SafeHtmlBoundary["evidence"];
+	tested?: boolean;
+}
+
+const SAFE_HTML_BOUNDARIES: Array<{ name: string; sourceKind: SafeHtmlSourceKind; aliases?: string[] }> = [
+	{ name: "DOMPurify.sanitize", sourceKind: "html-sanitizer", aliases: ["DOMPurify"] },
+	{ name: "sanitizeHtml", sourceKind: "html-sanitizer", aliases: ["sanitize-html"] },
+	{ name: "sanitizeHTML", sourceKind: "html-sanitizer" },
+	{ name: "sanitize", sourceKind: "html-sanitizer" },
+	{ name: "escapeHtml", sourceKind: "html-sanitizer" },
+	{ name: "escapeHTML", sourceKind: "html-sanitizer" },
+	{ name: "renderMd", sourceKind: "markdown-renderer", aliases: ["renderMarkdown"] },
+	{ name: "renderMarkdown", sourceKind: "markdown-renderer", aliases: ["renderMd"] },
+	{ name: "renderTerminal", sourceKind: "terminal-renderer" },
+	{ name: "toTrustedHTML", sourceKind: "trusted-types", aliases: ["TrustedHTML"] },
+	{ name: "createTrustedHTML", sourceKind: "trusted-types", aliases: ["TrustedHTML"] },
+];
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function boundaryCallPattern(boundary: { name: string }): RegExp {
+	return new RegExp(`(?:^|[^\\w$])${escapeRegExp(boundary.name)}\\s*\\(`);
+}
+
+function safeHtmlBoundaryFromText(text: string): SafeHtmlBoundary | undefined {
+	for (const boundary of SAFE_HTML_BOUNDARIES) {
+		if (boundaryCallPattern(boundary).test(text)) {
+			return { name: boundary.name, sourceKind: boundary.sourceKind, evidence: "direct-call" };
+		}
+	}
+	return undefined;
+}
+
+function classifySafeHtmlExpression(expr: string, content: string, lineIndex: number, lines: string[]): SafeHtmlBoundary | undefined {
+	const direct = safeHtmlBoundaryFromText(expr);
+	if (direct) return direct;
+	if (/\bas\s+TrustedHTML\b|\bTrustedHTML\b/.test(expr)) {
+		return { name: "TrustedHTML", sourceKind: "trusted-types", evidence: "trusted-type" };
+	}
+
+	const identifier = expr.trim().match(/^[A-Za-z_$][\w$]*$/)?.[0];
+	if (identifier) {
+		const assignment = content.match(new RegExp(`\\b(?:const|let|var)\\s+${escapeRegExp(identifier)}\\s*=\\s*([^;\\n]+)`));
+		const boundary = assignment?.[1] ? safeHtmlBoundaryFromText(assignment[1]) : undefined;
+		if (boundary) return { ...boundary, evidence: "assigned-value" };
+	}
+
+	const preceding = lines.slice(Math.max(0, lineIndex - 3), lineIndex).join("\n");
+	if (/biome-ignore\s+lint\/security\/noDangerouslySetInnerHtml/i.test(preceding)) {
+		const namedBoundary = SAFE_HTML_BOUNDARIES.find((boundary) => {
+			const names = [boundary.name, ...(boundary.aliases ?? [])];
+			return names.some((name) => new RegExp(`\\b${escapeRegExp(name)}\\b`, "i").test(preceding));
+		});
+		if (namedBoundary) {
+			return { name: namedBoundary.name, sourceKind: namedBoundary.sourceKind, evidence: "security-suppression" };
+		}
+		if (/\b(?:sanitize|escape|trusted)\b/i.test(preceding)) {
+			return { name: "security suppression", sourceKind: "inline-suppression", evidence: "security-suppression" };
+		}
+	}
+
+	return undefined;
+}
+
+function sanitizerHasTestCoverage(boundary: SafeHtmlBoundary, testFiles: SourceFile[]): boolean {
+	if (boundary.sourceKind === "trusted-types") return true;
+	const configured = SAFE_HTML_BOUNDARIES.find((item) => item.name === boundary.name);
+	const names = [boundary.name, ...(configured?.aliases ?? [])]
+		.map((name) => name.split(".").at(-1) ?? name)
+		.filter((name) => name && name !== "security suppression");
+	if (names.length === 0) return false;
+	return testFiles.some((file) => names.some((name) => file.content.includes(name)));
+}
+
+function dangerousHtmlExpression(line: string): string | undefined {
+	return line.match(/dangerouslySetInnerHTML\s*=\s*\{\s*\{\s*__html\s*:\s*([^}]+?)\s*\}\s*\}/)?.[1]?.trim();
+}
+
+function reactProjects(workspace?: WorkspaceInfo): ProjectContext[] | null {
+	if (!workspace?.projects) return null;
+	return workspace.projects.filter((project) => project.stack.framework === "react");
+}
+
+function cleanProjectPath(projectPath: string): string {
+	const clean = projectPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+	return clean || ".";
+}
+
+function projectContainsPath(projectPath: string, filePath: string): boolean {
+	const clean = cleanProjectPath(projectPath);
+	return clean === "." || filePath === clean || filePath.startsWith(`${clean}/`);
+}
+
+function projectSourceRoots(projects: ProjectContext[]): string[] {
+	const roots = new Set<string>();
+	for (const project of projects) {
+		if (project.srcRoots.length === 0) {
+			roots.add(project.path);
+			continue;
+		}
+		for (const root of project.srcRoots) roots.add(root);
+	}
+	return [...roots];
+}
+
+function mergedReactDeps(cwd: string, projects: ProjectContext[] | null): Record<string, string> {
+	const deps = { ...readDeps(cwd) };
+	for (const project of projects ?? []) {
+		if (project.path === ".") continue;
+		Object.assign(deps, readDeps(join(cwd, project.path)));
+	}
+	return deps;
+}
+
+function runProjectReactEslint(
+	cwd: string,
+	projects: ProjectContext[] | null,
+): { issues: Issue[]; ran: boolean; parsed: boolean; byProject: Array<Record<string, unknown>> } {
+	if (!projects) {
+		const deps = readDeps(cwd);
+		const config = detectReactLintConfig(cwd, deps);
+		const lint = runReactEslint(cwd, config.anyConfigured);
+		return { ...lint, byProject: [] };
+	}
+
+	const issues: Issue[] = [];
+	const byProject: Array<Record<string, unknown>> = [];
+	let ran = false;
+	let parsed = false;
+	for (const project of projects) {
+		const projectDir = project.path === "." ? cwd : join(cwd, project.path);
+		const deps = { ...readDeps(cwd), ...readDeps(projectDir) };
+		const config = detectReactLintConfig(projectDir, deps);
+		const lint = runReactEslint(projectDir, config.anyConfigured, { projectId: project.id, projectPath: project.path }, cwd);
+		ran = ran || lint.ran;
+		parsed = parsed || lint.parsed;
+		issues.push(...lint.issues);
+		byProject.push({
+			id: project.id,
+			name: project.name,
+			path: project.path,
+			lintConfigured: config.anyConfigured,
+			lintRan: lint.ran,
+			lintParsed: lint.parsed,
+			lintIssues: lint.issues.length,
+		});
+	}
+	return { issues, ran, parsed, byProject };
+}
+
+function aggregateReactLintConfig(cwd: string, deps: Record<string, string>, projects: ProjectContext[] | null) {
+	const configs = projects
+		? projects.map((project) => {
+				const projectDir = project.path === "." ? cwd : join(cwd, project.path);
+				const projectDeps = { ...readDeps(cwd), ...readDeps(projectDir) };
+				return detectReactLintConfig(projectDir, projectDeps);
+			})
+		: [detectReactLintConfig(cwd, deps)];
+	return {
+		hooksConfigured: configs.some((config) => config.hooksConfigured),
+		reactConfigured: configs.some((config) => config.reactConfigured),
+		refreshConfigured: configs.some((config) => config.refreshConfigured),
+		jsxA11yConfigured: configs.some((config) => config.jsxA11yConfigured),
+		eslintReactConfigured: configs.some((config) => config.eslintReactConfigured),
+		anyConfigured: configs.some((config) => config.anyConfigured),
+	};
+}
+
+export function runReact(cwd: string, workspace?: WorkspaceInfo, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 
 	// Stack gating is central (core.ts, via CheckMeta.appliesTo) — no framework check here.
-	const allFiles = getProductionFiles(cwd);
+	const scopedProjects = reactProjects(workspace);
+	if (scopedProjects?.length === 0) {
+		return {
+			name: "react",
+			score: 100,
+			grade: "A",
+			details: { skipped: true, reason: "no React projects detected", projects: [] },
+			issues: [],
+			duration: Date.now() - start,
+		};
+	}
+	const allFiles = (
+		inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd, scopedProjects ? projectSourceRoots(scopedProjects) : undefined)
+	).filter((file) => !scopedProjects || scopedProjects.some((project) => projectContainsPath(project.path, file.path)));
 	const files = allFiles.filter((f) => f.ext === ".tsx" || f.ext === ".jsx");
 	if (files.length === 0) {
 		return {
 			name: "react",
 			score: 100,
 			grade: "A",
-			details: { skipped: true, reason: "no JSX/TSX files" },
+			details: {
+				skipped: true,
+				reason: "no JSX/TSX files",
+				projects: scopedProjects?.map((project) => ({ id: project.id, name: project.name, path: project.path })),
+			},
 			issues: [],
 			duration: Date.now() - start,
 		};
 	}
 
 	const issues: Issue[] = [];
-	const deps = readDeps(cwd);
+	const deps = mergedReactDeps(cwd, scopedProjects);
 	const hasHooksPlugin = !!deps["eslint-plugin-react-hooks"];
 	const hasReactPlugin = !!deps["eslint-plugin-react"];
 	const hasReactRefreshPlugin = !!deps["eslint-plugin-react-refresh"];
 	const hasJsxA11yPlugin = !!deps["eslint-plugin-jsx-a11y"];
 	const hasEslintReactPlugin = !!(deps["@eslint-react/eslint-plugin"] || deps["eslint-plugin-react-x"] || deps["eslint-plugin-react-dom"]);
-	const reactLintConfig = detectReactLintConfig(cwd, deps);
-	const reactLint = runReactEslint(cwd, reactLintConfig.anyConfigured);
+	const reactLintConfig = aggregateReactLintConfig(cwd, deps, scopedProjects);
+	const reactLint = runProjectReactEslint(cwd, scopedProjects);
 	issues.push(...reactLint.issues);
 	const hooksCoveredByLint = reactLint.parsed && reactLintConfig.hooksConfigured;
 	const jsxKeyCoveredByLint = reactLint.parsed && reactLintConfig.reactConfigured;
@@ -256,9 +501,15 @@ export function runReact(cwd: string): CheckResult {
 	let propSpreading = 0;
 	let inlineHandlers = 0;
 	let indexKeys = 0;
+	let rawDangerousHtml = 0;
+	let sanitizedDangerousHtml = 0;
+	let sanitizedDangerousHtmlWithoutTests = 0;
+	const dangerousHtmlContexts: DangerousHtmlContext[] = [];
+	const testFiles = collectAllFiles(cwd).filter((file) => file.isTest);
 
 	for (const f of files) {
-		const lines = f.content.split("\n");
+		const scanContent = maskCommentsAndNonMarkupTemplates(f.content);
+		const lines = scanContent.split("\n");
 
 		// Track brace depth inside conditional blocks
 		let condBraceDepth = 0; // > 0 means we're inside a conditional's body
@@ -336,13 +587,59 @@ export function runReact(cwd: string): CheckResult {
 			if (/on[A-Z]\w*=\{(?:\(\) =>|function)/.test(trimmed)) {
 				inlineHandlers++;
 			}
+
+			const htmlExpr = dangerousHtmlExpression(trimmed);
+			if (htmlExpr) {
+				const boundary = classifySafeHtmlExpression(htmlExpr, scanContent, i, lines);
+				if (boundary) {
+					sanitizedDangerousHtml++;
+					const tested = sanitizerHasTestCoverage(boundary, testFiles);
+					if (!tested) sanitizedDangerousHtmlWithoutTests++;
+					dangerousHtmlContexts.push({
+						file: f.path,
+						line: i + 1,
+						expression: htmlExpr,
+						classification: tested ? "sanitized-tested" : "sanitized-untested",
+						sanitizer: boundary.name,
+						sourceKind: boundary.sourceKind,
+						evidence: boundary.evidence,
+						tested,
+					});
+					issues.push({
+						severity: tested ? "info" : "warning",
+						message: tested
+							? `React raw HTML sink is fed by tested ${boundary.name} ${boundary.sourceKind} boundary`
+							: `React raw HTML sink is fed by ${boundary.name} ${boundary.sourceKind} boundary, but no matching sanitizer tests were found`,
+						file: f.path,
+						line: i + 1,
+						rule: "react-dangerous-html-sanitized",
+						snippet: htmlExpr,
+					});
+				} else {
+					rawDangerousHtml++;
+					dangerousHtmlContexts.push({
+						file: f.path,
+						line: i + 1,
+						expression: htmlExpr,
+						classification: "raw",
+					});
+					issues.push({
+						severity: "warning",
+						message: "React raw HTML sink without a recognized sanitizer boundary",
+						file: f.path,
+						line: i + 1,
+						rule: "react-dangerous-html",
+						snippet: htmlExpr,
+					});
+				}
+			}
 		}
 	}
 
 	// 6. useEffect with missing/empty dependency array
 	let effectNoDeps = 0;
 	for (const f of files) {
-		const lines = f.content.split("\n");
+		const lines = maskCommentsAndNonMarkupTemplates(f.content).split("\n");
 		for (let i = 0; i < lines.length; i++) {
 			const trimmed = lines[i].trim();
 			// useEffect(() => { ... }) without second argument
@@ -368,7 +665,7 @@ export function runReact(cwd: string): CheckResult {
 	// 7. Direct DOM manipulation in React components
 	let domManipulation = 0;
 	for (const f of files) {
-		const lines = f.content.split("\n");
+		const lines = maskCommentsAndNonMarkupTemplates(f.content).split("\n");
 		for (let i = 0; i < lines.length; i++) {
 			const trimmed = lines[i].trim();
 			if (/document\.(?:getElementById|querySelector|getElementsBy)\s*\(/.test(trimmed)) {
@@ -432,6 +729,7 @@ export function runReact(cwd: string): CheckResult {
 		grade: gradeFromScore(score),
 		details: {
 			jsxFiles: files.length,
+			source: inventory ? "file-inventory" : "legacy-walk",
 			conditionalHooks,
 			missingKeys,
 			indexKeys,
@@ -439,6 +737,11 @@ export function runReact(cwd: string): CheckResult {
 			inlineHandlers,
 			effectNoDeps,
 			domManipulation,
+			rawDangerousHtml,
+			sanitizedDangerousHtml,
+			sanitizedDangerousHtmlWithoutTests,
+			dangerousHtmlContexts,
+			safeHtmlBoundaries: SAFE_HTML_BOUNDARIES.map((boundary) => ({ name: boundary.name, sourceKind: boundary.sourceKind })),
 			hasErrorBoundary,
 			inlineStyles,
 			categories,
@@ -450,6 +753,13 @@ export function runReact(cwd: string): CheckResult {
 				{ id: "indexKeys", label: "Index keys", value: indexKeys },
 				{ id: "effectNoDeps", label: "Effects without deps", value: effectNoDeps },
 				{ id: "domManipulation", label: "Direct DOM queries", value: domManipulation },
+				{ id: "rawDangerousHtml", label: "Raw HTML sinks", value: rawDangerousHtml },
+				{ id: "sanitizedDangerousHtml", label: "Sanitized HTML sinks", value: sanitizedDangerousHtml },
+				{
+					id: "sanitizedDangerousHtmlWithoutTests",
+					label: "Sanitized HTML sinks without tests",
+					value: sanitizedDangerousHtmlWithoutTests,
+				},
 			],
 			tooling: {
 				eslintPluginReactHooks: hasHooksPlugin,
@@ -465,6 +775,14 @@ export function runReact(cwd: string): CheckResult {
 				jsxKeyCoveredByLint,
 				effectsCoveredByLint,
 			},
+			projects: scopedProjects?.map((project) => ({
+				id: project.id,
+				name: project.name,
+				path: project.path,
+				jsxFiles: files.filter((file) => projectContainsPath(project.path, file.path)).length,
+				issues: issues.filter((issue) => issue.file && projectContainsPath(project.path, issue.file)).length,
+				tooling: reactLint.byProject.find((entry) => entry.id === project.id),
+			})),
 			suggestion: !hasHooksPlugin
 				? "Install eslint-plugin-react-hooks for deeper React analysis: pnpm add -D eslint-plugin-react-hooks"
 				: undefined,

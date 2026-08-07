@@ -2,12 +2,14 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
 
-export function runGitHygiene(cwd: string): CheckResult {
+export function runGitHygiene(cwd: string, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 
@@ -23,7 +25,7 @@ export function runGitHygiene(cwd: string): CheckResult {
 	}
 
 	// 1. Check for merge conflict markers in source files
-	const files = getProductionFiles(cwd);
+	const files = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 	for (const f of files) {
 		const lines = f.content.split("\n");
 		for (let i = 0; i < lines.length; i++) {

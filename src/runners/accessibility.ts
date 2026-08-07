@@ -4,50 +4,358 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getProductionFiles, readDeps } from "../fs-utils.js";
-import type { CheckResult, Issue } from "../types.js";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
+import { getProductionFiles, normalizeToolPath } from "../fs-utils.js";
+import type { CheckResult, Issue, ProjectContext, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
+import { run } from "./exec.js";
+import { depsForProjects, filesForProjects, frontendProjects, projectDetails, projectSourceRoots } from "./project-scope.js";
 
-export function runAccessibility(cwd: string): CheckResult {
+type A11yIssue = Issue & {
+	category?: string;
+	fix?: string;
+	selector?: string;
+	source?: "eslint-plugin-jsx-a11y" | "vcqa-heuristic";
+	wcag?: string;
+};
+
+const VALID_ARIA_ROLES = new Set([
+	"alert",
+	"alertdialog",
+	"application",
+	"article",
+	"banner",
+	"button",
+	"cell",
+	"checkbox",
+	"columnheader",
+	"combobox",
+	"complementary",
+	"contentinfo",
+	"definition",
+	"dialog",
+	"directory",
+	"document",
+	"feed",
+	"figure",
+	"form",
+	"grid",
+	"gridcell",
+	"group",
+	"heading",
+	"img",
+	"link",
+	"list",
+	"listbox",
+	"listitem",
+	"log",
+	"main",
+	"marquee",
+	"math",
+	"menu",
+	"menubar",
+	"menuitem",
+	"menuitemcheckbox",
+	"menuitemradio",
+	"navigation",
+	"none",
+	"note",
+	"option",
+	"presentation",
+	"progressbar",
+	"radio",
+	"radiogroup",
+	"region",
+	"row",
+	"rowgroup",
+	"rowheader",
+	"scrollbar",
+	"search",
+	"searchbox",
+	"separator",
+	"slider",
+	"spinbutton",
+	"status",
+	"switch",
+	"tab",
+	"table",
+	"tablist",
+	"tabpanel",
+	"term",
+	"textbox",
+	"timer",
+	"toolbar",
+	"tooltip",
+	"tree",
+	"treegrid",
+	"treeitem",
+]);
+
+const WCAG_BY_ESLINT_RULE: Record<string, string> = {
+	"jsx-a11y/alt-text": "WCAG 1.1.1",
+	"jsx-a11y/anchor-has-content": "WCAG 2.4.4",
+	"jsx-a11y/aria-activedescendant-has-tabindex": "WCAG 4.1.2",
+	"jsx-a11y/aria-props": "WCAG 4.1.2",
+	"jsx-a11y/aria-proptypes": "WCAG 4.1.2",
+	"jsx-a11y/aria-role": "WCAG 4.1.2",
+	"jsx-a11y/aria-unsupported-elements": "WCAG 4.1.2",
+	"jsx-a11y/click-events-have-key-events": "WCAG 2.1.1",
+	"jsx-a11y/control-has-associated-label": "WCAG 4.1.2",
+	"jsx-a11y/heading-has-content": "WCAG 2.4.6",
+	"jsx-a11y/html-has-lang": "WCAG 3.1.1",
+	"jsx-a11y/interactive-supports-focus": "WCAG 2.1.1",
+	"jsx-a11y/label-has-associated-control": "WCAG 3.3.2",
+	"jsx-a11y/media-has-caption": "WCAG 1.2.2",
+	"jsx-a11y/no-autofocus": "WCAG 2.4.3",
+	"jsx-a11y/no-noninteractive-tabindex": "WCAG 2.4.3",
+	"jsx-a11y/no-redundant-roles": "WCAG 4.1.2",
+	"jsx-a11y/role-has-required-aria-props": "WCAG 4.1.2",
+	"jsx-a11y/role-supports-aria-props": "WCAG 4.1.2",
+	"jsx-a11y/tabindex-no-positive": "WCAG 2.4.3",
+};
+
+function htmlPathsForProjects(projects: ProjectContext[] | null): string[] {
+	const htmlPaths = ["index.html", "web/index.html", "public/index.html", "src/index.html"];
+	if (!projects) return htmlPaths;
+	return projects.flatMap((project) => {
+		if (project.path === ".") return htmlPaths;
+		return htmlPaths.map((path) => `${project.path}/${path}`);
+	});
+}
+
+function issue(input: A11yIssue): Issue {
+	return input;
+}
+
+function selectorForTag(tag: string): string | undefined {
+	return tag.match(/^<([A-Za-z][\w:-]*)/)?.[1]?.toLowerCase();
+}
+
+function openingTag(lines: string[], start: number, maxLines = 8): string {
+	let tag = lines[start]?.trim() ?? "";
+	for (let i = start + 1; i < Math.min(lines.length, start + maxLines) && !tag.includes(">"); i++) {
+		tag += ` ${lines[i].trim()}`;
+	}
+	return tag;
+}
+
+function elementBlock(lines: string[], start: number, closingTag: string, maxLines = 12): string {
+	let block = "";
+	for (let i = start; i < Math.min(lines.length, start + maxLines); i++) {
+		block += `${lines[i]} `;
+		if (lines[i].includes(closingTag)) break;
+	}
+	return block;
+}
+
+function hasExplicitName(text: string): boolean {
+	return /\b(?:aria-label|aria-labelledby|title)=/.test(text);
+}
+
+function hasVisibleTextInElement(block: string, tagName: string): boolean {
+	const match = block.match(new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "i"));
+	if (!match?.[1]) return false;
+	const text = match[1]
+		.replace(/\{[^}]*}/g, " ")
+		.replace(/<[^>]*>/g, " ")
+		.replace(/&nbsp;/g, " ")
+		.trim();
+	return /[\p{L}\p{N}]/u.test(text);
+}
+
+function staticIdValues(source: string): string[] {
+	return [...source.matchAll(/\bid=["']([^"']+)["']/g)].map((match) => match[1]).filter((value): value is string => !!value);
+}
+
+function idRefs(value: string): string[] {
+	return value
+		.split(/\s+/)
+		.map((ref) => ref.trim())
+		.filter(Boolean);
+}
+
+function hasAssociatedLabel(source: string, tag: string, surroundingBlock: string): boolean {
+	if (hasExplicitName(tag) || hasExplicitName(surroundingBlock)) return true;
+	if (/<label\b/i.test(surroundingBlock)) return true;
+	const id = tag.match(/\bid=["']([^"']+)["']/)?.[1];
+	return !!id && new RegExp(`<label\\b[^>]*(?:htmlFor|for)=["']${escapeRegExp(id)}["']`, "i").test(source);
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasLandmark(source: string): boolean {
+	return (
+		/<(?:main|nav|header|footer|aside)\b/i.test(source) ||
+		/\brole=["'](?:main|navigation|banner|contentinfo|complementary|search)["']/i.test(source)
+	);
+}
+
+function isReactViteApp(projects: ProjectContext[] | null, deps: Record<string, string>): boolean {
+	if (projects) return projects.some((project) => project.stack.framework === "react" && project.stack.bundler === "vite");
+	return !!deps.react && !!deps.vite;
+}
+
+function eslintConfigMentionsJsxA11y(cwd: string, projects: ProjectContext[] | null): boolean {
+	const configNames = [
+		"eslint.config.js",
+		"eslint.config.ts",
+		"eslint.config.mjs",
+		"eslint.config.cjs",
+		".eslintrc",
+		".eslintrc.json",
+		".eslintrc.js",
+		".eslintrc.cjs",
+		".eslintrc.yml",
+		".eslintrc.yaml",
+	];
+	for (const project of projects ?? [{ path: "." }]) {
+		const base = project.path === "." ? cwd : join(cwd, project.path);
+		for (const name of configNames) {
+			try {
+				if (readFileSync(join(base, name), "utf-8").includes("jsx-a11y")) return true;
+			} catch {
+				/* config absent */
+			}
+		}
+	}
+	return false;
+}
+
+function eslintBinary(cwd: string, projects: ProjectContext[] | null): { bin: string; cwd: string; project?: ProjectContext } | null {
+	for (const project of projects ?? [{ path: "." as const }]) {
+		const base = project.path === "." ? cwd : join(cwd, project.path);
+		const localBin = join(base, "node_modules", ".bin", "eslint");
+		if (existsSync(localBin)) return { bin: localBin, cwd: base, project: "id" in project ? project : undefined };
+	}
+	const rootBin = join(cwd, "node_modules", ".bin", "eslint");
+	return existsSync(rootBin) ? { bin: rootBin, cwd, project: undefined } : null;
+}
+
+function parseJsxA11yEslint(stdout: string, repoCwd: string, toolCwd: string): Issue[] {
+	const issues: Issue[] = [];
+	try {
+		const files = JSON.parse(stdout);
+		for (const file of files) {
+			for (const msg of file.messages || []) {
+				if (typeof msg.ruleId !== "string" || !msg.ruleId.startsWith("jsx-a11y/")) continue;
+				const filePath = typeof file.filePath === "string" ? normalizeToolPath(repoCwd, toolCwd, file.filePath) : undefined;
+				issues.push(
+					issue({
+						severity: msg.severity === 2 ? "error" : "warning",
+						message: msg.message,
+						file: filePath,
+						line: msg.line,
+						rule: msg.ruleId,
+						category: "Accessibility",
+						fix: "Apply the eslint-plugin-jsx-a11y rule guidance for this component.",
+						source: "eslint-plugin-jsx-a11y",
+						wcag: WCAG_BY_ESLINT_RULE[msg.ruleId],
+					}),
+				);
+			}
+		}
+	} catch {
+		/* eslint output parse failed */
+	}
+	return issues;
+}
+
+function runJsxA11yEslint(
+	cwd: string,
+	projects: ProjectContext[] | null,
+): { issues: Issue[]; ran: boolean; configured: boolean; reason?: string } {
+	const configured = eslintConfigMentionsJsxA11y(cwd, projects);
+	const bin = eslintBinary(cwd, projects);
+	if (!configured) return { issues: [], ran: false, configured, reason: "eslint-plugin-jsx-a11y not referenced in ESLint config" };
+	if (!bin) return { issues: [], ran: false, configured, reason: "eslint binary not installed locally" };
+	const { stdout } = run(`"${bin.bin}" . --format json 2>/dev/null || true`, bin.cwd, 60_000, {
+		projectId: bin.project?.id,
+		projectPath: bin.project?.path,
+	});
+	return { issues: parseJsxA11yEslint(stdout, cwd, bin.cwd), ran: true, configured };
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this runner keeps related static accessibility rules in one pass so scoring counters and evidence details stay aligned.
+export function runAccessibility(cwd: string, workspace?: WorkspaceInfo, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
-	const files = getProductionFiles(cwd).filter((f) => f.ext === ".tsx" || f.ext === ".jsx" || f.ext === ".vue" || f.ext === ".svelte");
+	const projects = frontendProjects(workspace);
+	if (workspace?.projects && projects?.length === 0) {
+		return {
+			name: "accessibility",
+			score: 100,
+			grade: "A",
+			details: { skipped: true, reason: "no frontend app projects detected", projects: [] },
+			issues: [],
+			duration: Date.now() - start,
+		};
+	}
+	const files = filesForProjects(
+		inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd, projects ? projectSourceRoots(projects) : undefined),
+		projects,
+	).filter((f) => f.ext === ".tsx" || f.ext === ".jsx" || f.ext === ".vue" || f.ext === ".svelte");
 
 	if (files.length === 0) {
 		return {
 			name: "accessibility",
 			score: 100,
 			grade: "A",
-			details: { skipped: true, reason: "no JSX/TSX/Vue/Svelte files" },
+			details: { skipped: true, reason: "no JSX/TSX/Vue/Svelte files", projects: projectDetails(projects, files) },
 			issues: [],
 			duration: Date.now() - start,
 		};
 	}
 
 	const issues: Issue[] = [];
-	const deps = readDeps(cwd);
-	// If jsx-a11y plugin is installed, most a11y rules are handled by lint runner
+	const deps = depsForProjects(cwd, projects);
 	const hasA11yPlugin = !!deps["eslint-plugin-jsx-a11y"];
-	if (hasA11yPlugin) {
-		return {
-			name: "accessibility",
-			score: 100,
-			grade: "A",
-			details: { skipped: true, reason: "covered by eslint-plugin-jsx-a11y (see lint check)" },
-			issues: [],
-			duration: Date.now() - start,
-		};
-	}
+	const jsxA11y = hasA11yPlugin
+		? runJsxA11yEslint(cwd, projects)
+		: { issues: [], ran: false, configured: false, reason: "dependency absent" };
+	issues.push(...jsxA11y.issues);
 	let missingAlt = 0;
+	let buttonName = 0;
 	let clickDiv = 0;
 	let missingLabel = 0;
 	let missingLang = 0;
 	let autofocus = 0;
 	let positiveTabindex = 0;
+	let invalidAria = 0;
+	let headingOrder = 0;
+	let brokenAriaRefs = 0;
+	const allSource = files.map((f) => f.rawContent || f.content).join("\n");
+	const projectHasLandmark = hasLandmark(allSource);
+	const reactViteApp = isReactViteApp(projects, deps);
 
 	for (const f of files) {
 		// For SFCs, use raw content (includes template) for a11y checks
 		const source = f.rawContent || f.content;
 		const lines = source.split("\n");
+		const idValues = staticIdValues(source);
+		const ids = new Set(idValues);
+		const seenIds = new Map<string, number>();
+		let previousHeading = 0;
+
+		for (const id of idValues) seenIds.set(id, (seenIds.get(id) ?? 0) + 1);
+		for (const [id, count] of seenIds) {
+			if (count > 1) {
+				invalidAria++;
+				issues.push(
+					issue({
+						severity: "warning",
+						message: `Duplicate id "${id}" can break accessible-name references`,
+						file: f.path,
+						rule: "duplicate-id",
+						category: "Accessibility",
+						fix: "Make IDs unique before referencing them from labels or ARIA attributes.",
+						source: "vcqa-heuristic",
+						wcag: "WCAG 4.1.1",
+					}),
+				);
+			}
+		}
 
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];
@@ -56,68 +364,225 @@ export function runAccessibility(cwd: string): CheckResult {
 
 			// 1. <img> without alt
 			if (/<img\b/.test(trimmed) && !/alt=/.test(trimmed)) {
-				const block = lines.slice(i, Math.min(i + 5, lines.length)).join(" ");
+				const block = openingTag(lines, i, 5);
 				if (/<img\b/.test(block) && !/alt=/.test(block)) {
 					missingAlt++;
-					issues.push({ severity: "error", message: "<img> missing alt attribute", file: f.path, line: i + 1, rule: "img-alt" });
+					issues.push(
+						issue({
+							severity: "error",
+							message: "<img> missing alt attribute",
+							file: f.path,
+							line: i + 1,
+							rule: "img-alt",
+							category: "Accessibility",
+							fix: 'Add meaningful alt text, or alt="" when the image is decorative.',
+							selector: selectorForTag(block),
+							source: "vcqa-heuristic",
+							wcag: "WCAG 1.1.1",
+						}),
+					);
 				}
 			}
 
-			// 2. Click handler on non-interactive element without role/keyboard
+			// 2. Icon-only button without an accessible name
+			if (/<button\b/.test(trimmed)) {
+				const block = elementBlock(lines, i, "</button>", 12);
+				if (!hasExplicitName(block) && !hasVisibleTextInElement(block, "button")) {
+					buttonName++;
+					issues.push(
+						issue({
+							severity: "error",
+							message: "Icon-only <button> has no accessible name",
+							file: f.path,
+							line: i + 1,
+							rule: "button-name",
+							category: "Accessibility",
+							fix: "Add aria-label, aria-labelledby, title, or visible text that names the button action.",
+							selector: "button",
+							source: "vcqa-heuristic",
+							wcag: "WCAG 4.1.2",
+						}),
+					);
+				}
+			}
+
+			// 3. Click handler on non-interactive element without role/keyboard
 			// React: onClick=, Vue: @click/v-on:click, Svelte: on:click
 			if (/(?:onClick=|@click|v-on:click|on:click)/.test(trimmed) && /<(?:div|span|p|li|section|article|header|footer)\b/.test(trimmed)) {
 				const block = lines.slice(i, Math.min(i + 3, lines.length)).join(" ");
 				if (!(/role=/.test(block) && /(?:onKeyDown|onKeyUp|onKeyPress|tabIndex|@keydown|on:keydown)/.test(block))) {
 					clickDiv++;
-					issues.push({
-						severity: "warning",
-						message: "Click handler on non-interactive element without role + keyboard handler",
-						file: f.path,
-						line: i + 1,
-						rule: "click-events",
-					});
+					issues.push(
+						issue({
+							severity: "warning",
+							message: "Click handler on non-interactive element without role + keyboard handler",
+							file: f.path,
+							line: i + 1,
+							rule: "click-events",
+							category: "Accessibility",
+							fix: "Use a native <button>/<a>, or add an appropriate role, tabIndex, and keyboard handler.",
+							selector: selectorForTag(block),
+							source: "vcqa-heuristic",
+							wcag: "WCAG 2.1.1",
+						}),
+					);
 				}
 			}
 
-			// 3. <input>/<select>/<textarea> without associated label
+			// 4. <input>/<select>/<textarea> without associated label
 			if (/<(?:input|select|textarea)\b/.test(trimmed) && !/type=["'](?:hidden|submit|button|reset)["']/.test(trimmed)) {
+				const tag = openingTag(lines, i, 6);
 				const block = lines.slice(Math.max(0, i - 3), Math.min(i + 3, lines.length)).join(" ");
-				if (!/aria-label=/.test(block) && !/aria-labelledby=/.test(block) && !/<label/.test(block) && !/id=/.test(trimmed)) {
+				if (!hasAssociatedLabel(source, tag, block)) {
 					missingLabel++;
-					issues.push({
-						severity: "warning",
-						message: "Form control without label, aria-label, or aria-labelledby",
-						file: f.path,
-						line: i + 1,
-						rule: "form-label",
-					});
+					issues.push(
+						issue({
+							severity: "warning",
+							message: "Form control without label, aria-label, or aria-labelledby",
+							file: f.path,
+							line: i + 1,
+							rule: "form-label",
+							category: "Accessibility",
+							fix: "Associate the control with a <label>, aria-label, or aria-labelledby.",
+							selector: selectorForTag(tag),
+							source: "vcqa-heuristic",
+							wcag: "WCAG 3.3.2",
+						}),
+					);
 				}
 			}
 
-			// 4. autoFocus
+			// 5. Invalid or suspicious ARIA attributes/roles
+			if (/\baria-lable=|\barialabel=|\bariaLabel=|\barial-label=/i.test(trimmed)) {
+				invalidAria++;
+				issues.push(
+					issue({
+						severity: "error",
+						message: "Suspicious ARIA attribute spelling",
+						file: f.path,
+						line: i + 1,
+						rule: "invalid-aria-attr",
+						category: "Accessibility",
+						fix: "Use valid ARIA attribute names such as aria-label or aria-labelledby.",
+						source: "vcqa-heuristic",
+						wcag: "WCAG 4.1.2",
+					}),
+				);
+			}
+			const role = trimmed.match(/\brole=["']([^"']+)["']/)?.[1];
+			if (role && !VALID_ARIA_ROLES.has(role)) {
+				invalidAria++;
+				issues.push(
+					issue({
+						severity: "error",
+						message: `Unknown ARIA role "${role}"`,
+						file: f.path,
+						line: i + 1,
+						rule: "invalid-aria-role",
+						category: "Accessibility",
+						fix: "Use a valid ARIA role, or prefer the native semantic element.",
+						source: "vcqa-heuristic",
+						wcag: "WCAG 4.1.2",
+					}),
+				);
+			}
+			if (/aria-hidden=["']true["']/.test(trimmed) && /(?:tabIndex=\{?0|tabindex=["']0|onClick=|@click|on:click|href=)/.test(trimmed)) {
+				invalidAria++;
+				issues.push(
+					issue({
+						severity: "error",
+						message: "Focusable or interactive element is hidden from assistive technology",
+						file: f.path,
+						line: i + 1,
+						rule: "aria-hidden-focus",
+						category: "Accessibility",
+						fix: "Remove aria-hidden from focusable content or remove the element from the tab order.",
+						source: "vcqa-heuristic",
+						wcag: "WCAG 4.1.2",
+					}),
+				);
+			}
+			for (const match of trimmed.matchAll(/\baria-labelledby=["']([^"']+)["']/g)) {
+				for (const ref of idRefs(match[1] ?? "")) {
+					if (!ids.has(ref)) {
+						brokenAriaRefs++;
+						issues.push(
+							issue({
+								severity: "warning",
+								message: `aria-labelledby references missing id "${ref}"`,
+								file: f.path,
+								line: i + 1,
+								rule: "broken-aria-reference",
+								category: "Accessibility",
+								fix: "Point aria-labelledby at visible text with a matching id, or use aria-label.",
+								source: "vcqa-heuristic",
+								wcag: "WCAG 4.1.2",
+							}),
+						);
+					}
+				}
+			}
+
+			// 6. Heading order regression when statically visible
+			const heading = trimmed.match(/<h([1-6])\b/i)?.[1];
+			if (heading) {
+				const level = Number.parseInt(heading, 10);
+				if (previousHeading > 0 && level > previousHeading + 1) {
+					headingOrder++;
+					issues.push(
+						issue({
+							severity: "warning",
+							message: `Heading jumps from h${previousHeading} to h${level}`,
+							file: f.path,
+							line: i + 1,
+							rule: "heading-order",
+							category: "Accessibility",
+							fix: "Do not skip heading levels; use CSS for visual size instead of changing semantic order.",
+							selector: `h${level}`,
+							source: "vcqa-heuristic",
+							wcag: "WCAG 2.4.6",
+						}),
+					);
+				}
+				previousHeading = level;
+			}
+
+			// 7. autoFocus
 			if (/\bautoFocus\b/.test(trimmed) || /\bautofocus\b/.test(trimmed)) {
 				autofocus++;
-				issues.push({
-					severity: "warning",
-					message: "autoFocus can disorient screen reader users",
-					file: f.path,
-					line: i + 1,
-					rule: "no-autofocus",
-				});
+				issues.push(
+					issue({
+						severity: "warning",
+						message: "autoFocus can disorient screen reader users",
+						file: f.path,
+						line: i + 1,
+						rule: "no-autofocus",
+						category: "Accessibility",
+						fix: "Move focus intentionally after user action, or announce the context change.",
+						source: "vcqa-heuristic",
+						wcag: "WCAG 2.4.3",
+					}),
+				);
 			}
 
-			// 5. Positive tabIndex
+			// 8. Positive tabIndex
 			if (/tabIndex=\{[1-9]/.test(trimmed) || /tabindex=["'][1-9]/.test(trimmed)) {
 				positiveTabindex++;
-				issues.push({
-					severity: "warning",
-					message: "Positive tabIndex disrupts natural tab order — use 0 or -1",
-					file: f.path,
-					line: i + 1,
-					rule: "tabindex",
-				});
+				issues.push(
+					issue({
+						severity: "warning",
+						message: "Positive tabIndex disrupts natural tab order — use 0 or -1",
+						file: f.path,
+						line: i + 1,
+						rule: "tabindex",
+						category: "Accessibility",
+						fix: "Keep DOM order logical and use tabIndex={0} or {-1} only when needed.",
+						source: "vcqa-heuristic",
+						wcag: "WCAG 2.4.3",
+					}),
+				);
 			}
-			// 6. Vue: v-for without :key (check same element, not next lines)
+			// 9. Vue: v-for without :key (check same element, not next lines)
 			if (/v-for=/.test(trimmed)) {
 				// Collect the full opening tag (may span multiple lines until >)
 				let tag = trimmed;
@@ -125,53 +590,108 @@ export function runAccessibility(cwd: string): CheckResult {
 					tag += ` ${lines[k].trim()}`;
 				}
 				if (!/:key=/.test(tag) && !/v-bind:key=/.test(tag)) {
-					issues.push({
-						severity: "error",
-						message: "v-for without :key — causes rendering bugs when list changes",
-						file: f.path,
-						line: i + 1,
-						rule: "vue-v-for-key",
-					});
+					issues.push(
+						issue({
+							severity: "error",
+							message: "v-for without :key — causes rendering bugs when list changes",
+							file: f.path,
+							line: i + 1,
+							rule: "vue-v-for-key",
+							category: "Accessibility",
+							fix: "Add a stable :key for each repeated item.",
+							source: "vcqa-heuristic",
+						}),
+					);
 				}
 			}
 		}
 	}
 
-	// 7. Check for html lang attribute + viewport + mobile meta in index.html
-	const htmlPaths = ["index.html", "web/index.html", "public/index.html", "src/index.html"];
-	for (const h of htmlPaths) {
+	if (reactViteApp && !projectHasLandmark) {
+		issues.push(
+			issue({
+				severity: "warning",
+				message: 'React/Vite app has no obvious page landmark such as <main> or role="main"',
+				file: files.find((file) => /(?:^|\/)(?:App|main|index)\.(?:tsx|jsx)$/.test(file.path))?.path ?? files[0]?.path,
+				rule: "missing-landmark",
+				category: "Accessibility",
+				fix: "Wrap primary page content in <main>, and use nav/header/footer landmarks where appropriate.",
+				selector: "main",
+				source: "vcqa-heuristic",
+				wcag: "WCAG 1.3.1",
+			}),
+		);
+	}
+
+	// 10. Check for html lang attribute + viewport + mobile meta in index.html
+	for (const h of htmlPathsForProjects(projects)) {
 		const full = join(cwd, h);
 		if (!existsSync(full)) continue;
 		const content = readFileSync(full, "utf-8");
 		if (/<html\b/.test(content) && !/<html[^>]*lang=/.test(content)) {
 			missingLang++;
-			issues.push({ severity: "warning", message: "<html> missing lang attribute", file: h, rule: "html-lang" });
+			issues.push(
+				issue({
+					severity: "warning",
+					message: "<html> missing lang attribute",
+					file: h,
+					rule: "html-lang",
+					category: "Accessibility",
+					fix: 'Add a language tag such as <html lang="en">.',
+					selector: "html",
+					source: "vcqa-heuristic",
+					wcag: "WCAG 3.1.1",
+				}),
+			);
 		}
 		// Mobile viewport
 		if (!/<meta[^>]*name=["']viewport["']/.test(content)) {
-			issues.push({
-				severity: "error",
-				message: 'Missing <meta name="viewport"> — page won\'t scale on mobile',
-				file: h,
-				rule: "missing-viewport",
-			});
+			issues.push(
+				issue({
+					severity: "error",
+					message: 'Missing <meta name="viewport"> — page won\'t scale on mobile',
+					file: h,
+					rule: "missing-viewport",
+					category: "Accessibility",
+					fix: 'Add <meta name="viewport" content="width=device-width, initial-scale=1.0">.',
+					selector: 'meta[name="viewport"]',
+					source: "vcqa-heuristic",
+				}),
+			);
 		}
 		// charset
 		if (!/<meta[^>]*charset=/i.test(content)) {
-			issues.push({ severity: "warning", message: "Missing <meta charset> — may cause encoding issues", file: h, rule: "missing-charset" });
+			issues.push(
+				issue({
+					severity: "warning",
+					message: "Missing <meta charset> — may cause encoding issues",
+					file: h,
+					rule: "missing-charset",
+					category: "Accessibility",
+					fix: 'Add <meta charset="UTF-8"> near the start of <head>.',
+					selector: "meta[charset]",
+					source: "vcqa-heuristic",
+				}),
+			);
 		}
 		// Touch icon for mobile bookmarks
 		if (!/<link[^>]*apple-touch-icon/.test(content) && !/<link[^>]*icon/.test(content)) {
-			issues.push({
-				severity: "info",
-				message: "No favicon or apple-touch-icon — poor mobile bookmark experience",
-				file: h,
-				rule: "missing-icon",
-			});
+			issues.push(
+				issue({
+					severity: "info",
+					message: "No favicon or apple-touch-icon — poor mobile bookmark experience",
+					file: h,
+					rule: "missing-icon",
+					category: "Accessibility",
+					fix: "Add a favicon or apple-touch-icon link so saved shortcuts are recognizable.",
+					selector: 'link[rel~="icon"]',
+					source: "vcqa-heuristic",
+				}),
+			);
 		}
 	}
 
-	// 8. Mobile-unfriendly patterns in components
+	// 11. Mobile-unfriendly patterns in components
 	for (const f of files) {
 		const source = f.rawContent || f.content;
 		const lines = source.split("\n");
@@ -179,43 +699,64 @@ export function runAccessibility(cwd: string): CheckResult {
 			const line = lines[i];
 			// Fixed pixel widths that break on mobile
 			if (/style=.*width:\s*\d{4,}px/.test(line)) {
-				issues.push({
-					severity: "info",
-					message: "Fixed width ≥1000px — likely breaks on mobile",
-					file: f.path,
-					line: i + 1,
-					rule: "fixed-width",
-				});
+				issues.push(
+					issue({
+						severity: "info",
+						message: "Fixed width ≥1000px — likely breaks on mobile",
+						file: f.path,
+						line: i + 1,
+						rule: "fixed-width",
+						category: "Accessibility",
+						fix: "Use responsive sizing with max-width, percentages, or container queries.",
+						source: "vcqa-heuristic",
+					}),
+				);
 			}
 			// Horizontal scroll containers without overflow handling
 			if (/overflow-x:\s*(?:scroll|auto)/.test(line) && !/\btouch\b/.test(line) && !/-webkit-overflow-scrolling/.test(line)) {
-				issues.push({
-					severity: "info",
-					message: "Horizontal scroll without touch-action — poor mobile scroll UX",
-					file: f.path,
-					line: i + 1,
-					rule: "touch-scroll",
-				});
+				issues.push(
+					issue({
+						severity: "info",
+						message: "Horizontal scroll without touch-action — poor mobile scroll UX",
+						file: f.path,
+						line: i + 1,
+						rule: "touch-scroll",
+						category: "Accessibility",
+						fix: "Ensure horizontal scroll regions work with touch and keyboard, with visible overflow affordances.",
+						source: "vcqa-heuristic",
+					}),
+				);
 			}
 			// Hover-only interactions (no touch fallback)
 			if (/onMouseEnter=|@mouseenter|on:mouseenter/.test(line) && !/onClick=|@click|on:click|onTouchStart|@touchstart/.test(line)) {
-				issues.push({
-					severity: "info",
-					message: "Hover-only interaction — unreachable on touch devices",
-					file: f.path,
-					line: i + 1,
-					rule: "hover-only",
-				});
+				issues.push(
+					issue({
+						severity: "info",
+						message: "Hover-only interaction — unreachable on touch devices",
+						file: f.path,
+						line: i + 1,
+						rule: "hover-only",
+						category: "Accessibility",
+						fix: "Provide click, focus, or touch behavior for the same action.",
+						source: "vcqa-heuristic",
+					}),
+				);
 			}
 			// Tiny touch targets
 			if (/(?:width|height):\s*(?:1[0-9]|[1-9])px/.test(line) && /(?:onClick|@click|on:click|button|<a )/.test(line)) {
-				issues.push({
-					severity: "info",
-					message: "Touch target likely <44px — hard to tap on mobile (WCAG 2.5.8)",
-					file: f.path,
-					line: i + 1,
-					rule: "small-touch-target",
-				});
+				issues.push(
+					issue({
+						severity: "info",
+						message: "Touch target likely <44px — hard to tap on mobile (WCAG 2.5.8)",
+						file: f.path,
+						line: i + 1,
+						rule: "small-touch-target",
+						category: "Accessibility",
+						fix: "Make interactive targets at least 44px by 44px, or provide equivalent spacing.",
+						source: "vcqa-heuristic",
+						wcag: "WCAG 2.5.8",
+					}),
+				);
 			}
 		}
 	}
@@ -233,15 +774,32 @@ export function runAccessibility(cwd: string): CheckResult {
 		grade: gradeFromScore(score),
 		details: {
 			jsxFiles: files.length,
+			source: inventory ? "file-inventory" : "legacy-walk",
+			reactViteApp,
+			standardSignals: {
+				"eslint-plugin-jsx-a11y": {
+					installed: hasA11yPlugin,
+					configured: jsxA11y.configured,
+					ran: jsxA11y.ran,
+					issues: jsxA11y.issues.length,
+					reason: jsxA11y.reason,
+				},
+			},
 			missingAlt,
+			buttonName,
 			clickDiv,
 			missingLabel,
 			missingLang,
 			autofocus,
 			positiveTabindex,
-			suggestion: !hasA11yPlugin
-				? "Install eslint-plugin-jsx-a11y for deeper accessibility analysis: pnpm add -D eslint-plugin-jsx-a11y"
-				: undefined,
+			invalidAria,
+			headingOrder,
+			brokenAriaRefs,
+			projects: projectDetails(projects, files),
+			suggestion:
+				!hasA11yPlugin || !jsxA11y.configured
+					? "Install and configure eslint-plugin-jsx-a11y for deeper accessibility analysis: pnpm add -D eslint-plugin-jsx-a11y"
+					: undefined,
 		},
 		issues,
 		duration: Date.now() - start,

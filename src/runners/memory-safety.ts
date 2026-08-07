@@ -1,8 +1,14 @@
-/** Memory safety — detects resource leak patterns in TypeScript/JavaScript. */
+/** Resource lifecycle — detects leak-prone patterns in TypeScript/JavaScript.
+ *
+ * The stable check id remains `memory-safety` for historical compatibility.
+ */
 
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
-import type { CheckResult, Issue } from "../types.js";
+import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
+import { filesForProjects, nonOverlappingProjects, projectContainsPath, projectSourceRoots } from "./project-scope.js";
 
 interface Pattern {
 	name: string;
@@ -57,10 +63,14 @@ const PATTERNS: Pattern[] = [
 	},
 ];
 
-export function runMemorySafety(cwd: string): CheckResult {
+export function runMemorySafety(cwd: string, workspace?: WorkspaceInfo, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
-	const files = getProductionFiles(cwd);
+	const projects = nonOverlappingProjects(workspace);
+	const files = filesForProjects(
+		inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd, projects ? projectSourceRoots(projects) : undefined),
+		projects,
+	);
 
 	for (const f of files) {
 		if (f.isTest) continue;
@@ -117,7 +127,22 @@ export function runMemorySafety(cwd: string): CheckResult {
 		name: "memory-safety",
 		score,
 		grade: gradeFromScore(score),
-		details: { totalFiles, affectedFiles, patterns: issues.length },
+		details: {
+			label: "Resource Lifecycle",
+			legacyId: "memory-safety",
+			semantics: "js-ts-resource-lifecycle",
+			source: inventory ? "file-inventory" : "legacy-walk",
+			totalFiles,
+			affectedFiles,
+			patterns: issues.length,
+			projects: projects?.map((project) => ({
+				id: project.id,
+				name: project.name,
+				path: project.path,
+				files: files.filter((file) => projectContainsPath(project.path, file.path)).length,
+				issues: issues.filter((issue) => issue.file && projectContainsPath(project.path, issue.file)).length,
+			})),
+		},
 		issues,
 		duration: Date.now() - start,
 	};

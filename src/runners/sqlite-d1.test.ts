@@ -2,6 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { detectWorkspace } from "../detect.js";
+import { buildFileInventory } from "../file-inventory.js";
+import { buildEffectiveScanPolicy } from "../scan-policy.js";
 import { runSqliteD1 } from "./sqlite-d1.js";
 
 function makeProject(files: Record<string, string>): string {
@@ -29,6 +32,23 @@ describe("runSqliteD1", () => {
 		rmSync(dir, { recursive: true });
 	});
 
+	it("uses FileInventory for source scanning and skips ignored/generated SQL findings", () => {
+		const dir = makeProject({
+			"src/db.ts": `export async function getUser(env: Env, id: string) {
+  return env.DB.prepare("SELECT id, email FROM users WHERE id = ?").bind(id).first();
+}`,
+			"dist/db.ts": `export const q = (env: Env, name: string) =>
+  env.DB.prepare(\`SELECT id FROM users WHERE name = '\${name}'\`).all();`,
+			".claude/worktrees/agent-a/src/db.ts": `export const q = (env: Env, name: string) =>
+  env.DB.prepare(\`SELECT id FROM users WHERE name = '\${name}'\`).all();`,
+		});
+		const inventory = buildFileInventory(dir, detectWorkspace(dir), buildEffectiveScanPolicy(dir, {}));
+		const result = runSqliteD1(dir, undefined, inventory);
+		expect(result.details).toMatchObject({ source: "file-inventory", queries: 1 });
+		expect(result.issues.some((i) => i.file?.includes(".claude/worktrees") || i.file?.startsWith("dist/"))).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
 	it("flags template-literal interpolation as injection", () => {
 		const dir = makeProject({
 			"src/db.ts": `export async function getUser(env: Env, id: string) {
@@ -48,6 +68,21 @@ describe("runSqliteD1", () => {
 }`,
 		});
 		expect(runSqliteD1(dir).issues.some((i) => i.rule === "sql-concatenation")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("does not flag literal-only SQL string concatenation as injection", () => {
+		const dir = makeProject({
+			"src/db.ts": `export async function get(env: Env, instanceId: string, userId: string) {
+  return env.DB.prepare(
+    "SELECT i.config AS config, a.config AS agent_config FROM agent_instances i" +
+      " LEFT JOIN agents a ON a.id = i.agent_id WHERE i.id = ?1 AND i.user_id = ?2",
+  ).bind(instanceId, userId).first();
+}`,
+		});
+		const r = runSqliteD1(dir);
+		expect(r.issues.some((i) => i.rule === "sql-concatenation")).toBe(false);
+		expect(r.issues.some((i) => i.rule === "sql-interpolation")).toBe(false);
 		rmSync(dir, { recursive: true });
 	});
 
@@ -163,6 +198,60 @@ export const find = (env: Env, like: string) => env.DB
 		});
 		const r = runSqliteD1(dir);
 		expect(r.issues.some((i) => i.rule === "sql-interpolation" && i.severity === "error")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("classifies SQLite JSON path interpolation as identifier/path risk, not value injection", () => {
+		const dir = makeProject({
+			"src/db.ts": `const CONFIG_OR_EMPTY = "COALESCE(config, '{}')";
+export async function setConfig(env: Env, key: string, value: unknown, id: string, userId: string) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new Error("bad key");
+  return env.DB.prepare(\`
+    UPDATE agent_instances
+       SET config = json_set(\${CONFIG_OR_EMPTY}, '$.\${key}', json(?1))
+     WHERE id = ?2 AND user_id = ?3
+  \`).bind(JSON.stringify(value), id, userId).run();
+}`,
+		});
+		const r = runSqliteD1(dir);
+		expect(r.issues.some((i) => i.rule === "sql-interpolation")).toBe(false);
+		expect(r.issues.some((i) => i.rule === "sql-dynamic-identifier" && i.severity === "warning")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("detects multiline D1 chains with a trailing comma before .bind()", () => {
+		const dir = makeProject({
+			"src/db.ts": `export async function close(env: Env, sessionId: string, instanceId: string, userId: string, status: string) {
+  const res = await env.DB.prepare(
+    \`UPDATE coding_sessions
+       SET status = ?4, ended_at = datetime('now'), updated_at = datetime('now'),
+           driver_id = NULL, driver_at = NULL
+     WHERE id = ?1 AND instance_id = ?2 AND user_id = ?3 AND status IN ('active', 'suspended')\`,
+  )
+    .bind(sessionId, instanceId, userId, status)
+    .run();
+  return res;
+}`,
+		});
+		const r = runSqliteD1(dir);
+		expect(r.issues.some((i) => i.rule === "missing-bind")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("does not let comments between prepare() and bind() break chain detection", () => {
+		const dir = makeProject({
+			"src/db.ts": `export async function get(env: Env, id: string) {
+  return env.DB.prepare(
+    // user's id placeholder is bound below
+    "SELECT id FROM users WHERE id = ?",
+  )
+    // keep the D1 chain readable
+    .bind(id)
+    .first();
+}`,
+		});
+		const r = runSqliteD1(dir);
+		expect(r.issues.some((i) => i.rule === "missing-bind")).toBe(false);
 		rmSync(dir, { recursive: true });
 	});
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseBiomeLint, scoreLint } from "./lint.js";
+import { parseBiomeLint, parseEslintJson, scoreLint } from "./lint.js";
 
 describe("parseBiomeLint", () => {
 	it("returns null on non-JSON (biome absent / crashed)", () => {
@@ -21,6 +21,38 @@ describe("parseBiomeLint", () => {
 		expect(issues[0]).toMatchObject({ severity: "error", file: "src/a.ts", rule: "lint/correctness/noUnusedVariables" });
 		// path can be an object form depending on biome version.
 		expect(issues[1]).toMatchObject({ severity: "warning", file: "src/b.ts" });
+	});
+
+	it("normalizes package-relative Biome paths with tool metadata", () => {
+		const out = JSON.stringify({
+			diagnostics: [
+				{ severity: "error", description: "unused var", category: "lint/correctness/noUnusedVariables", location: { path: "src/a.ts" } },
+				{
+					severity: "warning",
+					description: "cross package",
+					category: "lint/style/useConst",
+					location: { path: "../../agents/coder/web/src/b.ts" },
+				},
+			],
+		});
+		const issues = parseBiomeLint(out, { repoCwd: "/repo", toolCwd: "/repo/store/console" })!;
+
+		expect(issues[0]).toMatchObject({
+			file: "store/console/src/a.ts",
+			details: {
+				repoRelativePath: "store/console/src/a.ts",
+				toolRelativePath: "src/a.ts",
+				toolCwd: "/repo/store/console",
+				pathStatus: "normalized",
+			},
+		});
+		expect(issues[1]).toMatchObject({
+			file: "agents/coder/web/src/b.ts",
+			details: {
+				repoRelativePath: "agents/coder/web/src/b.ts",
+				toolRelativePath: "../../agents/coder/web/src/b.ts",
+			},
+		});
 	});
 
 	it("skips generated files (node_modules, .vibe-check)", () => {
@@ -52,6 +84,59 @@ describe("parseBiomeLint", () => {
 		// One collapsed parse issue for the file + the one genuine lint warning.
 		expect(issues.filter((i) => i.rule === "parse")).toHaveLength(1);
 		expect(issues).toHaveLength(2);
+	});
+});
+
+describe("parseEslintJson", () => {
+	it("normalizes ESLint filePath from nested tool cwd", () => {
+		const out = JSON.stringify([
+			{
+				filePath: "src/App.tsx",
+				messages: [{ severity: 2, message: "broken", line: 7, ruleId: "react/no-unknown-property" }],
+			},
+			{
+				filePath: "../../agents/coder/web/src/CopilotView.tsx",
+				messages: [{ severity: 1, message: "warn", line: 2, ruleId: "no-console" }],
+			},
+		]);
+
+		const issues = parseEslintJson(out, { repoCwd: "/repo", toolCwd: "/repo/store/console" });
+
+		expect(issues[0]).toMatchObject({
+			severity: "error",
+			file: "store/console/src/App.tsx",
+			details: {
+				repoRelativePath: "store/console/src/App.tsx",
+				toolRelativePath: "src/App.tsx",
+				toolCwd: "/repo/store/console",
+			},
+		});
+		expect(issues[1]).toMatchObject({
+			severity: "warning",
+			file: "agents/coder/web/src/CopilotView.tsx",
+			details: {
+				repoRelativePath: "agents/coder/web/src/CopilotView.tsx",
+				toolRelativePath: "../../agents/coder/web/src/CopilotView.tsx",
+			},
+		});
+	});
+
+	it("marks ESLint paths outside the repo as non-clickable", () => {
+		const out = JSON.stringify([
+			{
+				filePath: "../../../../outside.ts",
+				messages: [{ severity: 2, message: "outside", line: 1, ruleId: "no-restricted-imports" }],
+			},
+		]);
+
+		const issues = parseEslintJson(out, { repoCwd: "/repo", toolCwd: "/repo/store/console" });
+
+		expect(issues[0].file).toBeUndefined();
+		expect((issues[0] as any).details).toMatchObject({
+			toolRelativePath: "../../../../outside.ts",
+			toolCwd: "/repo/store/console",
+			pathStatus: "outside-repo",
+		});
 	});
 });
 

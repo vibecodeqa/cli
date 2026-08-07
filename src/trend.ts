@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { type IssueSnapshot, issueSnapshot, readIssueFingerprint } from "./issue-fingerprint.js";
 import type { VibeReport } from "./types.js";
 
 export interface TrendDelta {
@@ -9,6 +10,8 @@ export interface TrendDelta {
 	checkDeltas: { name: string; prev: number; curr: number; delta: number }[];
 	newIssues: number;
 	fixedIssues: number;
+	introduced?: IssueSnapshot[];
+	fixed?: IssueSnapshot[];
 	prevTimestamp: string;
 }
 
@@ -39,12 +42,25 @@ export function computeTrend(report: VibeReport, outputDir: string): TrendDelta 
 		});
 	}
 
-	const currIssueCount = report.checks.reduce((s, c) => s + c.issues.length, 0);
-	const prevIssueCount = prev.checks.reduce((s, c) => s + c.issues.length, 0);
-	const newIssues = Math.max(0, currIssueCount - prevIssueCount);
-	const fixedIssues = Math.max(0, prevIssueCount - currIssueCount);
+	const prevIssueMap = issueMap(prev);
+	const currIssueMap = issueMap(report);
+	const introduced = [...currIssueMap.entries()].filter(([fp]) => !prevIssueMap.has(fp)).map(([, issue]) => issue);
+	const fixed = [...prevIssueMap.entries()].filter(([fp]) => !currIssueMap.has(fp)).map(([, issue]) => issue);
+	const newIssues = introduced.length;
+	const fixedIssues = fixed.length;
 
-	return { scoreDelta, checkDeltas, newIssues, fixedIssues, prevTimestamp: prev.timestamp };
+	return { scoreDelta, checkDeltas, newIssues, fixedIssues, introduced, fixed, prevTimestamp: prev.timestamp };
+}
+
+function issueMap(report: VibeReport): Map<string, IssueSnapshot> {
+	const out = new Map<string, IssueSnapshot>();
+	for (const check of report.checks) {
+		for (const issue of check.issues) {
+			const fp = readIssueFingerprint(check.name, issue);
+			out.set(fp, issueSnapshot(check.name, issue));
+		}
+	}
+	return out;
 }
 
 /** Render trend delta as terminal-friendly string with sparkline. */

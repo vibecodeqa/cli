@@ -2,7 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { detectWorkspace } from "../detect.js";
+import { buildFileInventory } from "../file-inventory.js";
 import { setGlobalSrcRoots } from "../fs-utils.js";
+import { buildEffectiveScanPolicy } from "../scan-policy.js";
 import type { StackInfo, WorkspaceInfo } from "../types.js";
 import { runStructure } from "./structure.js";
 
@@ -23,6 +26,10 @@ function makeProject(files: Record<string, string>): string {
 		writeFileSync(full, content);
 	}
 	return dir;
+}
+
+function makeInventory(dir: string) {
+	return buildFileInventory(dir, detectWorkspace(dir), buildEffectiveScanPolicy(dir, {}));
 }
 
 afterEach(() => setGlobalSrcRoots(undefined));
@@ -133,6 +140,26 @@ describe("runStructure", () => {
 		setGlobalSrcRoots(workspace.srcRoots);
 		const result = runStructure(dir, tsStack, workspace);
 		expect((result.details as any).found).toContain("tsconfig.json");
+		rmSync(dir, { recursive: true });
+	});
+
+	it("uses FileInventory for source/test counts and skips ignored generated outputs", () => {
+		const dir = makeProject({
+			"package.json": JSON.stringify({ scripts: { test: "vitest", build: "tsc" } }),
+			"tsconfig.json": "{}",
+			LICENSE: "MIT",
+			".gitignore": "node_modules",
+			"pnpm-lock.yaml": "",
+			"src/app.ts": "export const app = 1;\n",
+			"src/app.test.ts": "test('app', () => {});\n",
+			"dist/generated.ts": "export const generated = 1;\n",
+			"dist/generated.test.ts": "test('generated', () => {});\n",
+			".claude/worktrees/agent-a/src/agent.ts": "export const agent = 1;\n",
+			".claude/worktrees/agent-a/src/agent.test.ts": "test('agent', () => {});\n",
+		});
+		const result = runStructure(dir, tsStack, undefined, makeInventory(dir));
+
+		expect(result.details).toMatchObject({ source: "file-inventory", srcFiles: 1, testFiles: 1, testRatio: "100%" });
 		rmSync(dir, { recursive: true });
 	});
 });

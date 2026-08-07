@@ -1,7 +1,8 @@
 /** Shared filesystem utilities — eliminates duplicate file-walking across runners. */
 
 import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, extname, join } from "node:path";
+import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
+import defaultExclusions from "./data/default-exclusions.json" with { type: "json" };
 
 export interface SourceFile {
 	path: string; // relative to cwd
@@ -14,34 +15,10 @@ export interface SourceFile {
 	isTest: boolean;
 }
 
-const SKIP_DIRS = new Set([
-	"node_modules",
-	"dist",
-	".git",
-	".vibe-check",
-	"coverage",
-	"test-results",
-	"__pycache__",
-	".dart_tool",
-	"build",
-	".flutter-plugins",
-	".next",
-	".nuxt",
-	".output",
-	"vendor",
-	"third_party",
-	// Framework build/cache output — generated copies of source that otherwise
-	// get scanned and flagged as duplicates of the real files (e.g. Cloudflare's
-	// .wrangler/tmp/bundle-*/ mirrors src into middleware-loader.entry.ts).
-	".wrangler",
-	".vercel",
-	".turbo",
-	".svelte-kit",
-	".astro",
-	".cache",
-	".parcel-cache",
-	".provision",
-]);
+const DEFAULT_EXCLUDED_DIR_NAMES = new Set(defaultExclusions.directoryNames);
+const DEFAULT_EXCLUDED_FILE_PATTERNS = defaultExclusions.filePatterns;
+const DEFAULT_EXCLUDED_PATH_PREFIXES = defaultExclusions.generatedPathPrefixes;
+const IGNORE_HIDDEN_DIRECTORIES = Boolean(defaultExclusions.ignoreHiddenDirectories);
 const CODE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".dart", ".vue", ".svelte"]);
 const ALL_EXTS = new Set([...CODE_EXTS, ".json", ".env", ".yaml", ".yml", ".toml"]);
 
@@ -64,7 +41,7 @@ export function setGlobalIgnore(patterns: string[] | undefined): void {
 }
 
 // Extra directory/file *names* to skip, matched per path segment exactly like
-// SKIP_DIRS (not globs). This is the channel the desktop monitor uses to push
+// the default exclusion policy (not globs). This is the channel the desktop monitor uses to push
 // its user-configurable "Ignored paths" into the scan, so the watcher, the
 // graphs, and the report all exclude the same folders. Populated from the
 // VCQA_IGNORE env var (see readEnvIgnoreNames) or setGlobalIgnoreNames().
@@ -72,7 +49,7 @@ let _globalIgnoreNames: Set<string> = new Set();
 let _globalIgnoreSubpaths: string[] = [];
 export function setGlobalIgnoreNames(names: Iterable<string> | undefined): void {
 	const all = [...(names ?? [])];
-	// Bare names are matched per path segment (like SKIP_DIRS); entries containing
+	// Bare names are matched per path segment (like the default exclusion policy); entries containing
 	// a slash are matched as a slash-bounded sub-path against the relative path.
 	_globalIgnoreNames = new Set(all.filter((n) => !n.includes("/")));
 	_globalIgnoreSubpaths = all.filter((n) => n.includes("/")).map((n) => n.replace(/^\/+|\/+$/g, ""));
@@ -93,6 +70,26 @@ export function readEnvIgnoreNames(env: string | undefined): string[] {
 				.filter(Boolean),
 		),
 	];
+}
+
+/** Read directory entries from the repo's .gitignore. File ignores are not
+ *  merged globally because security checks may still need to inspect ignored
+ *  secret files such as .env. */
+export function readGitIgnoreDirectoryNames(cwd: string): string[] {
+	let raw: string;
+	try {
+		raw = readFileSync(join(cwd, ".gitignore"), "utf-8");
+	} catch {
+		return [];
+	}
+	const names = raw
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line && !line.startsWith("#") && !line.startsWith("!"))
+		.filter((line) => line.endsWith("/"))
+		.map((line) => line.replace(/^\/+|\/+$/g, ""))
+		.filter(Boolean);
+	return [...new Set(names)];
 }
 
 /**
@@ -200,14 +197,51 @@ function shouldIgnore(relPath: string): boolean {
  *  eslint) scan the filesystem directly and don't know our ignore, so a runner
  *  filters the paths they report through this to stay consistent with the walk. */
 export function isIgnoredPath(relPath: string): boolean {
-	if (shouldIgnore(relPath) || matchesIgnoreSubpath(relPath)) return true;
-	// A segment is ignored if it's a skip-dir, a configured ignore name, or hidden
-	// (`.github`, `.storybook`, …) — the walker skips all three (`entry.startsWith(".")`),
-	// so external tools like Biome must not score files the rest of the scan never saw.
+	if (shouldIgnore(relPath) || matchesIgnoreSubpath(relPath) || matchesDefaultPathPrefix(relPath) || matchesDefaultFilePattern(relPath))
+		return true;
+	// A segment is ignored if it's a default exclusion, a configured ignore name, or
+	// matches the explicit hidden-directory mode from the default policy. The walker
+	// uses the same rule so external tools like Biome do not score files the rest of
+	// the scan never saw.
 	return relPath.split("/").some((seg) => {
 		if (seg === "." || seg === "..") return false;
-		return seg.startsWith(".") || SKIP_DIRS.has(seg) || _globalIgnoreNames.has(seg);
+		return (IGNORE_HIDDEN_DIRECTORIES && seg.startsWith(".")) || DEFAULT_EXCLUDED_DIR_NAMES.has(seg) || _globalIgnoreNames.has(seg);
 	});
+}
+
+function matchesDefaultPathPrefix(relPath: string): boolean {
+	const clean = relPath.replace(/^\/+|\/+$/g, "");
+	return DEFAULT_EXCLUDED_PATH_PREFIXES.some((prefix) => clean === prefix || clean.startsWith(`${prefix}/`));
+}
+
+function matchesDefaultFilePattern(relPath: string): boolean {
+	const fileName = basename(relPath);
+	return DEFAULT_EXCLUDED_FILE_PATTERNS.some((pattern) => matchesPathPattern(relPath, fileName, pattern));
+}
+
+function matchesPathPattern(relPath: string, fileName: string, pattern: string): boolean {
+	if (pattern.startsWith("*.") || pattern.startsWith("*")) return fileName.endsWith(pattern.slice(1));
+	if (pattern.endsWith("*")) return fileName.startsWith(pattern.slice(0, -1));
+	const star = pattern.indexOf("*");
+	if (star >= 0) {
+		const before = pattern.slice(0, star);
+		const after = pattern.slice(star + 1);
+		return fileName.startsWith(before) && fileName.endsWith(after);
+	}
+	return relPath === pattern || fileName === pattern;
+}
+
+/** Normalize a file path emitted by an external tool into a repo-root-relative
+ *  path. Tool output is usually relative to the tool cwd, which is often a
+ *  workspace package rather than the scan root. */
+export function normalizeToolPath(cwd: string, toolCwd: string, rawPath: string): string {
+	const clean = rawPath.replace(/\\/g, "/").trim();
+	if (!clean) return clean;
+	const absolute = isAbsolute(clean) ? clean : resolve(toolCwd, clean);
+	const rel = relative(cwd, absolute).replace(/\\/g, "/");
+	if (!rel || rel === ".") return clean;
+	if (rel.startsWith("../") || rel === "..") return clean;
+	return rel;
 }
 
 function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>, seen: Set<string>): void {
@@ -218,55 +252,76 @@ function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>, se
 		return; // directory doesn't exist, permission denied, or broken symlink
 	}
 	for (const entry of entries) {
-		if (SKIP_DIRS.has(entry) || _globalIgnoreNames.has(entry)) continue;
-		const full = join(dir, entry);
-		const relPath = full.replace(`${cwd}/`, "");
-		if (shouldIgnore(relPath) || matchesIgnoreSubpath(relPath)) continue;
-		try {
-			// Skip symlinks to prevent traversal attacks (H3)
-			if (lstatSync(full).isSymbolicLink()) continue;
-			const stat = statSync(full);
-			if (stat.isDirectory()) {
-				// Hidden/tooling directories are not product source. Keep files intact,
-				// but do not recurse into hidden mirrors/caches/config dirs like
-				// .provision, .github, .claude.
-				if (entry.startsWith(".")) continue;
-				walk(full, cwd, out, exts, seen);
-				continue;
-			}
-			const ext = extname(entry);
-			if (!exts.has(ext)) continue;
-			// Skip files over 1MB to prevent memory issues (M1)
-			if (stat.size > 1_000_000) continue;
-			// A file reachable from two overlapping roots is collected once.
-			if (seen.has(full)) continue;
-			seen.add(full);
-			const fileContent = readFileSync(full, "utf-8");
-			const isSFC = ext === ".vue" || ext === ".svelte";
-			// For SFCs, extract <script> block for logic analysis; keep raw for template checks
-			const content = isSFC ? extractScript(fileContent) : fileContent;
-			const rawContent = isSFC ? fileContent : undefined;
-			const isTest =
-				entry.includes(".test.") ||
-				entry.includes(".spec.") ||
-				entry.endsWith("_test.dart") ||
-				relPath.includes("__tests__/") ||
-				relPath.includes("/test/") ||
-				relPath.startsWith("test/") ||
-				relPath.includes("/tests/") ||
-				relPath.startsWith("tests/");
-			out.push({
-				path: relPath,
-				fullPath: full,
-				base: basename(entry, ext),
-				ext,
-				content,
-				rawContent,
-				lines: content.split("\n").length,
-				isTest,
-			});
-		} catch {
-			/* broken symlink, deleted file, or permission denied */
-		}
+		walkEntry(dir, entry, cwd, out, exts, seen);
 	}
+}
+
+function walkEntry(dir: string, entry: string, cwd: string, out: SourceFile[], exts: Set<string>, seen: Set<string>): void {
+	if (shouldSkipEntryName(entry)) return;
+	const full = join(dir, entry);
+	const relPath = full.replace(`${cwd}/`, "");
+	if (shouldIgnore(relPath) || matchesIgnoreSubpath(relPath) || matchesDefaultPathPrefix(relPath) || matchesDefaultFilePattern(relPath))
+		return;
+	try {
+		// Skip symlinks to prevent traversal attacks (H3)
+		if (lstatSync(full).isSymbolicLink()) return;
+		const stat = statSync(full);
+		if (stat.isDirectory()) {
+			if (!shouldSkipDirectoryName(entry)) walk(full, cwd, out, exts, seen);
+			return;
+		}
+		pushSourceFile(entry, full, relPath, stat.size, out, exts, seen);
+	} catch {
+		/* broken symlink, deleted file, or permission denied */
+	}
+}
+
+function pushSourceFile(
+	entry: string,
+	full: string,
+	relPath: string,
+	size: number,
+	out: SourceFile[],
+	exts: Set<string>,
+	seen: Set<string>,
+): void {
+	const ext = extname(entry);
+	if (!exts.has(ext) || size > 1_000_000 || seen.has(full)) return;
+	seen.add(full);
+	const fileContent = readFileSync(full, "utf-8");
+	const isSFC = ext === ".vue" || ext === ".svelte";
+	// For SFCs, extract <script> block for logic analysis; keep raw for template checks
+	const content = isSFC ? extractScript(fileContent) : fileContent;
+	const rawContent = isSFC ? fileContent : undefined;
+	out.push({
+		path: relPath,
+		fullPath: full,
+		base: basename(entry, ext),
+		ext,
+		content,
+		rawContent,
+		lines: content.split("\n").length,
+		isTest: isTestPath(entry, relPath),
+	});
+}
+
+function isTestPath(entry: string, relPath: string): boolean {
+	return (
+		entry.includes(".test.") ||
+		entry.includes(".spec.") ||
+		entry.endsWith("_test.dart") ||
+		relPath.includes("__tests__/") ||
+		relPath.includes("/test/") ||
+		relPath.startsWith("test/") ||
+		relPath.includes("/tests/") ||
+		relPath.startsWith("tests/")
+	);
+}
+
+function shouldSkipEntryName(entry: string): boolean {
+	return DEFAULT_EXCLUDED_DIR_NAMES.has(entry) || _globalIgnoreNames.has(entry);
+}
+
+function shouldSkipDirectoryName(entry: string): boolean {
+	return IGNORE_HIDDEN_DIRECTORIES && entry.startsWith(".");
 }

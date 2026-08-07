@@ -2,6 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { detectWorkspace } from "../detect.js";
+import { buildFileInventory } from "../file-inventory.js";
+import { buildEffectiveScanPolicy } from "../scan-policy.js";
 import { parseReactEslintIssues, runReact } from "./react.js";
 
 function makeProject(files: Record<string, string>): string {
@@ -200,6 +203,221 @@ export function App({ items }: { items: string[] }) {
 		);
 		rmSync(dir, { recursive: true });
 	});
+
+	it("does not parse JSX comments as real hooks, maps, DOM queries, or handlers", () => {
+		const dir = makeProject({
+			"App.tsx": `import { useState } from "react";
+export class ErrorBoundary extends React.Component { componentDidCatch() {} render() { return this.props.children; } }
+export function App() {
+  return <div>{/*
+    if (ready) { useState(0); }
+    items.map((x) => <span>{x}</span>)
+    <button onClick={() => document.querySelector("#x")}>bad</button>
+  */}<span>ok</span></div>;
+}`,
+		});
+		const result = runReact(dir);
+		expect(result.issues.some((i) => ["conditional-hook", "missing-key", "direct-dom"].includes(i.rule ?? ""))).toBe(false);
+		expect((result.details as any).inlineHandlers).toBe(0);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("does not parse non-markup template literals as direct DOM usage", () => {
+		const dir = makeProject({
+			"App.tsx": `export class ErrorBoundary extends React.Component { componentDidCatch() {} render() { return this.props.children; } }
+export function App() {
+  const debug = \`document.querySelector("#root") and onClick={() => run()}\`;
+  return <div>{debug}</div>;
+}`,
+		});
+		const result = runReact(dir);
+		expect(result.issues.some((i) => i.rule === "direct-dom")).toBe(false);
+		expect((result.details as any).inlineHandlers).toBe(0);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("classifies tested sanitizer boundaries for React raw HTML sinks as contextual info", () => {
+		const dir = makeProject({
+			"App.tsx": `export class ErrorBoundary extends React.Component { componentDidCatch() {} render() { return this.props.children; } }
+const renderMd = (value: string) => value.replace(/</g, "&lt;");
+export function App({ text }: { text: string }) {
+  return <div dangerouslySetInnerHTML={{ __html: renderMd(text) }} />;
+}`,
+			"ui.test.ts": `import { expect, it } from "vitest";
+it("escapes markdown html", () => {
+  expect(renderMd("<script>x</script>")).not.toContain("<script>");
+});`,
+		});
+		const result = runReact(dir);
+		expect(result.issues).toContainEqual(
+			expect.objectContaining({
+				severity: "info",
+				rule: "react-dangerous-html-sanitized",
+				file: "src/App.tsx",
+				snippet: "renderMd(text)",
+			}),
+		);
+		expect(result.issues.some((i) => i.rule === "react-dangerous-html")).toBe(false);
+		expect((result.details as any).sanitizedDangerousHtml).toBe(1);
+		expect((result.details as any).sanitizedDangerousHtmlWithoutTests).toBe(0);
+		expect((result.details as any).rawDangerousHtml).toBe(0);
+		expect((result.details as any).dangerousHtmlContexts).toContainEqual(
+			expect.objectContaining({
+				classification: "sanitized-tested",
+				sanitizer: "renderMd",
+				sourceKind: "markdown-renderer",
+				tested: true,
+			}),
+		);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("recognizes tested terminal renderer boundaries for React raw HTML sinks", () => {
+		const dir = makeProject({
+			"Terminal.tsx": `export class ErrorBoundary extends React.Component { componentDidCatch() {} render() { return this.props.children; } }
+const renderTerminal = (value: string) => value.replace(/\\x1b\\[[0-9;]*m/g, "");
+export function Terminal({ text }: { text: string }) {
+  const rendered = renderTerminal(text);
+  return <pre dangerouslySetInnerHTML={{ __html: rendered }} />;
+}`,
+			"terminal-render.test.ts": `import { expect, it } from "vitest";
+it("renders terminal text safely", () => {
+  expect(renderTerminal("\\x1b[31mred")).toContain("red");
+});`,
+		});
+		const result = runReact(dir);
+		expect(result.issues).toContainEqual(
+			expect.objectContaining({
+				severity: "info",
+				rule: "react-dangerous-html-sanitized",
+				file: "src/Terminal.tsx",
+				snippet: "rendered",
+			}),
+		);
+		expect((result.details as any).dangerousHtmlContexts).toContainEqual(
+			expect.objectContaining({
+				classification: "sanitized-tested",
+				sanitizer: "renderTerminal",
+				sourceKind: "terminal-renderer",
+				evidence: "assigned-value",
+			}),
+		);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("keeps warning severity when a sanitizer boundary has no matching test coverage", () => {
+		const dir = makeProject({
+			"App.tsx": `export class ErrorBoundary extends React.Component { componentDidCatch() {} render() { return this.props.children; } }
+import sanitizeHtml from "sanitize-html";
+export function App({ html }: { html: string }) {
+  return <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />;
+}`,
+		});
+		const result = runReact(dir);
+		expect(result.issues).toContainEqual(
+			expect.objectContaining({
+				severity: "warning",
+				rule: "react-dangerous-html-sanitized",
+				file: "src/App.tsx",
+				snippet: "sanitizeHtml(html)",
+			}),
+		);
+		expect((result.details as any).sanitizedDangerousHtml).toBe(1);
+		expect((result.details as any).sanitizedDangerousHtmlWithoutTests).toBe(1);
+		expect((result.details as any).dangerousHtmlContexts).toContainEqual(
+			expect.objectContaining({
+				classification: "sanitized-untested",
+				sanitizer: "sanitizeHtml",
+				sourceKind: "html-sanitizer",
+				tested: false,
+			}),
+		);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("still warns for raw React HTML sinks", () => {
+		const dir = makeProject({
+			"App.tsx": `export class ErrorBoundary extends React.Component { componentDidCatch() {} render() { return this.props.children; } }
+export function App({ html }: { html: string }) {
+  return <div dangerouslySetInnerHTML={{ __html: html }} />;
+}`,
+		});
+		const result = runReact(dir);
+		expect(result.issues).toContainEqual(
+			expect.objectContaining({
+				severity: "warning",
+				rule: "react-dangerous-html",
+				file: "src/App.tsx",
+				snippet: "html",
+			}),
+		);
+		expect((result.details as any).rawDangerousHtml).toBe(1);
+		expect((result.details as any).dangerousHtmlContexts).toContainEqual(
+			expect.objectContaining({ classification: "raw", expression: "html" }),
+		);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("scopes JSX analysis to React projects in a mixed monorepo", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-react-mixed-"));
+		writeFileSync(join(dir, "package.json"), JSON.stringify({ workspaces: ["packages/*"] }));
+		mkdirSync(join(dir, "packages/web/src"), { recursive: true });
+		mkdirSync(join(dir, "packages/core/src"), { recursive: true });
+		writeFileSync(join(dir, "packages/web/package.json"), JSON.stringify({ dependencies: { react: "^19.0.0" } }));
+		writeFileSync(join(dir, "packages/core/package.json"), JSON.stringify({ dependencies: {} }));
+		writeFileSync(
+			join(dir, "packages/web/src/App.tsx"),
+			`export function App({ items }: { items: string[] }) {
+  return <ul>{items.map((item) => <li>{item}</li>)}</ul>;
+}`,
+		);
+		writeFileSync(
+			join(dir, "packages/web/src/ErrorBoundary.tsx"),
+			`export class ErrorBoundary extends React.Component { componentDidCatch() {} render() { return this.props.children; } }`,
+		);
+		writeFileSync(
+			join(dir, "packages/core/src/Fake.tsx"),
+			`export function Fake({ items }: { items: string[] }) {
+  return <>{items.map((item) => <span>{item}</span>)}</>;
+}`,
+		);
+
+		const workspace = detectWorkspace(dir);
+		const result = runReact(dir, workspace);
+
+		expect((result.details as any).jsxFiles).toBe(2);
+		expect((result.details as any).projects).toEqual([expect.objectContaining({ path: "packages/web", jsxFiles: 2 })]);
+		expect(result.issues.some((issue) => issue.file?.startsWith("packages/core/"))).toBe(false);
+		expect(result.issues.some((issue) => issue.file === "packages/web/src/App.tsx" && issue.rule === "missing-key")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("uses FileInventory and skips generated output and agent worktrees", () => {
+		const dir = makeProject({
+			"App.tsx": `export function App({ items }: { items: string[] }) {
+  return <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul>;
+}`,
+			"ErrorBoundary.tsx": `export class ErrorBoundary extends React.Component { componentDidCatch() {} render() { return this.props.children; } }`,
+		});
+		mkdirSync(join(dir, "dist"), { recursive: true });
+		mkdirSync(join(dir, ".claude", "worktrees", "agent-a", "src"), { recursive: true });
+		writeFileSync(
+			join(dir, "dist", "Generated.tsx"),
+			`export function Generated({ items }: { items: string[] }) { return <>{items.map((item) => <span>{item}</span>)}</>; }`,
+		);
+		writeFileSync(
+			join(dir, ".claude", "worktrees", "agent-a", "src", "Agent.tsx"),
+			`export function Agent({ items }: { items: string[] }) { return <>{items.map((item) => <span>{item}</span>)}</>; }`,
+		);
+
+		const inventory = buildFileInventory(dir, detectWorkspace(dir), buildEffectiveScanPolicy(dir, {}));
+		const result = runReact(dir, undefined, inventory);
+
+		expect(result.details).toMatchObject({ source: "file-inventory", jsxFiles: 2 });
+		expect(result.issues.some((issue) => issue.file?.startsWith("dist/") || issue.file?.includes(".claude/worktrees"))).toBe(false);
+		expect(result.issues.some((issue) => issue.rule === "missing-key")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
 });
 
 describe("parseReactEslintIssues", () => {
@@ -215,10 +433,41 @@ describe("parseReactEslintIssues", () => {
 				],
 			},
 		]);
-		expect(parseReactEslintIssues(stdout, "/repo")).toEqual([
+		expect(parseReactEslintIssues(stdout, "/repo")).toMatchObject([
 			{ severity: "error", message: "Hook is called conditionally", file: "src/App.tsx", line: 5, rule: "react-hooks/rules-of-hooks" },
 			{ severity: "warning", message: "Missing key", file: "src/App.tsx", line: 8, rule: "react/jsx-key" },
 			{ severity: "warning", message: "Fast refresh warning", file: "src/App.tsx", line: 1, rule: "react-refresh/only-export-components" },
 		]);
+	});
+
+	it("normalizes React eslint paths from nested package cwd", () => {
+		const stdout = JSON.stringify([
+			{
+				filePath: "src/App.tsx",
+				messages: [{ severity: 2, message: "Hook is called conditionally", line: 5, ruleId: "react-hooks/rules-of-hooks" }],
+			},
+			{
+				filePath: "../../agents/coder/web/src/CopilotView.tsx",
+				messages: [{ severity: 1, message: "Missing key", line: 8, ruleId: "react/jsx-key" }],
+			},
+		]);
+
+		const issues = parseReactEslintIssues(stdout, "/repo/store/console", "/repo")!;
+
+		expect(issues[0]).toMatchObject({
+			file: "store/console/src/App.tsx",
+			details: {
+				repoRelativePath: "store/console/src/App.tsx",
+				toolRelativePath: "src/App.tsx",
+				toolCwd: "/repo/store/console",
+			},
+		});
+		expect(issues[1]).toMatchObject({
+			file: "agents/coder/web/src/CopilotView.tsx",
+			details: {
+				repoRelativePath: "agents/coder/web/src/CopilotView.tsx",
+				toolRelativePath: "../../agents/coder/web/src/CopilotView.tsx",
+			},
+		});
 	});
 });

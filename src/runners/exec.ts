@@ -18,6 +18,12 @@ export interface ToolRun {
 	command: string;
 	/** Directory the command ran in — the thing that was wrong above. */
 	cwd: string;
+	analyzerId?: string;
+	analyzer?: string;
+	projectId?: string;
+	projectPath?: string;
+	status: "success" | "failed";
+	exitCode: number | null;
 	ok: boolean;
 	durationMs: number;
 	/** Combined output, trimmed and capped so reports stay a sane size. */
@@ -31,11 +37,27 @@ const MAX_BUFFER = 64 * 1024 * 1024;
 
 let buffer: ToolRun[] = [];
 let recording = false;
+let defaultContext: ToolRunContext = {};
+
+export interface ToolRunContext {
+	analyzerId?: string;
+	analyzer?: string;
+	projectId?: string;
+	projectPath?: string;
+}
+
+export interface ToolRunFilter {
+	analyzerId?: string;
+	analyzer?: string;
+	projectId?: string;
+	projectPath?: string;
+}
 
 /** Start collecting runs for one check. */
-export function startToolRecording(): void {
+export function startToolRecording(context: ToolRunContext = {}): void {
 	buffer = [];
 	recording = true;
+	defaultContext = context;
 }
 
 /** Stop collecting and return what this check ran. */
@@ -43,6 +65,7 @@ export function takeToolRuns(): ToolRun[] {
 	recording = false;
 	const runs = buffer;
 	buffer = [];
+	defaultContext = {};
 	return runs;
 }
 
@@ -60,8 +83,34 @@ function record(entry: ToolRun): void {
 	if (recording) buffer.push(entry);
 }
 
-export function run(cmd: string, cwd: string, timeout = 60_000): { stdout: string; ok: boolean } {
+function normalizedContext(context: ToolRunContext): ToolRunContext {
+	const analyzerId = context.analyzerId ?? context.analyzer;
+	return {
+		...context,
+		...(analyzerId ? { analyzerId, analyzer: context.analyzer ?? analyzerId } : {}),
+	};
+}
+
+function outputOf(error: any): string {
+	const stdout = error?.stdout ? String(error.stdout) : "";
+	const stderr = error?.stderr ? String(error.stderr) : "";
+	const combined = `${stdout}${stdout && stderr ? "\n" : ""}${stderr}`.trim();
+	return combined || String(error);
+}
+
+export function filterToolRuns(runs: ToolRun[], filter: ToolRunFilter = {}): ToolRun[] {
+	const analyzerId = filter.analyzerId ?? filter.analyzer;
+	return runs.filter((run) => {
+		if (analyzerId && (run.analyzerId ?? run.analyzer) !== analyzerId) return false;
+		if (filter.projectId && run.projectId !== filter.projectId) return false;
+		if (filter.projectPath && run.projectPath !== filter.projectPath) return false;
+		return true;
+	});
+}
+
+export function run(cmd: string, cwd: string, timeout = 60_000, context: ToolRunContext = {}): { stdout: string; ok: boolean } {
 	const started = Date.now();
+	const runContext = normalizedContext({ ...defaultContext, ...context });
 	try {
 		const stdout = execSync(cmd, {
 			cwd,
@@ -74,6 +123,9 @@ export function run(cmd: string, cwd: string, timeout = 60_000): { stdout: strin
 			tool: toolNameOf(cmd),
 			command: cmd,
 			cwd,
+			...runContext,
+			status: "success",
+			exitCode: 0,
 			ok: true,
 			durationMs: Date.now() - started,
 			output: stdout.trim().slice(0, MAX_OUTPUT),
@@ -81,11 +133,14 @@ export function run(cmd: string, cwd: string, timeout = 60_000): { stdout: strin
 		});
 		return { stdout, ok: true };
 	} catch (e: any) {
-		const output = String(e.stdout || e.stderr || e);
+		const output = outputOf(e);
 		record({
 			tool: toolNameOf(cmd),
 			command: cmd,
 			cwd,
+			...runContext,
+			status: "failed",
+			exitCode: typeof e?.status === "number" ? e.status : null,
 			ok: false,
 			durationMs: Date.now() - started,
 			output: output.trim().slice(0, MAX_OUTPUT),
@@ -95,8 +150,8 @@ export function run(cmd: string, cwd: string, timeout = 60_000): { stdout: strin
 	}
 }
 
-export function runJSON<T>(cmd: string, cwd: string, timeout = 60_000): T | null {
-	const { stdout } = run(cmd, cwd, timeout);
+export function runJSON<T>(cmd: string, cwd: string, timeout = 60_000, context: ToolRunContext = {}): T | null {
+	const { stdout } = run(cmd, cwd, timeout, context);
 	try {
 		return JSON.parse(stdout) as T;
 	} catch {

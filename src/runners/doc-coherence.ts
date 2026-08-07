@@ -11,11 +11,13 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
-export function runDocCoherence(cwd: string): CheckResult {
+export function runDocCoherence(cwd: string, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const proKey = process.env.VCQA_PRO_KEY || "";
 
@@ -27,7 +29,7 @@ export function runDocCoherence(cwd: string): CheckResult {
 	}
 
 	let hasJSDoc = false;
-	const files = getProductionFiles(cwd);
+	const files = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 	hasJSDoc = files.some((f) => /\/\*\*/.test(f.content));
 
 	// Without Pro key, return placeholder
@@ -42,6 +44,7 @@ export function runDocCoherence(cwd: string): CheckResult {
 				reason: "Set VCQA_PRO_KEY to enable LLM-powered analysis",
 				docFiles,
 				hasJSDoc,
+				source: inventory ? "file-inventory" : "legacy-walk",
 				description:
 					"Detects contradictions between documentation and code. Finds stale README claims, incorrect JSDoc, and misleading comments.",
 			},
@@ -120,7 +123,14 @@ export function runDocCoherence(cwd: string): CheckResult {
 		name: "doc-coherence",
 		score,
 		grade: gradeFromScore(score),
-		details: { premium: true, docFiles, hasJSDoc, issuesFound: issues.length, tool: "pro-local" },
+		details: {
+			premium: true,
+			docFiles,
+			hasJSDoc,
+			source: inventory ? "file-inventory" : "legacy-walk",
+			issuesFound: issues.length,
+			tool: "pro-local",
+		},
 		issues,
 		duration: Date.now() - start,
 	};

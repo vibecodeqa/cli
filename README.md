@@ -65,7 +65,7 @@ Uses Claude to read your code context, understand the issue, and generate a targ
 | Structure | 6% | Standard files, lockfile, test-to-source ratio |
 | Lint | 5% | Biome or ESLint errors/warnings |
 | Types | 6% | TypeScript compilation errors |
-| Type Safety | 3% | `as any`, `@ts-ignore`, non-null assertions |
+| Type Safety | 3% | `as any`, `@ts-ignore`, non-null assertions, unsafe double/context casts |
 | Standards | 3% | File naming, large files, code smells |
 
 ### Quality (28%)
@@ -85,7 +85,7 @@ Uses Claude to read your code context, understand the issue, and generate a targ
 | Styling | 1% | Hardcoded colors, mixed approaches, !important, inconsistent spacing |
 | Env Validation | 1% | .env hygiene, .env.example drift |
 | Git Hygiene | 1% | Merge conflicts, commit quality, large/binary files |
-| Memory Safety | 1% | Interval/listener leaks, unclosed observers, global pollution |
+| Resource Lifecycle (`memory-safety`) | 1% | Interval/listener leaks, unclosed observers, global pollution |
 
 ### Testing (13%)
 
@@ -234,7 +234,7 @@ Auto-detects workspace tools: pnpm, npm, yarn, bun, lerna, turborepo, nx, melos.
 When a monorepo is detected, vcqa:
 - Resolves all workspace packages from `pnpm-workspace.yaml`, `package.json` `workspaces`, `lerna.json`, etc.
 - Scans `packages/*/src/` (or wherever each package's source lives)
-- Runs linting from root `.` (lets biome/eslint find all files via their own config)
+- Runs supported tools from the cwd where their config lives and normalizes findings back to repo-root paths
 - Checks `tsconfig.json` in each workspace package for strict mode
 - Detects lockfiles in root or packages (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `bun.lockb`, `bun.lock`)
 - Scopes confusion checks per-package (no false positives from cross-package names)
@@ -243,7 +243,7 @@ When a monorepo is detected, vcqa:
 npx @vibecodeqa/cli ~/my-monorepo    # auto-detects workspace, scans all packages
 ```
 
-No configuration needed — if your monorepo has a `workspaces` field or `pnpm-workspace.yaml`, it just works.
+Repo and folder discovery is deterministic core functionality. AI/Pro features may explain the detected architecture or suggest config, but they are not required for scanning.
 
 ## Stack detection
 

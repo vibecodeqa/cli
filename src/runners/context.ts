@@ -12,6 +12,8 @@
  *   4. Circular dependencies — import cycles that confuse navigation
  */
 
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -20,12 +22,12 @@ const MAX_FILE_TOKENS = 4000; // ~400 lines; beyond this LLMs lose mid-context i
 const MAX_IMPORTS = 15; // files importing >15 modules are hard to reason about
 const CHARS_PER_TOKEN = 3.5; // empirical average for code
 
-export function runContext(cwd: string): CheckResult {
+export function runContext(cwd: string, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 
 	// Collect source files with imports
-	const sourceFiles = getProductionFiles(cwd);
+	const sourceFiles = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 	const files = sourceFiles.map((sf) => ({
 		path: sf.path,
 		content: sf.content,
@@ -94,12 +96,8 @@ export function runContext(cwd: string): CheckResult {
 
 	const cycles = findCycles(importGraph);
 	circularDeps = cycles.length;
-	for (const cycle of cycles.slice(0, 5)) {
-		issues.push({ severity: "error", message: `Circular dependency: ${cycle.join(" → ")}`, rule: "circular-dependency" });
-	}
-	if (cycles.length > 5) {
-		issues.push({ severity: "error", message: `...and ${cycles.length - 5} more circular dependencies`, rule: "circular-dependency" });
-	}
+	// Architecture owns circular dependency findings. Context keeps the metric for
+	// locality views, but does not duplicate the issue or score penalty.
 
 	// ── 4. Self-containment heuristic ──
 	// Files with many imports and few exports are "context sinks" — hard to understand in isolation
@@ -124,7 +122,7 @@ export function runContext(cwd: string): CheckResult {
 	const totalFiles = files.length || 1;
 	const highTokenPct = (highTokenFiles / totalFiles) * 100;
 	const heavyImportPct = (heavyImportFiles / totalFiles) * 100;
-	const penalty = highTokenPct * 1.5 + heavyImportPct * 1 + Math.min(circularDeps, 5) * 8 + contextSinks * 3;
+	const penalty = highTokenPct * 1.5 + heavyImportPct * 1 + contextSinks * 3;
 	const score = Math.max(0, Math.min(100, Math.round(100 - penalty)));
 
 	return {
@@ -133,6 +131,7 @@ export function runContext(cwd: string): CheckResult {
 		grade: gradeFromScore(score),
 		details: {
 			filesScanned: files.length,
+			source: inventory ? "file-inventory" : "legacy-walk",
 			totalTokens,
 			avgTokensPerFile: Math.round(avgTokens),
 			avgImportsPerFile: Math.round(avgImports * 10) / 10,

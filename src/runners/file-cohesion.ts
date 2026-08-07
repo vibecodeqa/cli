@@ -17,6 +17,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -77,7 +79,7 @@ const CONCERN_PATTERNS: { name: string; patterns: RegExp[] }[] = [
 	{ name: "CLI", patterns: [/\bprocess\.argv\b/, /\bcommander|yargs|meow|cac\b/, /\bparse(Args|Options)\b/] },
 ];
 
-export async function runFileCohesion(cwd: string): Promise<CheckResult> {
+export async function runFileCohesion(cwd: string, inventory?: FileInventory): Promise<CheckResult> {
 	const start = Date.now();
 	const proKey = process.env.VCQA_PRO_KEY || "";
 
@@ -98,7 +100,7 @@ export async function runFileCohesion(cwd: string): Promise<CheckResult> {
 		};
 	}
 
-	const files = getProductionFiles(cwd);
+	const files = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 	const issues: Issue[] = [];
 	const cache = loadCache(cwd);
 	let cacheHits = 0;
@@ -183,6 +185,7 @@ export async function runFileCohesion(cwd: string): Promise<CheckResult> {
 			totalFiles,
 			multiConcernFiles,
 			cacheHits,
+			source: inventory ? "file-inventory" : "legacy-walk",
 			candidates: candidates.map((c) => ({ path: c.path, concerns: c.concerns, lines: c.lines })),
 		},
 		issues,

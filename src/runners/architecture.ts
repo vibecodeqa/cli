@@ -13,6 +13,8 @@
 import { existsSync } from "node:fs";
 import { basename, dirname, extname } from "node:path";
 import { cruise } from "dependency-cruiser";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles, type SourceFile } from "../fs-utils.js";
 import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -26,6 +28,14 @@ interface ModuleNode {
 	exports: number;
 }
 
+interface GraphBuild {
+	nodes: Map<string, ModuleNode>;
+	typeOnlyEdgesIgnored: number;
+	dynamicEdgesIgnored: number;
+	typeOnlyNodes: Map<string, ModuleNode>;
+	dynamicNodes: Map<string, ModuleNode>;
+}
+
 export interface ArchGraph {
 	nodes: Map<string, ModuleNode>;
 	cycles: string[][];
@@ -33,17 +43,17 @@ export interface ArchGraph {
 	orphans: string[];
 }
 
-export async function runArchitecture(cwd: string, workspace?: WorkspaceInfo): Promise<CheckResult> {
+export async function runArchitecture(cwd: string, workspace?: WorkspaceInfo, inventory?: FileInventory): Promise<CheckResult> {
 	const start = Date.now();
 	const issues: Issue[] = [];
-	const files = getProductionFiles(cwd);
+	const files = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 
 	if (files.length < 2) {
 		return {
 			name: "architecture",
 			score: 100,
 			grade: "A",
-			details: { skipped: true, reason: "fewer than 2 source files" },
+			details: { skipped: true, reason: "fewer than 2 source files", source: inventory ? "file-inventory" : "legacy-walk" },
 			issues: [],
 			duration: Date.now() - start,
 		};
@@ -58,11 +68,34 @@ export async function runArchitecture(cwd: string, workspace?: WorkspaceInfo): P
 
 	// ── Circular dependencies ──
 	const cycles = findCycles(graph.nodes);
+	const typeOnlyCycles = findCycles(graph.typeOnlyNodes);
+	const dynamicCycles = findCycles(graph.dynamicNodes);
 	for (const cycle of cycles.slice(0, 5)) {
-		issues.push({ severity: "error", message: `Circular: ${cycle.map(short).join(" \u2192 ")}`, file: cycle[0], rule: "circular-dep" });
+		issues.push({
+			severity: "error",
+			message: `Static runtime circular dependency: ${cycle.map(short).join(" \u2192 ")}`,
+			file: cycle[0],
+			rule: "circular-dep",
+		});
 	}
 	if (cycles.length > 5) {
 		issues.push({ severity: "error", message: `...and ${cycles.length - 5} more cycles`, rule: "circular-dep" });
+	}
+	for (const cycle of typeOnlyCycles.slice(0, 3)) {
+		issues.push({
+			severity: "info",
+			message: `Type-only dependency cycle ignored for runtime scoring: ${cycle.map(short).join(" \u2192 ")}`,
+			file: cycle[0],
+			rule: "type-only-cycle",
+		});
+	}
+	for (const cycle of dynamicCycles.slice(0, 3)) {
+		issues.push({
+			severity: "info",
+			message: `Deferred dynamic import cycle ignored for runtime scoring: ${cycle.map(short).join(" \u2192 ")}`,
+			file: cycle[0],
+			rule: "dynamic-import-cycle",
+		});
 	}
 
 	// ── God modules (imported by >50% of files) ──
@@ -171,6 +204,8 @@ export async function runArchitecture(cwd: string, workspace?: WorkspaceInfo): P
 		details: {
 			totalModules: graph.nodes.size,
 			circularDeps: cycles.length,
+			typeOnlyCycles: typeOnlyCycles.length,
+			dynamicCycles: dynamicCycles.length,
 			godModules: godModules.length,
 			orphans: orphans.length,
 			highFanOut,
@@ -179,6 +214,9 @@ export async function runArchitecture(cwd: string, workspace?: WorkspaceInfo): P
 			containerSvg: generateContainerDiagram(cwd),
 			assessment,
 			tool,
+			source: inventory ? "file-inventory" : "legacy-walk",
+			typeOnlyEdgesIgnored: graph.typeOnlyEdgesIgnored,
+			dynamicEdgesIgnored: graph.dynamicEdgesIgnored,
 		},
 		issues,
 		duration: Date.now() - start,
@@ -191,7 +229,7 @@ export async function runArchitecture(cwd: string, workspace?: WorkspaceInfo): P
  *  tsconfig path aliases, transitive TS deps). Returns null — so the caller
  *  falls back to the built-in resolver — if it errors or covers too little of
  *  the project (e.g. .vue/.svelte SFCs it can't resolve, or monorepo bare imports). */
-async function buildGraphViaCruise(cwd: string, files: SourceFile[]): Promise<{ nodes: Map<string, ModuleNode> } | null> {
+async function buildGraphViaCruise(cwd: string, files: SourceFile[]): Promise<GraphBuild | null> {
 	// .vue/.svelte single-file components need our SFC-aware resolver; dependency-cruiser
 	// doesn't resolve them without a bundler plugin, so hand those projects to the built-in.
 	if (files.some((f) => f.ext === ".vue" || f.ext === ".svelte")) return null;
@@ -216,6 +254,10 @@ async function buildGraphViaCruise(cwd: string, files: SourceFile[]): Promise<{ 
 		const modules = output.modules ?? [];
 
 		const nodes = new Map<string, ModuleNode>();
+		const typeOnlyNodes = emptyGraphNodes(files);
+		const dynamicNodes = emptyGraphNodes(files);
+		let typeOnlyEdgesIgnored = 0;
+		let dynamicEdgesIgnored = 0;
 		for (const m of modules) {
 			if (fileSet.has(m.source)) {
 				nodes.set(m.source, { path: m.source, imports: [], importedBy: [], dir: dirname(m.source), exports: 0 });
@@ -228,8 +270,21 @@ async function buildGraphViaCruise(cwd: string, files: SourceFile[]): Promise<{ 
 			for (const d of m.dependencies ?? []) {
 				if (d.coreModule || !d.resolved || d.resolved === m.source) continue;
 				if (!fileSet.has(d.resolved) || seen.has(d.resolved)) continue;
+				const depTypes = d.dependencyTypes ?? [];
+				if (d.typeOnly || depTypes.includes("type-only") || depTypes.includes("type-import")) {
+					typeOnlyEdgesIgnored++;
+					addGraphEdge(typeOnlyNodes, m.source, d.resolved);
+					continue;
+				}
+				if (d.dynamic || depTypes.includes("dynamic-import")) {
+					dynamicEdgesIgnored++;
+					addGraphEdge(dynamicNodes, m.source, d.resolved);
+					continue;
+				}
 				seen.add(d.resolved);
 				node.imports.push(d.resolved);
+				addGraphEdge(typeOnlyNodes, m.source, d.resolved);
+				addGraphEdge(dynamicNodes, m.source, d.resolved);
 			}
 		}
 		for (const [path, node] of nodes) {
@@ -238,7 +293,7 @@ async function buildGraphViaCruise(cwd: string, files: SourceFile[]): Promise<{ 
 
 		// Too little coverage → the built-in resolver is a better bet for this project.
 		if (nodes.size < files.length * 0.5) return null;
-		return { nodes };
+		return { nodes, typeOnlyEdgesIgnored, dynamicEdgesIgnored, typeOnlyNodes, dynamicNodes };
 	} catch {
 		return null;
 	} finally {
@@ -246,9 +301,13 @@ async function buildGraphViaCruise(cwd: string, files: SourceFile[]): Promise<{ 
 	}
 }
 
-function buildGraph(files: SourceFile[]): { nodes: Map<string, ModuleNode> } {
+function buildGraph(files: SourceFile[]): GraphBuild {
 	const filePaths = new Set(files.map((f) => f.path));
 	const nodes = new Map<string, ModuleNode>();
+	const typeOnlyNodes = emptyGraphNodes(files);
+	const dynamicNodes = emptyGraphNodes(files);
+	let typeOnlyEdgesIgnored = 0;
+	let dynamicEdgesIgnored = 0;
 
 	// Initialize nodes
 	for (const f of files) {
@@ -263,30 +322,92 @@ function buildGraph(files: SourceFile[]): { nodes: Map<string, ModuleNode> } {
 
 	// Parse imports and build edges
 	for (const f of files) {
-		const imports = parseImports(f.content);
+		const parsed = parseImports(f.content);
+		typeOnlyEdgesIgnored += parsed.typeOnlyEdgesIgnored;
+		dynamicEdgesIgnored += parsed.dynamicEdgesIgnored;
 		const node = nodes.get(f.path)!;
 
-		for (const imp of imports) {
+		for (const imp of parsed.imports) {
 			const resolved = resolveImport(f.path, imp, filePaths);
 			if (resolved && resolved !== f.path) {
 				node.imports.push(resolved);
 				const target = nodes.get(resolved);
 				if (target) target.importedBy.push(f.path);
+				addGraphEdge(typeOnlyNodes, f.path, resolved);
+				addGraphEdge(dynamicNodes, f.path, resolved);
+			}
+		}
+		for (const imp of parsed.typeOnlyImports) {
+			const resolved = resolveImport(f.path, imp, filePaths);
+			if (resolved && resolved !== f.path) {
+				addGraphEdge(typeOnlyNodes, f.path, resolved);
+			}
+		}
+		for (const imp of parsed.dynamicImports) {
+			const resolved = resolveImport(f.path, imp, filePaths);
+			if (resolved && resolved !== f.path) {
+				addGraphEdge(dynamicNodes, f.path, resolved);
 			}
 		}
 	}
 
-	return { nodes };
+	return { nodes, typeOnlyEdgesIgnored, dynamicEdgesIgnored, typeOnlyNodes, dynamicNodes };
 }
 
-function parseImports(content: string): string[] {
-	const imports: string[] = [];
-	// Match both imports and re-exports (export { ... } from '...')
-	const regex = /(?:import|export)\s+(?:[\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g;
-	for (const match of content.matchAll(regex)) {
-		if (match[1].startsWith(".")) imports.push(match[1]);
+function emptyGraphNodes(files: SourceFile[]): Map<string, ModuleNode> {
+	const nodes = new Map<string, ModuleNode>();
+	for (const f of files) {
+		nodes.set(f.path, {
+			path: f.path,
+			imports: [],
+			importedBy: [],
+			dir: dirname(f.path),
+			exports: (f.content.match(/\bexport\s+/g) || []).length,
+		});
 	}
-	return imports;
+	return nodes;
+}
+
+function addGraphEdge(nodes: Map<string, ModuleNode>, from: string, to: string): void {
+	const source = nodes.get(from);
+	const target = nodes.get(to);
+	if (!source || !target || source.imports.includes(to)) return;
+	source.imports.push(to);
+	target.importedBy.push(from);
+}
+
+function parseImports(content: string): {
+	imports: string[];
+	typeOnlyImports: string[];
+	dynamicImports: string[];
+	typeOnlyEdgesIgnored: number;
+	dynamicEdgesIgnored: number;
+} {
+	const imports: string[] = [];
+	const typeOnlyImports: string[] = [];
+	const dynamicImports: string[] = [];
+	let typeOnlyEdgesIgnored = 0;
+	let dynamicEdgesIgnored = 0;
+	// Match both imports and re-exports (export { ... } from '...')
+	const regex = /\b(import|export)\s+([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g;
+	for (const match of content.matchAll(regex)) {
+		const clause = match[2].trim();
+		const specifier = match[3];
+		if (!specifier.startsWith(".")) continue;
+		if (clause === "type" || clause.startsWith("type ")) {
+			typeOnlyEdgesIgnored++;
+			typeOnlyImports.push(specifier);
+			continue;
+		}
+		imports.push(specifier);
+	}
+	for (const match of content.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) {
+		const specifier = match[1];
+		if (!specifier.startsWith(".")) continue;
+		dynamicEdgesIgnored++;
+		dynamicImports.push(specifier);
+	}
+	return { imports, typeOnlyImports, dynamicImports, typeOnlyEdgesIgnored, dynamicEdgesIgnored };
 }
 
 function resolveImport(fromPath: string, importPath: string, knownFiles: Set<string>): string | null {

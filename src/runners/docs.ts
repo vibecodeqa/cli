@@ -2,11 +2,13 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
-export function runDocs(cwd: string): CheckResult {
+export function runDocs(cwd: string, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 	let readmeScore = 0;
@@ -38,7 +40,7 @@ export function runDocs(cwd: string): CheckResult {
 	}
 
 	// Check exported function documentation
-	const sourceFiles = getProductionFiles(cwd);
+	const sourceFiles = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 
 	let totalExports = 0;
 	let documentedExports = 0;
@@ -107,6 +109,7 @@ export function runDocs(cwd: string): CheckResult {
 			documentedExports,
 			documentedPct: totalExports > 0 ? `${Math.round((documentedExports / totalExports) * 100)}%` : "n/a",
 			hasChangelog: changelogScore >= 80,
+			source: inventory ? "file-inventory" : "legacy-walk",
 		},
 		issues,
 		duration: Date.now() - start,

@@ -12,6 +12,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -22,7 +24,7 @@ interface DesignCache {
 	findings: Issue[];
 }
 
-export async function runDesignConsistency(cwd: string): Promise<CheckResult> {
+export async function runDesignConsistency(cwd: string, inventory?: FileInventory): Promise<CheckResult> {
 	const start = Date.now();
 	const proKey = process.env.VCQA_PRO_KEY || "";
 
@@ -43,7 +45,7 @@ export async function runDesignConsistency(cwd: string): Promise<CheckResult> {
 		};
 	}
 
-	const files = getProductionFiles(cwd);
+	const files = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 	const componentFiles = files.filter((f) => !f.isTest && /\.(tsx|jsx|vue|svelte)$/.test(f.path));
 
 	if (componentFiles.length < 2) {
@@ -51,7 +53,7 @@ export async function runDesignConsistency(cwd: string): Promise<CheckResult> {
 			name: "design-consistency",
 			score: 100,
 			grade: "A",
-			details: { componentsAnalyzed: componentFiles.length },
+			details: { componentsAnalyzed: componentFiles.length, source: inventory ? "file-inventory" : "legacy-walk" },
 			issues: [],
 			duration: Date.now() - start,
 		};
@@ -72,7 +74,12 @@ export async function runDesignConsistency(cwd: string): Promise<CheckResult> {
 			name: "design-consistency",
 			score: cache.findings.length === 0 ? 100 : Math.max(20, 100 - cache.findings.length * 12),
 			grade: gradeFromScore(cache.findings.length === 0 ? 100 : Math.max(20, 100 - cache.findings.length * 12)),
-			details: { premium: true, componentsAnalyzed: componentFiles.length, cached: true },
+			details: {
+				premium: true,
+				componentsAnalyzed: componentFiles.length,
+				source: inventory ? "file-inventory" : "legacy-walk",
+				cached: true,
+			},
 			issues: cache.findings,
 			duration: Date.now() - start,
 		};
@@ -97,7 +104,7 @@ export async function runDesignConsistency(cwd: string): Promise<CheckResult> {
 		name: "design-consistency",
 		score,
 		grade: gradeFromScore(score),
-		details: { premium: true, componentsAnalyzed: componentFiles.length },
+		details: { premium: true, componentsAnalyzed: componentFiles.length, source: inventory ? "file-inventory" : "legacy-walk" },
 		issues,
 		duration: Date.now() - start,
 	};

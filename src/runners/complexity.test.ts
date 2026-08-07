@@ -1,6 +1,9 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { detectWorkspace } from "../detect.js";
+import { buildFileInventory } from "../file-inventory.js";
+import { buildEffectiveScanPolicy } from "../scan-policy.js";
 import { runComplexity } from "./complexity.js";
 
 const TMP = join(import.meta.dirname!, "__test_complexity__");
@@ -9,12 +12,18 @@ function setup(files: Record<string, string>) {
 	rmSync(TMP, { recursive: true, force: true });
 	mkdirSync(join(TMP, "src"), { recursive: true });
 	for (const [path, content] of Object.entries(files)) {
-		writeFileSync(join(TMP, path), content);
+		const full = join(TMP, path);
+		mkdirSync(join(full, ".."), { recursive: true });
+		writeFileSync(full, content);
 	}
 }
 
 function cleanup() {
 	rmSync(TMP, { recursive: true, force: true });
+}
+
+function inventory() {
+	return buildFileInventory(TMP, detectWorkspace(TMP), buildEffectiveScanPolicy(TMP, {}));
 }
 
 describe("runComplexity", () => {
@@ -54,6 +63,31 @@ export function greet(name: string): string {
 		});
 		const result = runComplexity(TMP);
 		expect(result.issues.some((i) => i.rule === "high-complexity")).toBe(true);
+		cleanup();
+	});
+
+	it("ignores generated agent worktree source", () => {
+		const longBody = Array.from({ length: 65 }, (_, i) => `  const x${i} = ${i};`).join("\n");
+		setup({
+			"src/simple.ts": "export function simple() { return 1; }\n",
+			".claude/worktrees/agent-a/src/generated.ts": `export function generatedCopy() {\n${longBody}\n}`,
+		});
+		const result = runComplexity(TMP);
+		expect(result.issues.some((i) => i.file?.includes(".claude/worktrees"))).toBe(false);
+		expect(result.details.totalFiles).toBe(1);
+		cleanup();
+	});
+
+	it("uses FileInventory and excludes ignored/generated source", () => {
+		const longBody = Array.from({ length: 65 }, (_, i) => `  const x${i} = ${i};`).join("\n");
+		setup({
+			"src/simple.ts": "export function simple() { return 1; }\n",
+			"dist/generated.ts": `export function generatedCopy() {\n${longBody}\n}`,
+			".claude/worktrees/agent-a/src/generated.ts": `export function generatedCopy() {\n${longBody}\n}`,
+		});
+		const result = runComplexity(TMP, inventory());
+		expect(result.details).toMatchObject({ totalFiles: 1, source: "file-inventory" });
+		expect(result.issues.some((i) => i.file?.includes(".claude/worktrees") || i.file?.startsWith("dist/"))).toBe(false);
 		cleanup();
 	});
 

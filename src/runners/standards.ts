@@ -2,6 +2,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -22,7 +24,7 @@ const CODE_SMELLS: PatternCheck[] = [
 		message: "console.log in production code",
 		exclude: /\/\/ ?ok|eslint-disable|biome-ignore/,
 	},
-	{ name: "var keyword", pattern: /\bvar\s+\w/, severity: "error", message: "Use const/let instead of var" },
+	{ name: "var keyword", pattern: /\bvar\s+\w/, severity: "warning", message: "Use const/let instead of var" },
 	{ name: "loose equality", pattern: /[^!=]==[^=]/, severity: "warning", message: "Use === instead of ==", exclude: /['"]use strict['"]/ },
 	{ name: "eval()", pattern: /\beval\s*\(/, severity: "error", message: "eval() is a security risk — never use it" },
 	{ name: "new Function()", pattern: /new\s+Function\s*\(/, severity: "error", message: "new Function() is equivalent to eval()" },
@@ -54,7 +56,7 @@ const CODE_SMELLS: PatternCheck[] = [
 	},
 ];
 
-export function runStandards(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo): CheckResult {
+export function runStandards(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 
@@ -71,7 +73,7 @@ export function runStandards(cwd: string, stack: StackInfo, workspace?: Workspac
 	}
 
 	// Collect source files
-	const files = getProductionFiles(cwd);
+	const files = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 
 	// ── File naming conventions ──
 	let namingViolations = 0;
@@ -128,7 +130,7 @@ export function runStandards(cwd: string, stack: StackInfo, workspace?: Workspac
 			const excess = lines - SOFT_LIMIT;
 			fileSizePenalty += (excess / 100) ** 2;
 			issues.push({
-				severity: "error",
+				severity: "warning",
 				message: `${lines} lines — split this file (exponential penalty above ${SOFT_LIMIT})`,
 				file: f.path,
 				rule: "large-file",
@@ -149,14 +151,18 @@ export function runStandards(cwd: string, stack: StackInfo, workspace?: Workspac
 	// ── Code smell patterns ──
 	let smellCount = 0;
 	for (const f of files) {
-		const lines = f.content.split("\n");
+		const maskedContent = maskJsTextSpans(f.content);
+		const lines = maskedContent.split("\n");
+		const originalLines = f.content.split("\n");
 		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i];
+			const originalLine = originalLines[i] ?? "";
+			const line = lines[i] ?? "";
 			const trimmed = line.trim();
 			if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
-			if (/\bpattern\s*:|name:\s*["']|message:\s*["']|description:\s*["']|risk:\s*["']|recommendation:\s*["']/.test(trimmed)) continue;
+			if (/\bpattern\s*:|name:\s*["']|message:\s*["']|description:\s*["']|risk:\s*["']|recommendation:\s*["']/.test(originalLine.trim()))
+				continue;
 			// Skip string-only lines (check-meta descriptions, inline scripts)
-			if (/^\s*["'`].*["'`][,;]?\s*$/.test(line)) continue;
+			if (/^\s*["'`].*["'`][,;]?\s*$/.test(originalLine)) continue;
 
 			for (const check of CODE_SMELLS) {
 				// Skip console.log in CLI projects (intentional terminal output)
@@ -239,8 +245,126 @@ export function runStandards(cwd: string, stack: StackInfo, workspace?: Workspac
 		name: "standards",
 		score,
 		grade: gradeFromScore(score),
-		details: { filesScanned: files.length, codeSmells: smellCount, largeFiles, namingViolations },
+		details: {
+			filesScanned: files.length,
+			codeSmells: smellCount,
+			largeFiles,
+			namingViolations,
+			source: inventory ? "file-inventory" : "legacy-walk",
+		},
 		issues,
 		duration: Date.now() - start,
 	};
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: quote/comment masking is a tiny state machine; splitting it obscures the transitions.
+function maskJsTextSpans(source: string): string {
+	let out = "";
+	let mode: "code" | "single" | "double" | "template" | "line-comment" | "block-comment" = "code";
+	const templateExpressionDepths: number[] = [];
+
+	for (let i = 0; i < source.length; i++) {
+		const c = source[i]!;
+		const next = source[i + 1];
+
+		if (mode === "line-comment") {
+			if (c === "\n") {
+				out += "\n";
+				mode = "code";
+			} else {
+				out += " ";
+			}
+			continue;
+		}
+
+		if (mode === "block-comment") {
+			out += c === "\n" ? "\n" : " ";
+			if (c === "*" && next === "/") {
+				out += " ";
+				i++;
+				mode = "code";
+			}
+			continue;
+		}
+
+		if (mode === "single" || mode === "double") {
+			out += " ";
+			if (c === "\\" && next) {
+				out += next === "\n" ? "\n" : " ";
+				i++;
+				continue;
+			}
+			if ((mode === "single" && c === "'") || (mode === "double" && c === '"')) mode = "code";
+			continue;
+		}
+
+		if (mode === "template") {
+			if (c === "\n") {
+				out += "\n";
+				continue;
+			}
+			out += " ";
+			if (c === "\\" && next) {
+				out += next === "\n" ? "\n" : " ";
+				i++;
+				continue;
+			}
+			if (c === "`") {
+				mode = "code";
+				continue;
+			}
+			if (c === "$" && next === "{") {
+				out += " ";
+				i++;
+				templateExpressionDepths.push(1);
+				mode = "code";
+			}
+			continue;
+		}
+
+		if (templateExpressionDepths.length > 0) {
+			const depthIndex = templateExpressionDepths.length - 1;
+			if (c === "{") templateExpressionDepths[depthIndex]++;
+			if (c === "}") {
+				templateExpressionDepths[depthIndex]--;
+				if (templateExpressionDepths[depthIndex] === 0) {
+					templateExpressionDepths.pop();
+					out += " ";
+					mode = "template";
+					continue;
+				}
+			}
+		}
+
+		if (c === "/" && next === "/") {
+			out += "  ";
+			i++;
+			mode = "line-comment";
+			continue;
+		}
+		if (c === "/" && next === "*") {
+			out += "  ";
+			i++;
+			mode = "block-comment";
+			continue;
+		}
+		if (c === "'") {
+			out += " ";
+			mode = "single";
+			continue;
+		}
+		if (c === '"') {
+			out += " ";
+			mode = "double";
+			continue;
+		}
+		if (c === "`") {
+			out += " ";
+			mode = "template";
+			continue;
+		}
+		out += c;
+	}
+
+	return out;
 }

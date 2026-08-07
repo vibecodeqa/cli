@@ -39,6 +39,96 @@ describe("report generation", () => {
 		expect(pages.has("files.html")).toBe(true);
 		expect(pages.has("trends.html")).toBe(true);
 		expect(pages.has("feature-map.html")).toBe(true);
+		expect(pages.has("scan-scope.html")).toBe(true);
+	});
+
+	it("shows deterministic scan scope evidence", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-report-"));
+		const report = makeReport(dir, []);
+		report.meta.filesScanned = 12;
+		report.meta.workspace = {
+			isMonorepo: true,
+			tool: "pnpm",
+			packages: [{ name: "web", path: "apps/web", hasSrc: true, hasRootCode: false, hasTests: true, hasLinter: true }],
+			srcRoots: ["apps/web/src"],
+			discovery: {
+				mode: "manifest",
+				evidence: [
+					{ kind: "manifest", file: "pnpm-workspace.yaml", description: "pnpm workspace manifest defines package globs" },
+					{
+						kind: "rejected",
+						path: "apps/prototype",
+						description: "Convention candidate rejected because no supported project manifest was found",
+					},
+				],
+			},
+			projects: [
+				{
+					id: "apps-web",
+					name: "web",
+					path: "apps/web",
+					kind: "app",
+					stack: {
+						language: "typescript",
+						framework: "react",
+						bundler: "vite",
+						testRunner: "vitest",
+						linter: "biome",
+						packageManager: "pnpm",
+					},
+					srcRoots: ["apps/web/src"],
+					testRoots: ["apps/web/tests"],
+					configFiles: ["apps/web/tsconfig.json"],
+					manifestFiles: ["apps/web/package.json"],
+					evidence: [
+						{ kind: "source", path: "apps/web", description: "Workspace package selected as a scan project" },
+						{ kind: "manifest", file: "apps/web/package.json", description: "Project manifest found" },
+					],
+					confidence: 0.9,
+					toolCommands: {
+						lint: [{ tool: "biome", cwd: "apps/web", command: ["npx", "biome", "check", "."] }],
+					},
+				},
+			],
+		};
+		report.meta.scanPolicy = {
+			version: 1,
+			ignoreHiddenDirectories: true,
+			defaultDirectoryNameValues: ["node_modules", "dist"],
+			defaultFilePatternValues: ["*.min.js"],
+			generatedPathPrefixValues: ["generated"],
+			configIgnorePatternValues: ["fixtures/**"],
+			userIgnoreNameValues: ["tmp"],
+			envIgnoreNameValues: ["coverage"],
+			gitignoreDirectoryNameValues: ["build"],
+		};
+		report.meta.fileInventory = {
+			totalFiles: 20,
+			includedFiles: 12,
+			ignoredFiles: 3,
+			ignoredDirectories: 2,
+			generatedFiles: 1,
+			securitySensitiveFiles: 1,
+			byKind: { source: 8, test: 4 },
+		};
+
+		const pages = generatePages(report);
+		const scope = pages.get("scan-scope.html") || "";
+		expect(scope).toContain("Accepted Projects");
+		expect(scope).toContain("apps/web");
+		expect(scope).toContain("Why scanned");
+		expect(scope).toContain("Workspace package selected as a scan project");
+		expect(scope).toContain("Rejected Candidates");
+		expect(scope).toContain("apps/prototype");
+		expect(scope).toContain("skipped / unavailable");
+		expect(scope).toContain("Effective Scan Policy");
+		expect(scope).toContain("node_modules");
+		expect(scope).toContain("generated");
+		expect(scope).toContain("Copy JSON");
+		expect(scope).toContain("&quot;scanPolicy&quot;");
+		const index = pages.get("index.html") || "";
+		expect(index).toContain("scan-scope.html");
+		expect(index).toContain("Scan Scope");
 	});
 
 	it("includes source snippets when file exists", () => {

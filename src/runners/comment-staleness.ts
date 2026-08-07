@@ -13,15 +13,17 @@
  *   - Function name contradicts implementation
  */
 
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
-export function runCommentStaleness(cwd: string): CheckResult {
+export function runCommentStaleness(cwd: string, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const proKey = process.env.VCQA_PRO_KEY || "";
 
-	const files = getProductionFiles(cwd);
+	const files = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 
 	if (!proKey) {
 		return {
@@ -193,6 +195,7 @@ export function runCommentStaleness(cwd: string): CheckResult {
 		details: {
 			premium: true,
 			filesScanned: files.length,
+			source: inventory ? "file-inventory" : "legacy-walk",
 			totalComments,
 			staleComments: staleCount,
 			tool: proKey ? "pro-local+llm" : "pro-local",

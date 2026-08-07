@@ -80,4 +80,18 @@ describe("flutter runner", () => {
 		expect(result.details.metrics).toEqual(expect.arrayContaining([expect.objectContaining({ id: "widgetTests", value: 1 })]));
 		expect(result.issues.some((issue) => issue.rule === "generated-files-neutral")).toBe(true);
 	});
+
+	it("prefers ProjectContext Flutter projects in mixed workspaces", () => {
+		write("package.json", JSON.stringify({ workspaces: ["apps/*"] }));
+		write("apps/mobile/pubspec.yaml", flutterPubspec);
+		write("apps/mobile/lib/main.dart", "void main() {}\n");
+		write("apps/web/package.json", JSON.stringify({ dependencies: { react: "^19.0.0" } }));
+		write("apps/web/src/App.tsx", "export function App() { return <div />; }\n");
+
+		const workspace = detectWorkspace(TMP);
+		const result = runFlutter(TMP, workspace);
+
+		expect(result.details.packages).toEqual([expect.objectContaining({ path: "apps/mobile", kind: "app" })]);
+		expect(result.details.packages.some((pkg: any) => pkg.path === "apps/web")).toBe(false);
+	});
 });

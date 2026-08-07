@@ -8,8 +8,10 @@
  */
 
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { getProductionFiles, readDeps } from "../fs-utils.js";
+import { isAbsolute, join } from "node:path";
+import type { FileInventory, InventoryFile } from "../file-inventory.js";
+import { inventoryFiles, inventorySourceFiles, readInventoryText } from "../file-inventory.js";
+import { getProductionFiles, isIgnoredPath, normalizeToolPath, readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
@@ -33,10 +35,10 @@ const HEAVY_DEPS: Record<string, { kb: number; alt: string }> = {
 	"date-fns": { kb: 40, alt: "import only needed functions: date-fns/format" },
 };
 
-export function runPerformance(cwd: string, workspace?: WorkspaceInfo): CheckResult {
+export function runPerformance(cwd: string, workspace?: WorkspaceInfo, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
-	const sourceFiles = getProductionFiles(cwd);
+	const sourceFiles = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 
 	if (sourceFiles.length === 0) {
 		return {
@@ -168,9 +170,16 @@ export function runPerformance(cwd: string, workspace?: WorkspaceInfo): CheckRes
 		deadExports = knipResult.exports;
 		unusedFiles = knipResult.files;
 		unusedDeps = knipResult.deps;
+		if (!knipResult.configured) {
+			issues.push({
+				severity: "info",
+				message: "Knip is not configured — dead-code findings are lower confidence until entry points are declared",
+				rule: "dead-code-config-missing",
+			});
+		}
 		if (unusedFiles > 0) {
 			issues.push({
-				severity: "warning",
+				severity: knipResult.configured ? "warning" : "info",
 				message: `${unusedFiles} unused files detected by Knip — consider removing`,
 				rule: "dead-files",
 			});
@@ -184,7 +193,7 @@ export function runPerformance(cwd: string, workspace?: WorkspaceInfo): CheckRes
 		}
 		if (unusedDeps > 0) {
 			issues.push({
-				severity: "warning",
+				severity: knipResult.configured ? "warning" : "info",
 				message: `${unusedDeps} unused dependencies detected by Knip — remove from package.json`,
 				rule: "unused-deps",
 			});
@@ -208,7 +217,7 @@ export function runPerformance(cwd: string, workspace?: WorkspaceInfo): CheckRes
 	}
 
 	// ── 8. CSS best practices ──
-	const cssFiles = getProductionFiles(cwd).filter((f) => f.ext === ".css");
+	const cssFiles = collectCssFiles(cwd, inventory);
 	for (const f of cssFiles) {
 		const lines = f.content.split("\n");
 		for (let i = 0; i < lines.length; i++) {
@@ -250,6 +259,7 @@ export function runPerformance(cwd: string, workspace?: WorkspaceInfo): CheckRes
 		grade: gradeFromScore(score),
 		details: {
 			filesScanned: sourceFiles.length,
+			source: inventory ? "file-inventory" : "legacy-walk",
 			barrelImports,
 			heavyDeps,
 			dynamicOpportunities,
@@ -263,6 +273,8 @@ export function runPerformance(cwd: string, workspace?: WorkspaceInfo): CheckRes
 						// False when nothing configured knip — its entry points are then
 						// guesses and "unused" can mean "unreachable from a wrong start".
 						deadCodeConfigured: knipResult.configured,
+						deadCodeConfidence: knipResult.configured ? "high" : "low",
+						excludedDeadCodeItems: knipResult.excluded,
 						// Item lists, not just counts — the Dead Code page needs the
 						// actual candidates (vibecodeqa/app#7). Capped so a pathological
 						// project cannot bloat the report.
@@ -279,6 +291,15 @@ export function runPerformance(cwd: string, workspace?: WorkspaceInfo): CheckRes
 		issues,
 		duration: Date.now() - start,
 	};
+}
+
+function collectCssFiles(cwd: string, inventory?: FileInventory): Array<{ path: string; content: string }> {
+	if (inventory) {
+		return inventoryFiles(inventory)
+			.filter((file): file is InventoryFile & { ext: ".css" } => file.ext === ".css")
+			.map((file) => ({ path: file.path, content: readInventoryText(file) }));
+	}
+	return getProductionFiles(cwd, undefined).filter((f) => f.ext === ".css");
 }
 
 function dirSizeKB(dir: string, depth = 0): number {
@@ -314,6 +335,7 @@ export interface DeadCodeItem {
 	name?: string;
 	line?: number;
 	col?: number;
+	details?: Record<string, string>;
 }
 
 export interface KnipFindings {
@@ -347,7 +369,14 @@ export function deadCodeCheckFromPerformance(performance: CheckResult): CheckRes
 		};
 	}
 
-	const score = total === 0 ? 100 : Math.max(0, 100 - Math.min(90, unusedFiles * 10 + unusedDeps * 8 + deadExports * 2));
+	const configured = details.deadCodeConfigured !== false;
+	const confidence = configured ? "high" : "low";
+	const score =
+		total === 0
+			? 100
+			: configured
+				? Math.max(0, 100 - Math.min(90, unusedFiles * 10 + unusedDeps * 8 + deadExports * 2))
+				: Math.max(60, 100 - Math.min(40, unusedFiles + unusedDeps + Math.ceil(deadExports / 25)));
 	return {
 		name: "dead-code",
 		score,
@@ -357,6 +386,8 @@ export function deadCodeCheckFromPerformance(performance: CheckResult): CheckRes
 			sourceCheck: "performance",
 			deadCodeTool: "knip",
 			deadCodeConfigured: details.deadCodeConfigured,
+			deadCodeConfidence: details.deadCodeConfidence ?? confidence,
+			excludedDeadCodeItems: details.excludedDeadCodeItems ?? 0,
 			unusedFiles,
 			unusedDeps,
 			deadExports,
@@ -448,20 +479,27 @@ export function knipRoots(cwd: string, workspace?: WorkspaceInfo): { dir: string
 function tryKnip(
 	cwd: string,
 	workspace?: WorkspaceInfo,
-): (KnipFindings & { files: number; exports: number; deps: number; configured: boolean }) | null {
+): (KnipFindings & { files: number; exports: number; deps: number; configured: boolean; excluded: number }) | null {
 	const roots = knipRoots(cwd, workspace);
 	const merged: KnipFindings = { unusedFiles: [], unusedExports: [], unusedTypes: [], unusedDeps: [] };
 	let any = false;
 	let configured = true;
+	let excluded = 0;
 	for (const root of roots) {
 		const { stdout } = run("npx knip --reporter json 2>/dev/null || true", root.dir, 60_000);
 		const parsed = parseKnipJson(stdout);
 		if (!parsed) continue;
 		any = true;
 		if (!root.configured) configured = false;
-		const prefix = (f: string) => (root.rel && f && !f.startsWith(root.rel) ? `${root.rel}/${f}` : f);
 		for (const key of ["unusedFiles", "unusedExports", "unusedTypes", "unusedDeps"] as const) {
-			for (const item of parsed[key]) merged[key].push({ ...item, file: prefix(item.file) });
+			for (const item of parsed[key]) {
+				const path = normalizeDeadCodePath(cwd, root.dir, item.file);
+				if (!path.file || isIgnoredPath(path.file)) {
+					excluded++;
+					continue;
+				}
+				merged[key].push({ ...item, file: path.file, details: path.details });
+			}
 		}
 	}
 	if (!any) return null;
@@ -471,5 +509,20 @@ function tryKnip(
 		files: merged.unusedFiles.length,
 		exports: merged.unusedExports.length + merged.unusedTypes.length,
 		deps: merged.unusedDeps.length,
+		excluded,
+	};
+}
+
+function normalizeDeadCodePath(repoCwd: string, toolCwd: string, rawPath: string): { file?: string; details: Record<string, string> } {
+	const repoRelativePath = normalizeToolPath(repoCwd, toolCwd, rawPath);
+	const outsideRepo = repoRelativePath.startsWith("../") || repoRelativePath === ".." || isAbsolute(repoRelativePath);
+	return {
+		file: outsideRepo ? undefined : repoRelativePath,
+		details: {
+			...(outsideRepo ? {} : { repoRelativePath }),
+			toolRelativePath: rawPath,
+			toolCwd,
+			pathStatus: outsideRepo ? "outside-repo" : "normalized",
+		},
 	};
 }

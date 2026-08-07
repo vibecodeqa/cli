@@ -14,15 +14,17 @@
  *   - Behavioral mismatches across modules
  */
 
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
-export function runCodeCoherence(cwd: string): CheckResult {
+export function runCodeCoherence(cwd: string, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const proKey = process.env.VCQA_PRO_KEY || "";
 
-	const files = getProductionFiles(cwd);
+	const files = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 	const totalExports = files.reduce((s, f) => s + (f.content.match(/\bexport\s+/g) || []).length, 0);
 	const totalFunctions = files.reduce((s, f) => s + (f.content.match(/\bfunction\s+\w+/g) || []).length, 0);
 
@@ -36,6 +38,7 @@ export function runCodeCoherence(cwd: string): CheckResult {
 				comingSoon: true,
 				reason: "Set VCQA_PRO_KEY to enable LLM-powered analysis",
 				filesAnalyzed: files.length,
+				source: inventory ? "file-inventory" : "legacy-walk",
 				totalExports,
 				totalFunctions,
 				description:
@@ -94,6 +97,7 @@ export function runCodeCoherence(cwd: string): CheckResult {
 		details: {
 			premium: true,
 			filesAnalyzed: files.length,
+			source: inventory ? "file-inventory" : "legacy-walk",
 			totalExports,
 			totalFunctions,
 			issuesFound: issues.length,

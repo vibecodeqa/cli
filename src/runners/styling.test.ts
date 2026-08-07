@@ -2,7 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runStyling } from "./styling.js";
+import { scan } from "../core.js";
+import { detectWorkspace } from "../detect.js";
+import { runStyling, stylingScore } from "./styling.js";
 
 let dir: string;
 beforeEach(() => {
@@ -127,6 +129,41 @@ export function Layout() {
 		expect(result.issues.some((i) => i.rule === "duplicate-tailwind")).toBe(true);
 	});
 
+	it("does not fail warning/info-only design-system consistency debt", () => {
+		writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "test", dependencies: { tailwindcss: "^3" } }));
+		writeFileSync(join(dir, "tailwind.config.js"), "module.exports = {}");
+		const sharedClasses = "flex items-center justify-between p-4 bg-white rounded-lg shadow-md";
+		for (let i = 0; i < 8; i++) {
+			writeFileSync(
+				join(dir, "src", `Card${i}.tsx`),
+				`export function Card${i}() { return <div className="${sharedClasses}" style={{ backgroundColor: "#123456", padding: "${7 + i}px" }}>card</div>; }`,
+			);
+		}
+
+		const result = runStyling(dir);
+
+		expect(result.issues.length).toBeGreaterThan(0);
+		expect(result.issues.some((issue) => issue.severity === "error")).toBe(false);
+		expect(result.score).toBeGreaterThanOrEqual(60);
+		expect(result.grade).not.toBe("F");
+		expect(result.details).toMatchObject({
+			hardFailure: false,
+			scoring: expect.objectContaining({
+				note: expect.stringContaining("design-system consistency debt"),
+			}),
+		});
+	});
+
+	it("keeps explicit styling errors as hard failures", () => {
+		const errorPenaltyResult = stylingScore(
+			[{ severity: "error", message: "Stylelint parse error", file: "src/App.css", rule: "stylelint-error" }],
+			4,
+		);
+
+		expect(errorPenaltyResult.score).toBeLessThan(80);
+		expect(errorPenaltyResult.hardFailure).toBe(true);
+	});
+
 	it("suggests Stylelint when not installed and CSS files exist", () => {
 		writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "test" }));
 		writeFileSync(join(dir, "src", "App.tsx"), 'export function App() { return <div className="app">app</div>; }');
@@ -145,5 +182,38 @@ export function Layout() {
 		const result = runStyling(dir);
 		const details = result.details as Record<string, unknown>;
 		expect(details.suggestion).toContain("Stylelint");
+	});
+
+	it("scopes styling analysis to frontend projects in a mixed monorepo", () => {
+		rmSync(dir, { recursive: true, force: true });
+		dir = mkdtempSync(join(tmpdir(), "vcqa-style-mixed-"));
+		writeFileSync(join(dir, "package.json"), JSON.stringify({ workspaces: ["packages/*"] }));
+		mkdirSync(join(dir, "packages/web/src"), { recursive: true });
+		mkdirSync(join(dir, "packages/core/src"), { recursive: true });
+		writeFileSync(join(dir, "packages/web/package.json"), JSON.stringify({ dependencies: { react: "^19.0.0" } }));
+		writeFileSync(join(dir, "packages/core/package.json"), JSON.stringify({ dependencies: {} }));
+		writeFileSync(join(dir, "packages/web/src/App.tsx"), `export function App() { return <div className="app">ok</div>; }`);
+		writeFileSync(
+			join(dir, "packages/core/src/Fake.tsx"),
+			`export function Fake() { return <div style={{ backgroundColor: "#123456" }}>fake</div>; }`,
+		);
+
+		const result = runStyling(dir, detectWorkspace(dir));
+
+		expect(result.issues.some((issue) => issue.file?.startsWith("packages/core/"))).toBe(false);
+		expect((result.details as any).projects).toEqual([expect.objectContaining({ path: "packages/web", files: 1 })]);
+	});
+
+	it("uses FileInventory through scan and omits generated component outputs", async () => {
+		mkdirSync(join(dir, "dist"), { recursive: true });
+		writeFileSync(join(dir, "package.json"), JSON.stringify({ dependencies: { react: "^19.0.0" } }));
+		writeFileSync(join(dir, "src", "App.tsx"), 'export function App() { return <div className="app">ok</div>; }');
+		writeFileSync(join(dir, "dist", "Bad.tsx"), 'export function Bad() { return <div style={{ backgroundColor: "#123456" }}>bad</div>; }');
+
+		const report = await scan(dir, { skipTests: true, checks: ["styling"] });
+		const result = report.checks[0]!;
+
+		expect(result.details).toMatchObject({ source: "file-inventory", totalComponentFiles: 1 });
+		expect(result.issues.some((issue) => issue.file?.includes("dist/"))).toBe(false);
 	});
 });

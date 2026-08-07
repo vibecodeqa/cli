@@ -2,7 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { detectWorkspace } from "../detect.js";
+import { buildFileInventory } from "../file-inventory.js";
 import { setGlobalSrcRoots } from "../fs-utils.js";
+import { buildEffectiveScanPolicy } from "../scan-policy.js";
 import { runDocs } from "./docs.js";
 
 function makeProject(files: Record<string, string>): string {
@@ -17,6 +20,10 @@ function makeProject(files: Record<string, string>): string {
 }
 
 afterEach(() => setGlobalSrcRoots(undefined));
+
+function inventory(dir: string) {
+	return buildFileInventory(dir, detectWorkspace(dir), buildEffectiveScanPolicy(dir, {}));
+}
 
 describe("runDocs", () => {
 	it("flags missing README", () => {
@@ -73,6 +80,26 @@ describe("runDocs", () => {
 		});
 		const result = runDocs(dir);
 		expect((result.details as any).documentedPct).toBe("100%");
+		rmSync(dir, { recursive: true });
+	});
+
+	it("uses FileInventory and excludes ignored/generated source", () => {
+		const dir = makeProject({
+			"README.md": "# App\n\nDocumented enough for this regression.\n\n## Install\n\nnpm install\n\n## Usage\n\nnpm test\n",
+			"CHANGELOG.md": "# Changelog\n",
+			"src/app.ts": "/** Does something. */\nexport function foo() {}\n",
+			"dist/generated.ts": "export function generatedOutput() {}\n",
+			".claude/worktrees/agent-a/src/generated.ts": "export function agentOutput() {}\n",
+		});
+		const result = runDocs(dir, inventory(dir));
+		expect(result.details).toMatchObject({
+			totalExports: 1,
+			documentedExports: 1,
+			documentedPct: "100%",
+			source: "file-inventory",
+		});
+		expect(result.issues.some((i) => i.file?.includes(".claude/worktrees") || i.file?.startsWith("dist/"))).toBe(false);
+		expect(result.issues.some((i) => i.rule === "undocumented-exports")).toBe(false);
 		rmSync(dir, { recursive: true });
 	});
 

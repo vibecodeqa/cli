@@ -7,6 +7,7 @@ source extensions, test file patterns, generated files, visual-neutral files,
 ecosystem skip directories, project markers, and default toolchain commands.
 
 This spec feeds the analyzer contract in `internal-analyzer-contract.md`.
+`repo-discovery.md` owns how profile facts become project contexts.
 
 ## Why Profiles Exist
 
@@ -66,7 +67,8 @@ profiles until they need full framework analyzers.
 
 ## Project Markers
 
-Project markers determine monorepo project roots. They must be conservative.
+Project markers determine candidate project roots. They must be conservative and
+only come from deterministic repo evidence, never from LLM guesses.
 
 Current allowed markers:
 
@@ -85,6 +87,9 @@ Do not add these markers yet:
 
 Those markers would surface projects whose checks mostly skip. Add them only
 when the matching language profile and analyzers are ready.
+
+LLM/Pro features may suggest new markers or explain ambiguous folders, but the
+profile registry is still the deterministic source of truth.
 
 ## Generated and Visual-Neutral Files
 

@@ -2,7 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { detectWorkspace } from "../detect.js";
+import { buildFileInventory } from "../file-inventory.js";
 import { setGlobalSrcRoots } from "../fs-utils.js";
+import { buildEffectiveScanPolicy } from "../scan-policy.js";
 import { runStandards } from "./standards.js";
 
 function makeProject(files: Record<string, string>, stack = { language: "typescript" as const }): { dir: string; stack: any } {
@@ -17,6 +20,10 @@ function makeProject(files: Record<string, string>, stack = { language: "typescr
 		dir,
 		stack: { language: stack.language, framework: "none", bundler: "none", testRunner: "none", linter: "none", packageManager: "npm" },
 	};
+}
+
+function inventory(dir: string) {
+	return buildFileInventory(dir, detectWorkspace(dir), buildEffectiveScanPolicy(dir, {}));
 }
 
 afterEach(() => setGlobalSrcRoots(undefined));
@@ -36,16 +43,121 @@ describe("runStandards", () => {
 			"src/app.ts": "var x = 1;\n",
 		});
 		const result = runStandards(dir, stack);
-		expect(result.issues.some((i) => i.message.includes("var"))).toBe(true);
+		const issue = result.issues.find((i) => i.message.includes("var"));
+		expect(issue).toBeDefined();
+		expect(issue!.severity).toBe("warning");
+		rmSync(dir, { recursive: true });
+	});
+
+	it("does not match code smell rules inside template literals", () => {
+		const { dir, stack } = makeProject({
+			"src/app.ts": `export function buildLoaderJs(): string {
+  return \`
+    var URL = "https://example.com";
+    console.log(URL);
+    if (URL == location.href) {}
+    document.body.innerHTML = "<p>loaded</p>";
+    document.write("hello");
+    eval("1 + 1");
+  \`;
+}
+`,
+			"tsconfig.json":
+				'{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"verbatimModuleSyntax":true,"skipLibCheck":true}}',
+		});
+		const result = runStandards(dir, stack);
+		expect(result.issues.some((i) => i.rule === "var keyword")).toBe(false);
+		expect(result.issues.some((i) => i.rule === "console.log")).toBe(false);
+		expect(result.issues.some((i) => i.rule === "loose equality")).toBe(false);
+		expect(result.issues.some((i) => i.rule === "innerHTML assignment")).toBe(false);
+		expect(result.issues.some((i) => i.rule === "document.write")).toBe(false);
+		expect(result.issues.some((i) => i.rule === "eval()")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("does not match code smell rules inside string-built embedded browser code", () => {
+		const { dir, stack } = makeProject({
+			"src/loader.ts": `export function buildLoaderJs(): string {
+  return [
+    'var URL = "https://example.com";',
+    "console.log(URL);",
+    "if (URL == location.href) {}",
+    "document.body.innerHTML = '<p>loaded</p>';",
+    "eval('1 + 1');",
+  ].join("\\n");
+}
+`,
+			"tsconfig.json":
+				'{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"verbatimModuleSyntax":true,"skipLibCheck":true}}',
+		});
+		const result = runStandards(dir, stack);
+		const smellRules = new Set(["var keyword", "console.log", "loose equality", "innerHTML assignment", "eval()"]);
+		expect(result.issues.filter((i) => smellRules.has(i.rule ?? "")).map((i) => i.rule)).toEqual([]);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("does not match code smell rules inside comments documenting code", () => {
+		const { dir, stack } = makeProject({
+			"src/comments.ts": `// var URL = "https://example.com"; console.log(URL); eval("1 + 1");
+/*
+document.body.innerHTML = "<p>loaded</p>";
+if (URL == location.href) {}
+*/
+export const ok = true;
+`,
+			"tsconfig.json":
+				'{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"verbatimModuleSyntax":true,"skipLibCheck":true}}',
+		});
+		const result = runStandards(dir, stack);
+		const smellRules = new Set(["var keyword", "console.log", "loose equality", "innerHTML assignment", "eval()"]);
+		expect(result.issues.filter((i) => smellRules.has(i.rule ?? "")).map((i) => i.rule)).toEqual([]);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("still detects real code smell rules outside literals and comments", () => {
+		const { dir, stack } = makeProject({
+			"src/app.ts": `export function run(input: string, el: HTMLElement, a: string, b: string): unknown {
+  var count = 1;
+  console.log(count);
+  if (a == b) count++;
+  el.innerHTML = input;
+  return eval(input);
+}
+`,
+			"tsconfig.json":
+				'{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"verbatimModuleSyntax":true,"skipLibCheck":true}}',
+		});
+		const result = runStandards(dir, stack);
+		expect(result.issues.some((i) => i.rule === "var keyword")).toBe(true);
+		expect(result.issues.some((i) => i.rule === "console.log")).toBe(true);
+		expect(result.issues.some((i) => i.rule === "loose equality")).toBe(true);
+		expect(result.issues.some((i) => i.rule === "innerHTML assignment")).toBe(true);
+		expect(result.issues.some((i) => i.rule === "eval()")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("still detects real code inside template interpolation", () => {
+		const { dir, stack } = makeProject({
+			"src/app.ts": `export function render(value: string): string {
+  return \`value: \${eval(value)}\`;
+}
+`,
+			"tsconfig.json":
+				'{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"verbatimModuleSyntax":true,"skipLibCheck":true}}',
+		});
+		const result = runStandards(dir, stack);
+		expect(result.issues.some((i) => i.rule === "eval()")).toBe(true);
 		rmSync(dir, { recursive: true });
 	});
 
 	it("detects large files", () => {
 		const { dir, stack } = makeProject({
-			"src/big.ts": Array.from({ length: 350 }, (_, i) => `export const v${i} = ${i};`).join("\n"),
+			"src/big.ts": Array.from({ length: 650 }, (_, i) => `export const v${i} = ${i};`).join("\n"),
 		});
 		const result = runStandards(dir, stack);
-		expect(result.issues.some((i) => i.rule === "large-file")).toBe(true);
+		const issue = result.issues.find((i) => i.rule === "large-file");
+		expect(issue).toBeDefined();
+		expect(issue!.severity).toBe("warning");
 		rmSync(dir, { recursive: true });
 	});
 
@@ -71,7 +183,7 @@ describe("runStandards", () => {
 
 	it("returns clean score for well-written code", () => {
 		const { dir, stack } = makeProject({
-			"src/app.ts": "export function greet(name: string): string {\n  return `Hello ${name}`;\n}\n",
+			"src/app.ts": "export function greet(name: string): string {\n  return 'Hello ' + name;\n}\n",
 			"tsconfig.json": '{"compilerOptions":{"strict":true}}',
 		});
 		const result = runStandards(dir, stack);
@@ -158,6 +270,23 @@ describe("runStandards", () => {
 		const { dir, stack } = makeProject({ "src/a.ts": lines250 });
 		const result = runStandards(dir, stack);
 		expect(result.issues.filter((i) => i.rule === "large-file")).toHaveLength(0);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("uses FileInventory and excludes ignored/generated source", () => {
+		const generatedLines = Array.from({ length: 650 }, (_, i) => `export const dist${i} = ${i};`).join("\n");
+		const agentLines = Array.from({ length: 650 }, (_, i) => `export const agent${i} = ${i};`).join("\n");
+		const { dir, stack } = makeProject({
+			"src/app.ts": "export const app = 1;\n",
+			"dist/generated.ts": `${generatedLines}\nconsole.log("dist");\n`,
+			".claude/worktrees/agent-a/src/generated.ts": `${agentLines}\nconsole.log("agent");\n`,
+			"tsconfig.json":
+				'{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"verbatimModuleSyntax":true,"skipLibCheck":true}}',
+		});
+		const result = runStandards(dir, stack, undefined, inventory(dir));
+		expect(result.details).toMatchObject({ filesScanned: 1, source: "file-inventory" });
+		expect(result.issues.some((i) => i.file?.includes(".claude/worktrees") || i.file?.startsWith("dist/"))).toBe(false);
+		expect(result.issues.some((i) => i.rule === "large-file" || i.rule === "console.log")).toBe(false);
 		rmSync(dir, { recursive: true });
 	});
 });

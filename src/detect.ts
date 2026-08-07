@@ -3,7 +3,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { StackInfo, WorkspaceInfo, WorkspacePackage } from "./types.js";
+import type { ProjectContext, ProjectDiscoveryEvidence, ProjectToolCommand, StackInfo, WorkspaceInfo, WorkspacePackage } from "./types.js";
 
 /** Detect infrastructure/data components (open vocabulary — see schema's StackInfo.components).
  *  Looks at the root and workspace package dirs for wrangler config and migration dirs. */
@@ -142,6 +142,96 @@ export function detectStack(cwd: string, workspace?: WorkspaceInfo): StackInfo {
 	return withComponents({ language, framework, bundler, testRunner, linter, packageManager });
 }
 
+function detectProjectStack(projectDir: string, rootCwd: string): StackInfo {
+	const has = (f: string) => existsSync(join(projectDir, f));
+	const read = (f: string) => {
+		try {
+			return readFileSync(join(projectDir, f), "utf-8");
+		} catch {
+			return "";
+		}
+	};
+
+	const pubspec = read("pubspec.yaml");
+	if (pubspec || has("pubspec.lock")) {
+		const isFlutter = pubspec.includes("flutter:") || pubspec.includes("flutter_test:");
+		const hasTest = pubspec.includes("test:") || pubspec.includes("flutter_test:");
+		return {
+			language: "dart",
+			framework: isFlutter ? "flutter" : "none",
+			bundler: "none",
+			testRunner: isFlutter ? (hasTest ? "flutter_test" : "none") : hasTest ? "dart_test" : "none",
+			linter: has("analysis_options.yaml") ? "dart_analyze" : "none",
+			packageManager: "pub",
+			components: detectComponents(projectDir),
+		};
+	}
+
+	let allDeps: Record<string, string> = {};
+	const pkg = read("package.json");
+	try {
+		const parsed = pkg ? JSON.parse(pkg) : {};
+		allDeps = { ...parsed.dependencies, ...parsed.devDependencies };
+	} catch {
+		/* invalid package.json */
+	}
+
+	const language =
+		has("tsconfig.json") ||
+		has("tsconfig.app.json") ||
+		has("tsconfig.base.json") ||
+		allDeps.typescript ||
+		readSafeEntries(projectDir).some((f) => f.endsWith(".ts") || f.endsWith(".tsx"))
+			? "typescript"
+			: allDeps.react || allDeps.vue || allDeps.svelte
+				? "javascript"
+				: "unknown";
+
+	let framework: StackInfo["framework"] = "none";
+	if (allDeps.next || allDeps.react) framework = "react";
+	else if (allDeps.nuxt || allDeps.vue) framework = "vue";
+	else if (allDeps["@sveltejs/kit"] || allDeps.svelte) framework = "svelte";
+
+	let bundler: StackInfo["bundler"] = "none";
+	if (allDeps.next || allDeps.nuxt) bundler = "vite";
+	else if (allDeps.vite || allDeps["@sveltejs/kit"]) bundler = "vite";
+	else if (allDeps.webpack) bundler = "webpack";
+	else if (allDeps.esbuild) bundler = "esbuild";
+
+	const hasBiomeConfig = has("biome.json") || has("biome.jsonc");
+	const hasEslintConfig =
+		has(".eslintrc") ||
+		has(".eslintrc.json") ||
+		has(".eslintrc.js") ||
+		has(".eslintrc.cjs") ||
+		has(".eslintrc.yml") ||
+		has(".eslintrc.yaml") ||
+		has("eslint.config.js") ||
+		has("eslint.config.ts") ||
+		has("eslint.config.mjs") ||
+		has("eslint.config.cjs");
+	const linter: StackInfo["linter"] =
+		allDeps["@biomejs/biome"] || hasBiomeConfig ? "biome" : allDeps.eslint || hasEslintConfig ? "eslint" : "none";
+	const packageManager: StackInfo["packageManager"] =
+		has("pnpm-lock.yaml") || existsSync(join(rootCwd, "pnpm-lock.yaml"))
+			? "pnpm"
+			: has("bun.lockb") || has("bun.lock") || existsSync(join(rootCwd, "bun.lockb")) || existsSync(join(rootCwd, "bun.lock"))
+				? "bun"
+				: has("yarn.lock") || existsSync(join(rootCwd, "yarn.lock"))
+					? "yarn"
+					: "npm";
+	const components = detectComponents(projectDir);
+	const stack: StackInfo = {
+		language,
+		framework,
+		bundler,
+		testRunner: allDeps.vitest ? "vitest" : allDeps.jest ? "jest" : "none",
+		linter,
+		packageManager,
+	};
+	return components.length > 0 ? { ...stack, components } : stack;
+}
+
 /**
  * Parse a YAML list under a given key. Handles:
  * - Block-style with comments/blank lines between entries
@@ -192,18 +282,21 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 	// Detect workspace tool
 	let tool: WorkspaceInfo["tool"] = "none";
 	let globs: string[] = [];
+	const discoveryEvidence: ProjectDiscoveryEvidence[] = [];
 
 	// ── Dart/Flutter monorepo (melos) ──
 	if (has("melos.yaml")) {
 		tool = "melos";
 		globs = parseYamlList(read("melos.yaml"), "packages");
 		if (globs.length === 0) globs = ["packages/*"];
+		discoveryEvidence.push({ kind: "manifest", file: "melos.yaml", description: "Melos workspace manifest defines package globs" });
 	}
 
 	// ── Node.js workspace configs ──
 	if (tool === "none" && has("pnpm-workspace.yaml")) {
 		tool = "pnpm";
 		globs = parseYamlList(read("pnpm-workspace.yaml"), "packages");
+		discoveryEvidence.push({ kind: "manifest", file: "pnpm-workspace.yaml", description: "pnpm workspace manifest defines package globs" });
 	}
 
 	if (tool === "none") {
@@ -216,6 +309,7 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 					if (ws.length > 0) {
 						tool = has("bun.lockb") || has("bun.lock") ? "bun" : has("yarn.lock") ? "yarn" : "npm";
 						globs = ws;
+						discoveryEvidence.push({ kind: "manifest", file: "package.json", description: "package.json workspaces define package globs" });
 					}
 				}
 			} catch {
@@ -227,6 +321,7 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 	if (has("lerna.json") && tool === "none") {
 		tool = "lerna";
 		const lerna = read("lerna.json");
+		discoveryEvidence.push({ kind: "manifest", file: "lerna.json", description: "Lerna workspace manifest defines package globs" });
 		try {
 			const parsed = JSON.parse(lerna);
 			globs = parsed.packages || ["packages/*"];
@@ -236,8 +331,14 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 	}
 
 	// Detect orchestration tools (overlay on top of workspace tool)
-	if (has("turbo.json") && tool !== "none" && tool !== "melos") tool = "turborepo";
-	if (has("nx.json") && tool !== "none" && tool !== "melos") tool = "nx";
+	if (has("turbo.json") && tool !== "none" && tool !== "melos") {
+		tool = "turborepo";
+		discoveryEvidence.push({ kind: "tooling", file: "turbo.json", description: "Turborepo config overlays the workspace" });
+	}
+	if (has("nx.json") && tool !== "none" && tool !== "melos") {
+		tool = "nx";
+		discoveryEvidence.push({ kind: "tooling", file: "nx.json", description: "Nx config overlays the workspace" });
+	}
 
 	// Filter out negation patterns (pnpm !prefix exclusions)
 	globs = globs.filter((g) => !g.startsWith("!"));
@@ -273,7 +374,14 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 	}
 
 	const srcRoots = buildSrcRoots(cwd, packages);
-	return { isMonorepo: true, tool, packages, srcRoots };
+	return {
+		isMonorepo: true,
+		tool,
+		packages,
+		srcRoots,
+		projects: buildProjectContexts(cwd, packages, discoveryEvidence, true),
+		discovery: { mode: "manifest", evidence: discoveryEvidence },
+	};
 }
 
 /** Resolve a workspace glob/path to package directories. */
@@ -382,6 +490,149 @@ function addPackage(relPath: string, pkgDir: string, packages: WorkspacePackage[
 	packages.push({ name, path: relPath, hasSrc: hasSrc || hasRootCode, hasRootCode, hasTests, hasLinter });
 }
 
+function projectId(path: string): string {
+	return path === "." ? "root" : path.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "") || "project";
+}
+
+function projectKind(path: string): ProjectContext["kind"] {
+	if (path === ".") return "root";
+	const first = path.split("/")[0] ?? "";
+	if (first === "apps" || first === "web" || first === "client" || first === "frontend") return "app";
+	if (first === "services" || first === "api" || first === "server" || first === "backend" || path.includes("worker")) return "service";
+	if (first === "packages" || first === "libs" || first === "lib" || path.includes("shared")) return "library";
+	return "package";
+}
+
+function existingRelativeFiles(cwd: string, basePath: string, candidates: string[]): string[] {
+	const base = basePath === "." ? cwd : join(cwd, basePath);
+	return candidates.filter((f) => existsSync(join(base, f))).map((f) => (basePath === "." ? f : join(basePath, f)));
+}
+
+function projectRoots(cwd: string, basePath: string, dirs: string[]): string[] {
+	const base = basePath === "." ? cwd : join(cwd, basePath);
+	return dirs.filter((d) => existsSync(join(base, d))).map((d) => (basePath === "." ? d : join(basePath, d)));
+}
+
+function projectConfidence(
+	manifestFiles: string[],
+	configFiles: string[],
+	srcRoots: string[],
+	evidence: ProjectDiscoveryEvidence[],
+): number {
+	let confidence = 0.35;
+	if (manifestFiles.length > 0) confidence += 0.35;
+	if (configFiles.length > 0) confidence += 0.15;
+	if (srcRoots.length > 0) confidence += 0.1;
+	if (evidence.some((item) => item.kind === "manifest")) confidence += 0.05;
+	if (evidence.some((item) => item.kind === "convention")) confidence -= 0.05;
+	return Math.max(0, Math.min(1, Number(confidence.toFixed(2))));
+}
+
+function projectToolCommands(project: {
+	path: string;
+	stack: StackInfo;
+	configFiles: string[];
+	manifestFiles: string[];
+	testRoots: string[];
+}): ProjectContext["toolCommands"] {
+	const cwd = project.path;
+	const hasConfig = (name: string) => project.configFiles.some((file) => file === name || file.endsWith(`/${name}`));
+	const hasManifest = (name: string) => project.manifestFiles.some((file) => file === name || file.endsWith(`/${name}`));
+	const commands: ProjectContext["toolCommands"] = {};
+	const add = (kind: keyof ProjectContext["toolCommands"], command: ProjectToolCommand) => {
+		commands[kind] = [...(commands[kind] ?? []), command];
+	};
+
+	if (project.stack.linter === "biome") add("lint", { tool: "biome", cwd, command: ["npx", "biome", "check", "."] });
+	if (project.stack.linter === "eslint") add("lint", { tool: "eslint", cwd, command: ["npx", "eslint", "."] });
+	if (project.stack.linter === "dart_analyze") add("lint", { tool: "dart", cwd, command: ["dart", "analyze"] });
+	if (hasConfig("tsconfig.json")) add("typecheck", { tool: "tsc", cwd, command: ["npx", "tsc", "--noEmit"] });
+	if (hasManifest("pubspec.yaml")) add("typecheck", { tool: "dart", cwd, command: ["dart", "analyze"] });
+	if (project.stack.testRunner === "vitest") add("test", { tool: "vitest", cwd, command: ["npx", "vitest", "run"] });
+	if (project.stack.testRunner === "jest") add("test", { tool: "jest", cwd, command: ["npx", "jest", "--json"] });
+	if (project.stack.testRunner === "flutter_test") add("test", { tool: "flutter", cwd, command: ["flutter", "test"] });
+	if (project.stack.testRunner === "dart_test") add("test", { tool: "dart", cwd, command: ["dart", "test"] });
+	if (project.stack.packageManager !== "pub" && hasManifest("package.json")) {
+		add("audit", { tool: project.stack.packageManager, cwd, command: [project.stack.packageManager, "audit"] });
+	}
+	return commands;
+}
+
+function createProjectContext(cwd: string, pkg: WorkspacePackage | null, evidence: ProjectDiscoveryEvidence[]): ProjectContext {
+	const path = pkg?.path ?? ".";
+	const dir = path === "." ? cwd : join(cwd, path);
+	const manifestFiles = existingRelativeFiles(cwd, path, ["package.json", "pubspec.yaml"]);
+	const configFiles = existingRelativeFiles(cwd, path, [
+		"tsconfig.json",
+		"tsconfig.app.json",
+		"tsconfig.base.json",
+		"biome.json",
+		"biome.jsonc",
+		"eslint.config.js",
+		"eslint.config.mjs",
+		"eslint.config.cjs",
+		"eslint.config.ts",
+		".eslintrc",
+		".eslintrc.json",
+		".eslintrc.js",
+		".eslintrc.cjs",
+		".eslintrc.yml",
+		".eslintrc.yaml",
+		"analysis_options.yaml",
+		"vitest.config.ts",
+		"vitest.config.js",
+		"jest.config.js",
+		"jest.config.ts",
+		"wrangler.toml",
+		"wrangler.json",
+		"wrangler.jsonc",
+	]);
+	const srcRoots = pkg?.hasRootCode ? [path] : projectRoots(cwd, path, ["src", "app", "lib"]);
+	const testRoots = projectRoots(cwd, path, ["test", "tests", "__tests__", "e2e"]);
+	const stack = detectProjectStack(dir, cwd);
+	const projectEvidence = [
+		...evidence,
+		...manifestFiles.map((file) => ({ kind: "manifest", file, description: "Project manifest found" }) satisfies ProjectDiscoveryEvidence),
+		...configFiles.map((file) => ({ kind: "config", file, description: "Project config found" }) satisfies ProjectDiscoveryEvidence),
+	];
+	const toolCommands = projectToolCommands({ path, stack, configFiles, manifestFiles, testRoots });
+	return {
+		id: projectId(path),
+		name: pkg?.name ?? "root",
+		path,
+		kind: projectKind(path),
+		stack,
+		srcRoots,
+		testRoots,
+		configFiles,
+		manifestFiles,
+		evidence: projectEvidence,
+		confidence: projectConfidence(manifestFiles, configFiles, srcRoots, projectEvidence),
+		toolCommands,
+	};
+}
+
+function buildProjectContexts(
+	cwd: string,
+	packages: WorkspacePackage[],
+	discoveryEvidence: ProjectDiscoveryEvidence[],
+	includeRoot: boolean,
+): ProjectContext[] {
+	const projects: ProjectContext[] = [];
+	if (includeRoot) {
+		projects.push(createProjectContext(cwd, null, [{ kind: "source", path: ".", description: "Repository root scanned as a project" }]));
+	}
+	for (const pkg of packages) {
+		projects.push(
+			createProjectContext(cwd, pkg, [
+				...discoveryEvidence,
+				{ kind: "source", path: pkg.path, description: "Workspace package selected as a scan project" },
+			]),
+		);
+	}
+	return projects;
+}
+
 /** Build srcRoots from resolved packages. */
 function buildSrcRoots(cwd: string, packages: WorkspacePackage[]): string[] {
 	const srcRoots: string[] = [];
@@ -420,7 +671,18 @@ function buildSrcRoots(cwd: string, packages: WorkspacePackage[]): string[] {
  * but still have a multi-root structure (e.g. server/ + client/, apps/ + libs/).
  */
 function detectConventionalLayout(cwd: string): WorkspaceInfo {
-	const none: WorkspaceInfo = { isMonorepo: false, tool: "none", packages: [], srcRoots: ["src", "web/src", "lib", "app"] };
+	const singleEvidence: ProjectDiscoveryEvidence[] = [
+		{ kind: "source", path: ".", description: "No workspace manifest found; repository root scanned as a single project" },
+	];
+	const rejectedEvidence: ProjectDiscoveryEvidence[] = [];
+	const none: WorkspaceInfo = {
+		isMonorepo: false,
+		tool: "none",
+		packages: [],
+		srcRoots: ["src", "web/src", "lib", "app"],
+		projects: buildProjectContexts(cwd, [], singleEvidence, true),
+		discovery: { mode: "single", evidence: singleEvidence },
+	};
 
 	// Check for common multi-app layouts
 	const conventions = [
@@ -434,6 +696,14 @@ function detectConventionalLayout(cwd: string): WorkspaceInfo {
 	for (const dirs of conventions) {
 		const existing = dirs.filter((d) => existsSync(join(cwd, d)) && statSync(join(cwd, d)).isDirectory());
 		if (existing.length < 2) continue;
+		const conventionRejectedEvidence: ProjectDiscoveryEvidence[] = [];
+		const conventionEvidence: ProjectDiscoveryEvidence[] = [
+			{
+				kind: "convention",
+				path: existing.join(" + "),
+				description: "Conventional multi-root layout detected without a workspace manifest",
+			},
+		];
 
 		// Found a conventional layout — treat like a monorepo
 		const packages: WorkspacePackage[] = [];
@@ -450,24 +720,48 @@ function detectConventionalLayout(cwd: string): WorkspaceInfo {
 
 			if (hasPkgJson) {
 				for (const entry of subDirs) {
-					addPackage(`${dir}/${entry}`, join(cwd, dir, entry), packages);
+					const childPath = `${dir}/${entry}`;
+					const childDir = join(cwd, dir, entry);
+					if (hasSupportedProjectMarker(childDir)) {
+						addPackage(childPath, childDir, packages);
+					} else {
+						conventionRejectedEvidence.push({
+							kind: "rejected",
+							path: childPath,
+							description: "Convention candidate rejected because no supported project manifest was found",
+						});
+					}
 				}
 			} else {
 				// The directory itself is a "package" (server/, client/)
 				// Only if it has a package.json or source files
 				const dirPath = join(cwd, dir);
-				const hasManifest = existsSync(join(dirPath, "package.json")) || existsSync(join(dirPath, "pubspec.yaml"));
+				const hasManifest = hasSupportedProjectMarker(dirPath);
 				const hasCode = readdirSync(dirPath).some(
 					(f) => f.endsWith(".ts") || f.endsWith(".tsx") || f.endsWith(".js") || f.endsWith(".dart"),
 				);
 				if (hasManifest || hasCode) {
 					addPackage(dir, dirPath, packages);
+				} else {
+					conventionRejectedEvidence.push({
+						kind: "rejected",
+						path: dir,
+						description: "Convention candidate rejected because no supported project manifest or root source file was found",
+					});
 				}
 			}
 		}
 
 		if (packages.length > 0) {
-			return { isMonorepo: true, tool: "none", packages, srcRoots: buildSrcRoots(cwd, packages) };
+			const evidence = [...conventionEvidence, ...conventionRejectedEvidence];
+			return {
+				isMonorepo: true,
+				tool: "none",
+				packages,
+				srcRoots: buildSrcRoots(cwd, packages),
+				projects: buildProjectContexts(cwd, packages, conventionEvidence, true),
+				discovery: { mode: "convention", evidence },
+			};
 		}
 	}
 
@@ -483,7 +777,7 @@ function detectConventionalLayout(cwd: string): WorkspaceInfo {
 		} catch {
 			continue;
 		}
-		if (existsSync(join(full, "package.json")) || existsSync(join(full, "pubspec.yaml"))) {
+		if (hasSupportedProjectMarker(full)) {
 			addPackage(entry, full, packages);
 			continue;
 		}
@@ -502,17 +796,56 @@ function detectConventionalLayout(cwd: string): WorkspaceInfo {
 			} catch {
 				continue;
 			}
-			if (existsSync(join(childFull, "package.json")) || existsSync(join(childFull, "pubspec.yaml"))) {
+			if (hasSupportedProjectMarker(childFull)) {
 				addPackage(`${entry}/${child}`, childFull, packages);
+			} else {
+				rejectedEvidence.push({
+					kind: "rejected",
+					path: `${entry}/${child}`,
+					description: "Nested convention candidate rejected because no supported project manifest was found",
+				});
 			}
 		}
 	}
 
 	if (packages.length >= 2) {
-		return { isMonorepo: true, tool: "none", packages, srcRoots: buildSrcRoots(cwd, packages) };
+		const conventionEvidence: ProjectDiscoveryEvidence[] = [
+			{
+				kind: "convention",
+				path: packages.map((p) => p.path).join(", "),
+				description: "Multiple child manifests detected without a workspace manifest",
+			},
+		];
+		return {
+			isMonorepo: true,
+			tool: "none",
+			packages,
+			srcRoots: buildSrcRoots(cwd, packages),
+			projects: buildProjectContexts(cwd, packages, conventionEvidence, true),
+			discovery: { mode: "convention", evidence: [...conventionEvidence, ...rejectedEvidence] },
+		};
 	}
 
-	return none;
+	return rejectedEvidence.length > 0
+		? { ...none, discovery: { mode: "single", evidence: [...singleEvidence, ...rejectedEvidence] } }
+		: none;
+}
+
+function hasSupportedProjectMarker(dir: string): boolean {
+	return [
+		"package.json",
+		"pubspec.yaml",
+		"tsconfig.json",
+		"tsconfig.app.json",
+		"tsconfig.base.json",
+		"biome.json",
+		"biome.jsonc",
+		"eslint.config.js",
+		"eslint.config.ts",
+		"eslint.config.mjs",
+		"eslint.config.cjs",
+		"analysis_options.yaml",
+	].some((marker) => existsSync(join(dir, marker)));
 }
 
 /** Detect GitHub/GitLab repo URL from git remote. */

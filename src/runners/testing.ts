@@ -11,8 +11,10 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, extname, join, relative } from "node:path";
-import { getProductionFiles, readDeps } from "../fs-utils.js";
-import type { CheckResult, Issue, StackInfo } from "../types.js";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
+import { getProductionFiles, normalizeToolPath, readDeps } from "../fs-utils.js";
+import type { CheckResult, Issue, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
 
@@ -46,6 +48,8 @@ interface CoverageData {
 }
 
 type TestCaseStatus = "passed" | "failed" | "skipped" | "todo" | "unknown";
+type TestProjectRunStatus = "passed" | "failed" | "partial" | "no-tests-matched" | "parse-failed" | "command-failed" | "skipped";
+type TestCoverageStatus = "reported" | "not-reported";
 
 interface TestCaseReport {
 	name: string;
@@ -68,6 +72,8 @@ interface TestSuiteReport {
 interface TestExecutionReport {
 	runner: string;
 	cwd: string;
+	projectId?: string;
+	projectPath?: string;
 	passed: number;
 	failed: number;
 	total: number;
@@ -75,6 +81,18 @@ interface TestExecutionReport {
 	suites: TestSuiteReport[];
 	failures: (TestCaseReport & { file: string })[];
 	slowest: (TestCaseReport & { file: string })[];
+}
+
+interface NormalizedTestProjectReport extends TestExecutionReport {
+	id: string;
+	path: string;
+	command: string | null;
+	status: TestProjectRunStatus;
+	statusLabel: string;
+	executionOk: boolean | null;
+	reportParsed: boolean;
+	coverageStatus: TestCoverageStatus;
+	coverage: CoverageData | null;
 }
 
 // ── Classification rules ──
@@ -115,7 +133,9 @@ function countPatterns(content: string) {
 
 // ── File discovery ──
 
-function findTestFiles(cwd: string, srcRoots?: string[]): TestFile[] {
+function findTestFiles(cwd: string, srcRoots?: string[], inventory?: FileInventory): TestFile[] {
+	if (inventory) return inventoryTestFiles(inventory);
+
 	const files: TestFile[] = [];
 	const dirs = srcRoots
 		? [...srcRoots, "e2e", "playwright"]
@@ -130,6 +150,22 @@ function findTestFiles(cwd: string, srcRoots?: string[]): TestFile[] {
 		if (existsSync(full)) walkTests(full, cwd, files);
 	}
 	return files;
+}
+
+function inventoryTestFiles(inventory: FileInventory): TestFile[] {
+	return inventorySourceFiles(inventory, { includeTests: true }).flatMap((file) => {
+		if (!isTestCandidate(file.path)) return [];
+		const layer = classifyTestFile(file.path, file.content);
+		const patterns = countPatterns(file.content);
+		return [
+			{
+				path: file.path,
+				layer,
+				lines: file.lines,
+				...patterns,
+			},
+		];
+	});
 }
 
 function walkTests(dir: string, cwd: string, out: TestFile[]): void {
@@ -154,16 +190,8 @@ function walkTests(dir: string, cwd: string, out: TestFile[]): void {
 		if (![".ts", ".tsx", ".js", ".jsx", ".dart"].includes(ext)) continue;
 		// Check if file is in a test directory by matching path segments (not substrings)
 		const relDir = dir.startsWith(cwd) ? dir.slice(cwd.length) : dir;
-		const inTestDir = /(?:^|\/)(?:test|tests|__tests__|e2e)(?:\/|$)/.test(relDir);
-		if (
-			!entry.includes(".test.") &&
-			!entry.includes(".spec.") &&
-			!entry.includes(".e2e.") &&
-			!entry.includes(".int.") &&
-			!entry.endsWith("_test.dart") &&
-			!inTestDir
-		)
-			continue;
+		const relPath = full.replace(`${cwd}/`, "");
+		if (!isTestCandidate(relPath, relDir, entry)) continue;
 
 		let content: string;
 		try {
@@ -171,7 +199,6 @@ function walkTests(dir: string, cwd: string, out: TestFile[]): void {
 		} catch {
 			continue;
 		}
-		const relPath = full.replace(`${cwd}/`, "");
 		const layer = classifyTestFile(relPath, content);
 		const patterns = countPatterns(content);
 
@@ -184,8 +211,20 @@ function walkTests(dir: string, cwd: string, out: TestFile[]): void {
 	}
 }
 
-function findSourceFiles(cwd: string, srcRoots?: string[]): string[] {
-	return getProductionFiles(cwd, srcRoots).map((f) => f.path);
+function isTestCandidate(relPath: string, relDir = "", entry = basename(relPath)): boolean {
+	const inTestDir = /(?:^|\/)(?:test|tests|__tests__|e2e|playwright)(?:\/|$)/.test(relDir || relPath);
+	return (
+		entry.includes(".test.") ||
+		entry.includes(".spec.") ||
+		entry.includes(".e2e.") ||
+		entry.includes(".int.") ||
+		entry.endsWith("_test.dart") ||
+		inTestDir
+	);
+}
+
+function findSourceFiles(cwd: string, srcRoots?: string[], inventory?: FileInventory): string[] {
+	return (inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd, srcRoots)).map((f) => f.path);
 }
 
 // ── Pairing analysis ──
@@ -250,7 +289,24 @@ function directRunnerFor(cwd: string): StackInfo["testRunner"] {
 	return "none";
 }
 
-function candidateRunRoots(cwd: string, srcRoots?: string[]): { cwd: string; runner: StackInfo["testRunner"] }[] {
+export interface TestRunTarget {
+	cwd: string;
+	runner: StackInfo["testRunner"];
+	projectId?: string;
+	projectPath?: string;
+}
+
+export function testRunTargets(cwd: string, srcRoots?: string[], workspace?: WorkspaceInfo): TestRunTarget[] {
+	const projectTargets = (workspace?.projects ?? [])
+		.map((project) => ({
+			cwd: project.path === "." ? cwd : join(cwd, project.path),
+			runner: project.stack.testRunner,
+			projectId: project.id,
+			projectPath: project.path,
+		}))
+		.filter((target) => target.runner === "vitest" || target.runner === "jest");
+	if (projectTargets.length > 0) return projectTargets;
+
 	if (!srcRoots || srcRoots.length === 0) {
 		const runner = directRunnerFor(cwd);
 		return runner === "none" ? [] : [{ cwd, runner }];
@@ -264,7 +320,12 @@ function candidateRunRoots(cwd: string, srcRoots?: string[]): { cwd: string; run
 	}
 
 	const packageCandidates = [...packageRoots]
-		.map((rel) => ({ cwd: join(cwd, rel), runner: directRunnerFor(join(cwd, rel)) }))
+		.map((rel) => ({
+			cwd: join(cwd, rel),
+			runner: directRunnerFor(join(cwd, rel)),
+			projectId: rel.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "") || "project",
+			projectPath: rel,
+		}))
 		.filter((r) => r.runner !== "none");
 	if (packageCandidates.length > 0) return packageCandidates;
 
@@ -340,12 +401,13 @@ function trimError(messages: unknown): string | undefined {
 	return text.length > 4000 ? `${text.slice(0, 4000)}\n...truncated` : text;
 }
 
-function relativeTestFile(runCwd: string, file: unknown): string {
+function relativeTestFile(runCwd: string, file: unknown, repoCwd = runCwd): string {
 	const path = String(file || "unknown");
 	if (!path || path === "unknown") return path;
-	if (!path.startsWith("/")) return path;
+	if (!path.startsWith("/")) return normalizeToolPath(repoCwd, runCwd, path);
 	const rel = relative(runCwd, path).replace(/\\/g, "/");
-	return rel.startsWith("..") ? path : rel;
+	if (!rel.startsWith("..")) return normalizeToolPath(repoCwd, runCwd, rel);
+	return normalizeToolPath(repoCwd, runCwd, path);
 }
 
 function readAssertionName(raw: Record<string, unknown>): string {
@@ -356,7 +418,7 @@ function readAssertionName(raw: Record<string, unknown>): string {
 	return [...ancestors, title].filter(Boolean).join(" ");
 }
 
-function compactSuite(runCwd: string, raw: Record<string, unknown>): TestSuiteReport {
+function compactSuite(runCwd: string, raw: Record<string, unknown>, repoCwd = runCwd): TestSuiteReport {
 	const assertions = Array.isArray(raw.assertionResults) ? (raw.assertionResults as Record<string, unknown>[]) : [];
 	const tests = assertions.map((a) => {
 		const status = normalizeStatus(a.status);
@@ -374,7 +436,7 @@ function compactSuite(runCwd: string, raw: Record<string, unknown>): TestSuiteRe
 	const end = Number(raw.endTime);
 	const suiteDuration = Number.isFinite(start) && Number.isFinite(end) && end >= start ? asDuration(end - start) : null;
 	return {
-		file: relativeTestFile(runCwd, raw.name),
+		file: relativeTestFile(runCwd, raw.name, repoCwd),
 		status: failed > 0 ? "failed" : skipped > 0 && passed === 0 ? "skipped" : passed > 0 ? "passed" : normalizeStatus(raw.status),
 		durationMs: suiteDuration,
 		passed,
@@ -385,11 +447,11 @@ function compactSuite(runCwd: string, raw: Record<string, unknown>): TestSuiteRe
 	};
 }
 
-export function parseTestExecutionReport(stdout: string, runCwd = ""): TestExecutionReport | null {
+export function parseTestExecutionReport(stdout: string, runCwd = "", repoCwd = runCwd): TestExecutionReport | null {
 	const data = firstJsonObject(stdout) as Record<string, unknown> | null;
 	if (!data) return null;
 	const suites = (Array.isArray(data.testResults) ? (data.testResults as Record<string, unknown>[]) : [])
-		.map((suite) => compactSuite(runCwd, suite))
+		.map((suite) => compactSuite(runCwd, suite, repoCwd))
 		.sort((a, b) => b.failed - a.failed || (b.durationMs ?? 0) - (a.durationMs ?? 0) || a.file.localeCompare(b.file));
 	const allTests = suites.flatMap((suite) => suite.tests.map((test) => ({ ...test, file: suite.file })));
 	return {
@@ -414,28 +476,117 @@ export function parseTestExecutionJson(stdout: string): { passed: number; failed
 	return { passed: report.passed, failed: report.failed, total: report.total };
 }
 
+function commandForTestTarget(target: TestRunTarget): string {
+	return target.runner === "vitest"
+		? "npx vitest run --reporter=json --coverage"
+		: "npx jest --json --coverage --coverageReporters=json-summary";
+}
+
+function statusLabel(status: TestProjectRunStatus): string {
+	switch (status) {
+		case "passed":
+			return "passed";
+		case "failed":
+			return "failed";
+		case "partial":
+			return "partial";
+		case "no-tests-matched":
+			return "no tests matched";
+		case "parse-failed":
+			return "report could not be parsed";
+		case "command-failed":
+			return "command failed";
+		case "skipped":
+			return "skipped";
+	}
+}
+
+function reportStatus(report: TestExecutionReport | null, executionOk: boolean | null): TestProjectRunStatus {
+	if (!report) return executionOk === false ? "command-failed" : "parse-failed";
+	if (report.failed > 0) return "failed";
+	if (report.total === 0) return "no-tests-matched";
+	if (report.passed > 0 && report.passed < report.total) return "partial";
+	return "passed";
+}
+
+export function normalizeTestProjectReport(input: {
+	target: TestRunTarget;
+	command: string | null;
+	report: TestExecutionReport | null;
+	executionOk: boolean | null;
+	coverage: CoverageData | null;
+	skipped?: boolean;
+}): NormalizedTestProjectReport {
+	const status = input.skipped ? "skipped" : reportStatus(input.report, input.executionOk);
+	const base = input.report ?? {
+		runner: input.target.runner,
+		cwd: input.target.cwd,
+		projectId: input.target.projectId,
+		projectPath: input.target.projectPath,
+		passed: 0,
+		failed: 0,
+		total: 0,
+		durationMs: null,
+		suites: [],
+		failures: [],
+		slowest: [],
+	};
+	return {
+		...base,
+		runner: input.target.runner,
+		cwd: input.target.cwd,
+		projectId: input.target.projectId,
+		projectPath: input.target.projectPath,
+		id: input.target.projectId ?? "root",
+		path: input.target.projectPath ?? ".",
+		command: input.command,
+		status,
+		statusLabel: statusLabel(status),
+		executionOk: input.executionOk,
+		reportParsed: Boolean(input.report),
+		coverageStatus: input.coverage ? "reported" : "not-reported",
+		coverage: input.coverage,
+	};
+}
+
+export function summarizeTestProjectStatus(projects: Pick<NormalizedTestProjectReport, "status">[]): TestProjectRunStatus | "unknown" {
+	if (projects.length === 0) return "unknown";
+	if (projects.every((p) => p.status === "skipped")) return "skipped";
+	if (projects.some((p) => p.status === "failed" || p.status === "command-failed")) return "failed";
+	if (projects.some((p) => p.status === "passed" || p.status === "partial")) {
+		return projects.every((p) => p.status === "passed") ? "passed" : "partial";
+	}
+	if (projects.every((p) => p.status === "no-tests-matched")) return "no-tests-matched";
+	return "parse-failed";
+}
+
 function runTestsWithCoverage(
 	cwd: string,
 	stack: StackInfo,
 	srcRoots?: string[],
-): { execution: { passed: number; failed: number; total: number } | null; coverage: CoverageData | null; reports: TestExecutionReport[] } {
-	if (stack.testRunner === "none") return { execution: null, coverage: null, reports: [] };
-
-	const roots = candidateRunRoots(cwd, srcRoots);
+	workspace?: WorkspaceInfo,
+): {
+	execution: { passed: number; failed: number; total: number } | null;
+	coverage: CoverageData | null;
+	reports: NormalizedTestProjectReport[];
+} {
+	const roots = testRunTargets(cwd, srcRoots, workspace);
+	if (stack.testRunner === "none" && roots.length === 0) return { execution: null, coverage: null, reports: [] };
 	let execution: { passed: number; failed: number; total: number } | null = null;
 	let coverage: CoverageData | null = null;
-	const reports: TestExecutionReport[] = [];
+	const reports: NormalizedTestProjectReport[] = [];
 
 	for (const root of roots) {
-		const cmd =
-			root.runner === "vitest"
-				? "npx vitest run --reporter=json --coverage 2>/dev/null || true"
-				: "npx jest --json --coverage --coverageReporters=json-summary 2>/dev/null || true";
-		const { stdout } = run(cmd, root.cwd, 120_000);
-		const report = parseTestExecutionReport(stdout, root.cwd);
+		const cmd = commandForTestTarget(root);
+		const { stdout, ok } = run(cmd, root.cwd, 120_000, {
+			projectId: root.projectId,
+			projectPath: root.projectPath,
+		});
+		const report = parseTestExecutionReport(stdout, root.cwd, cwd);
 		const parsed = report ? { passed: report.passed, failed: report.failed, total: report.total } : null;
+		const projectCoverage = readCoverageFile(root.cwd);
+		reports.push(normalizeTestProjectReport({ target: root, command: cmd, report, executionOk: ok, coverage: projectCoverage }));
 		if (parsed) {
-			reports.push({ ...report!, runner: root.runner, durationMs: null });
 			execution = execution
 				? {
 						passed: execution.passed + parsed.passed,
@@ -444,7 +595,7 @@ function runTestsWithCoverage(
 					}
 				: parsed;
 		}
-		coverage ??= readCoverageFile(root.cwd);
+		coverage ??= projectCoverage;
 	}
 
 	coverage ??= readCoverageFile(cwd, srcRoots);
@@ -463,10 +614,10 @@ function readCoverageFile(cwd: string, srcRoots?: string[]): CoverageData | null
 					const summary = JSON.parse(readFileSync(full, "utf-8"));
 					if (summary?.total) {
 						return {
-							statements: summary.total.statements?.pct || 0,
-							lines: summary.total.lines?.pct || 0,
-							branches: summary.total.branches?.pct || 0,
-							functions: summary.total.functions?.pct || 0,
+							statements: asCoveragePct(summary.total.statements?.pct),
+							lines: asCoveragePct(summary.total.lines?.pct),
+							branches: asCoveragePct(summary.total.branches?.pct),
+							functions: asCoveragePct(summary.total.functions?.pct),
 						};
 					}
 				} catch {
@@ -486,6 +637,11 @@ function readCoverageFile(cwd: string, srcRoots?: string[]): CoverageData | null
 		}
 	}
 	return null;
+}
+
+function asCoveragePct(value: unknown): number {
+	const n = Number(value);
+	return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
 }
 
 function parseLcov(content: string): CoverageData | null {
@@ -555,13 +711,20 @@ function analyzeQuality(testFiles: TestFile[]): QualityMetrics {
 
 // ── Main runner ──
 
-export function runTesting(cwd: string, stack: StackInfo, skipExec: boolean, srcRoots?: string[]): CheckResult {
+export function runTesting(
+	cwd: string,
+	stack: StackInfo,
+	skipExec: boolean,
+	srcRoots?: string[],
+	workspace?: WorkspaceInfo,
+	inventory?: FileInventory,
+): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 
 	// 1. Discover test files and classify by layer
-	const testFiles = findTestFiles(cwd, srcRoots);
-	const srcFiles = findSourceFiles(cwd, srcRoots);
+	const testFiles = findTestFiles(cwd, srcRoots, inventory);
+	const srcFiles = findSourceFiles(cwd, srcRoots, inventory);
 
 	if (testFiles.length === 0) {
 		return {
@@ -572,6 +735,7 @@ export function runTesting(cwd: string, stack: StackInfo, skipExec: boolean, src
 				reason: "No test files found",
 				srcFiles: srcFiles.length,
 				testFiles: 0,
+				source: inventory ? "file-inventory" : "legacy-walk",
 				pyramid: { unit: 0, integration: 0, component: 0, e2e: 0 },
 			},
 			issues: [{ severity: "error", message: `${srcFiles.length} source files with zero tests`, rule: "no-tests" }],
@@ -691,11 +855,12 @@ export function runTesting(cwd: string, stack: StackInfo, skipExec: boolean, src
 	// 7. Execute tests + collect coverage (unless --skip-tests)
 	let execution: { passed: number; failed: number; total: number } | null = null;
 	let coverage: CoverageData | null = null;
-	let testReports: TestExecutionReport[] = [];
+	let testReports: NormalizedTestProjectReport[] = [];
+	const testTargets = testRunTargets(cwd, srcRoots, workspace);
 
 	if (!skipExec) {
 		// Run tests ONCE with both coverage and JSON output
-		const combined = runTestsWithCoverage(cwd, stack, srcRoots);
+		const combined = runTestsWithCoverage(cwd, stack, srcRoots, workspace);
 		execution = combined.execution;
 		coverage = combined.coverage;
 		testReports = combined.reports;
@@ -708,6 +873,34 @@ export function runTesting(cwd: string, stack: StackInfo, skipExec: boolean, src
 	} else {
 		// --skip-tests: still try to read existing coverage reports
 		coverage = readCoverageFile(cwd, srcRoots);
+		testReports = testTargets.map((target) =>
+			normalizeTestProjectReport({
+				target,
+				command: null,
+				report: null,
+				executionOk: null,
+				coverage: readCoverageFile(target.cwd),
+				skipped: true,
+			}),
+		);
+	}
+
+	for (const report of testReports) {
+		const staticTestCount = staticTestFilesForProject(report.path, testFiles);
+		if (report.status === "no-tests-matched" && staticTestCount > 0) {
+			issues.push({
+				severity: "warning",
+				message: `${report.path} has ${staticTestCount} discovered test file${staticTestCount === 1 ? "" : "s"}, but ${report.runner} matched 0 tests`,
+				rule: "test-run-no-tests-matched",
+			});
+		}
+		if (report.status === "parse-failed" || report.status === "command-failed") {
+			issues.push({
+				severity: report.status === "command-failed" ? "error" : "warning",
+				message: `${report.path} ${report.runner} ${report.statusLabel}`,
+				rule: `test-run-${report.status}`,
+			});
+		}
 	}
 
 	if (coverage) {
@@ -785,6 +978,7 @@ export function runTesting(cwd: string, stack: StackInfo, skipExec: boolean, src
 			e2eTool: e2eTool.tool,
 			testFiles: testFiles.length,
 			srcFiles: srcFiles.length,
+			source: inventory ? "file-inventory" : "legacy-walk",
 			pairing: `${pairingPct}%`,
 			quality: {
 				assertionsPerTest: quality.avgAssertionsPerTest,
@@ -797,8 +991,36 @@ export function runTesting(cwd: string, stack: StackInfo, skipExec: boolean, src
 						executionSkipReason: "Scan ran with --skip-tests; existing coverage artifacts were read, but the test runner was not executed.",
 					}
 				: {}),
+			executionStatus: summarizeTestProjectStatus(testReports),
 			...(execution ? { passed: execution.passed, failed: execution.failed, total: execution.total } : {}),
 			...(testReports.length > 0 ? { testReports } : {}),
+			...(testReports.length > 0
+				? {
+						testProjects: testReports.map((report) => ({
+							id: report.id,
+							path: report.path,
+							runner: report.runner,
+							command: report.command,
+							status: report.status,
+							statusLabel: report.statusLabel,
+							reportParsed: report.reportParsed,
+							executionOk: report.executionOk,
+							passed: report.passed,
+							failed: report.failed,
+							total: report.total,
+							durationMs: report.durationMs,
+							coverageStatus: report.coverageStatus,
+							coverage: report.coverage
+								? {
+										stmts: report.coverage.statements,
+										branches: report.coverage.branches,
+										lines: report.coverage.lines,
+										fns: report.coverage.functions,
+									}
+								: null,
+						})),
+					}
+				: {}),
 			...(coverage
 				? { coverage: { stmts: coverage.statements, branches: coverage.branches, lines: coverage.lines, fns: coverage.functions } }
 				: {}),
@@ -813,4 +1035,10 @@ function countUntestable(srcFiles: string[]): number {
 		const b = basename(f).replace(/\.(ts|tsx|js|jsx)$/, "");
 		return ["index", "main", "types", "constants", "config"].includes(b);
 	}).length;
+}
+
+function staticTestFilesForProject(projectPath: string, testFiles: TestFile[]): number {
+	if (projectPath === ".") return testFiles.length;
+	const prefix = `${projectPath.replace(/^\/+|\/+$/g, "")}/`;
+	return testFiles.filter((file) => file.path.startsWith(prefix)).length;
 }

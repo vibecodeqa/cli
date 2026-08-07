@@ -6,7 +6,7 @@ import { join } from "node:path";
 export interface VcqaConfig {
 	/** Disable or configure individual checks */
 	checks?: Record<string, { enabled?: boolean; ignore?: string[] }>;
-	/** Extra glob patterns to ignore (added to built-in SKIP_DIRS) */
+	/** Extra glob patterns to ignore, merged with the versioned default exclusion policy. */
 	ignore?: string[];
 	/** Default fail-under threshold (overridden by --fail-under flag) */
 	failUnder?: number;

@@ -47,4 +47,6 @@ node dist/cli.js  # self-scan
 
 Push to `main` auto-publishes to npm via OIDC trusted publishing when the version in `package.json` changes. No tokens needed.
 
+Analyzer bug fixes are not fully delivered just because the source change exists in this repository. Before closing a scanner-fix issue, follow the release and downstream validation checklist in `docs/analyzer-release-validation.md`.
+
 **Stack gating rule:** a check either declares `appliesTo` in its CheckMeta (gated — the scan core skips it centrally) or is stack-blind. Framework conditionals inside generic runners are rejected in review; put framework logic in that framework's own check (see `runners/react.ts`).

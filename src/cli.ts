@@ -13,6 +13,7 @@ import { loadConfig } from "./config.js";
 import { scan } from "./core.js";
 import { computeDelta } from "./delta.js";
 import { detectStack, detectWorkspace } from "./detect.js";
+import { issueSnapshot } from "./issue-fingerprint.js";
 import { postPRComment } from "./pr-comment.js";
 import { generatePages } from "./report/html.js";
 import { computeTrend, formatTrend, type TrendDelta } from "./trend.js";
@@ -240,10 +241,13 @@ function generateMarkdown(report: VibeReport, trend: TrendDelta | null, prevRepo
 	}
 
 	md += `### Checks that ran (${ran.length} of ${checks.length})\n\n`;
-	md += "| Check | Score | Grade |\n|-------|-------|-------|\n";
+	md += "| Check | Score | Grade | Score impact |\n|-------|-------|-------|--------------|\n";
 	for (const c of ran) {
 		const emoji = c.score >= 90 ? "🟢" : c.score >= 75 ? "🟡" : c.score >= 60 ? "🟠" : "🔴";
-		md += `| ${emoji} ${c.name} | ${c.score}/100 | ${c.grade} |\n`;
+		const scoreMode = (c.details as Record<string, unknown>).scoreMode;
+		const impact =
+			scoreMode === "available-unscored" ? "advisory" : scoreMode === "available-scored" ? "scored" : String(scoreMode ?? "scored");
+		md += `| ${emoji} ${c.name} | ${c.score}/100 | ${c.grade} | ${impact} |\n`;
 	}
 
 	// What did NOT run, and why. Without this the report reads as "the product
@@ -405,7 +409,12 @@ async function writeOutputs(report: VibeReport, outputDir: string, flags: Parsed
 			score: report.score,
 			grade: report.grade,
 			timestamp: report.timestamp,
-			checks: report.checks.map((c) => ({ name: c.name, score: c.score, issues: c.issues.length })),
+			checks: report.checks.map((c) => ({
+				name: c.name,
+				score: c.score,
+				issueCount: c.issues.length,
+				issues: c.issues.map((issue) => issueSnapshot(c.name, issue)),
+			})),
 		}),
 	);
 	const historyFiles = readdirSync(historyDir).sort();
@@ -647,9 +656,10 @@ async function main() {
 					const det = result.details as Record<string, unknown>;
 					const premium = det.comingSoon;
 					const skipped = det.skipped;
+					const advisory = det.scoreMode === "available-unscored";
 					const c = premium ? "\x1b[2m" : skipped ? "\x1b[2m" : color(result.grade);
-					const label = premium ? "soon" : skipped ? "skip" : result.grade;
-					const scoreStr = premium ? "PRO" : skipped ? "—" : `${result.score}/100`;
+					const label = premium ? "soon" : skipped ? "skip" : advisory ? "adv" : result.grade;
+					const scoreStr = premium ? "PRO" : skipped ? "—" : advisory ? `${result.score}/100*` : `${result.score}/100`;
 					const issueStr = result.issues.length > 0 ? `  \x1b[2m${result.issues.length} issues\x1b[0m` : "";
 					console.log(`  ${check.padEnd(14)}${c}${label.padEnd(5)}${scoreStr}\x1b[0m  \x1b[2m${result.duration}ms\x1b[0m${issueStr}`);
 				},

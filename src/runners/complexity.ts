@@ -1,5 +1,7 @@
 /** Complexity analysis — counts lines, functions, and cognitive complexity via AST-free heuristics. */
 
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -15,12 +17,12 @@ interface FunctionMetric {
 const MAX_FUNCTION_LINES = 60;
 const MAX_COMPLEXITY = 15;
 
-export function runComplexity(cwd: string): CheckResult {
+export function runComplexity(cwd: string, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 	const functions: FunctionMetric[] = [];
 
-	const sourceFiles = getProductionFiles(cwd);
+	const sourceFiles = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 
 	let totalLines = 0;
 	const totalFiles = sourceFiles.length;
@@ -73,6 +75,7 @@ export function runComplexity(cwd: string): CheckResult {
 			longFunctions,
 			complexFunctions,
 			functionCount: functions.length,
+			source: inventory ? "file-inventory" : "legacy-walk",
 		},
 		issues,
 		duration: Date.now() - start,

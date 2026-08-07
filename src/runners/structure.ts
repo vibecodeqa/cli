@@ -2,6 +2,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { FileInventory } from "../file-inventory.js";
+import { inventorySourceFiles } from "../file-inventory.js";
 import { collectSourceFiles } from "../fs-utils.js";
 import type { CheckResult, Issue, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -29,7 +31,7 @@ const DART_FILES: FileCheck[] = [
 	{ name: "README.md", path: "README.md", required: false, description: "Project documentation" },
 ];
 
-export function runStructure(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo): CheckResult {
+export function runStructure(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 	const found: string[] = [];
@@ -98,7 +100,9 @@ export function runStructure(cwd: string, stack: StackInfo, workspace?: Workspac
 
 	// Count source vs test files (using workspace-aware roots)
 	const srcRoots = workspace?.isMonorepo ? workspace.srcRoots : undefined;
-	const allFiles = collectSourceFiles(cwd, { includeTests: true, srcRoots });
+	const allFiles = inventory
+		? inventorySourceFiles(inventory, { includeTests: true })
+		: collectSourceFiles(cwd, { includeTests: true, srcRoots });
 	const srcCount = allFiles.filter((f) => !f.isTest).length;
 	const testCount = allFiles.filter((f) => f.isTest).length;
 	const testRatio = srcCount > 0 ? testCount / srcCount : 0;
@@ -148,6 +152,7 @@ export function runStructure(cwd: string, stack: StackInfo, workspace?: Workspac
 			missing,
 			srcFiles: srcCount,
 			testFiles: testCount,
+			source: inventory ? "file-inventory" : "legacy-walk",
 			testRatio: `${Math.round(testRatio * 100)}%`,
 			...(workspace?.isMonorepo ? { monorepo: true, workspaceTool: workspace.tool, packages: workspace.packages.length } : {}),
 		},

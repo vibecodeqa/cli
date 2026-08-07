@@ -15,7 +15,7 @@ import {
 	generateSequenceDiagram,
 } from "../runners/architecture.js";
 import type { FeatureCluster } from "../runners/dead-patterns.js";
-import type { CheckResult, VibeReport } from "../types.js";
+import type { CheckResult, ProjectContext, ProjectDiscoveryEvidence, VibeReport } from "../types.js";
 import { det, e, gc, pc } from "./components.js";
 import { buildPyramid, buildRadar, buildRing, buildTimeline } from "./svg.js";
 
@@ -36,6 +36,88 @@ export interface FileEntry {
 }
 
 type FL = (path: string, line?: number) => string;
+
+function scoreModeLabel(check: CheckResult, meta: CheckMeta): string {
+	const mode = det(check).scoreMode;
+	if (mode === "not-applicable") return "not applicable";
+	if (mode === "unavailable") return "unavailable";
+	if (mode === "available-unscored") return "advisory";
+	if (mode === "available-scored") return `scored · weight ${meta.weight}%`;
+	if (meta.weight <= 0) return "advisory";
+	return `scored · weight ${meta.weight}%`;
+}
+
+function stackLabel(project: ProjectContext): string {
+	return [project.stack.language, project.stack.framework, project.stack.bundler, project.stack.testRunner, project.stack.linter]
+		.filter((v) => v && v !== "none" && v !== "unknown")
+		.join(" · ");
+}
+
+function evidenceLocation(ev: ProjectDiscoveryEvidence): string {
+	return ev.file ?? ev.path ?? ev.value ?? "";
+}
+
+function renderEvidenceChips(evidence: ProjectDiscoveryEvidence[]): string {
+	return evidence
+		.map((ev) => {
+			const loc = evidenceLocation(ev);
+			return `<span class="ws-ev${ev.kind === "rejected" ? " ws-ev-rejected" : ""}"><b>${e(ev.kind)}</b>${loc ? `<code>${e(loc)}</code>` : ""}<small>${e(ev.description)}</small></span>`;
+		})
+		.join("");
+}
+
+function renderScopeValue(value: unknown): string {
+	if (Array.isArray(value)) {
+		if (value.length === 0) return `<span class="scope-empty">none</span>`;
+		return value.map((item) => `<code>${e(String(item))}</code>`).join("");
+	}
+	if (value === undefined || value === null || value === "") return `<span class="scope-empty">none</span>`;
+	return `<span>${e(String(value))}</span>`;
+}
+
+function renderScopeRow(label: string, value: unknown): string {
+	return `<div class="scope-row"><span class="scope-k">${e(label)}</span><span class="scope-v">${renderScopeValue(value)}</span></div>`;
+}
+
+function scopePayload(report: VibeReport): string {
+	const workspace = report.meta.workspace;
+	const projects = workspace?.projects ?? [];
+	return JSON.stringify(
+		{
+			timestamp: report.timestamp,
+			cwd: report.meta.cwd,
+			stack: report.meta.stack,
+			filesScanned: report.meta.filesScanned,
+			workspace: workspace
+				? {
+						isMonorepo: workspace.isMonorepo,
+						tool: workspace.tool,
+						srcRoots: workspace.srcRoots,
+						packages: workspace.packages,
+						discovery: workspace.discovery,
+						projects: projects.map((project) => ({
+							id: project.id,
+							name: project.name,
+							path: project.path,
+							kind: project.kind,
+							stack: project.stack,
+							srcRoots: project.srcRoots,
+							testRoots: project.testRoots,
+							configFiles: project.configFiles,
+							manifestFiles: project.manifestFiles,
+							confidence: project.confidence,
+							evidence: project.evidence,
+							toolCommands: project.toolCommands,
+						})),
+					}
+				: null,
+			scanPolicy: report.meta.scanPolicy ?? null,
+			fileInventory: report.meta.fileInventory ?? null,
+		},
+		null,
+		2,
+	);
+}
 
 /** Read source lines around an issue for inline display in the report. */
 function readSourceSnippet(cwd: string, file: string, line: number, radius = 4): string | null {
@@ -155,7 +237,36 @@ export function overviewPage(
 	// Workspace / repo understanding section
 	let repoUnderstandingHtml = "";
 	const ws = report.meta.workspace;
-	if (ws?.isMonorepo) {
+	if (ws?.projects?.length) {
+		const mode = ws.discovery?.mode ?? (ws.isMonorepo ? "manifest" : "single");
+		const evidenceRows = (ws.discovery?.evidence ?? [])
+			.map((ev) => {
+				const loc = ev.file ?? ev.path ?? ev.value ?? "";
+				return `<span class="ws-ev"><b>${e(ev.kind)}</b>${loc ? `<code>${e(loc)}</code>` : ""}<small>${e(ev.description)}</small></span>`;
+			})
+			.join("");
+		const projectRows = ws.projects
+			.slice(0, 12)
+			.map((p) => {
+				const stack = [p.stack.language, p.stack.framework, p.stack.bundler, p.stack.testRunner, p.stack.linter]
+					.filter((v) => v && v !== "none" && v !== "unknown")
+					.join(" · ");
+				const meta = `${p.manifestFiles.length} manifest · ${p.configFiles.length} config · ${p.srcRoots.length} src`;
+				return `<div class="ws-project"><span class="ws-path">${e(p.path === "." ? "repo root" : p.path)}</span><span class="ws-name">${e(p.kind)}</span><span class="ws-stack">${e(stack || "unknown")}</span><span class="ws-flags">${e(meta)}</span></div>`;
+			})
+			.join("");
+		const more = ws.projects.length > 12 ? `<div class="ws-more">...and ${ws.projects.length - 12} more projects</div>` : "";
+		repoUnderstandingHtml = `<div class="ov-section"><h3>Repository Structure</h3>
+<div class="ws-info">
+  <div class="ws-badge">${ws.isMonorepo ? "Monorepo" : "Single Project"}</div>
+  <span>Discovery: <b>${e(mode)}</b></span>
+  <span>Tool: <b>${ws.tool}</b></span>
+  <span>Projects: <b>${ws.projects.length}</b></span>
+  <span>Source roots: <b>${ws.srcRoots.length}</b></span>
+</div>
+${evidenceRows ? `<div class="ws-evidence">${evidenceRows}</div>` : ""}
+<div class="ws-pkgs">${projectRows}${more}</div></div>`;
+	} else if (ws?.isMonorepo) {
 		const pkgRows = ws.packages
 			.slice(0, 12)
 			.map((p) => {
@@ -189,6 +300,147 @@ ${timelineSection}
 ${topIssuesHtml}
 ${fileHotspotsHtml}
 <div class="stack">${stackHtml}</div>`;
+}
+
+// ── Scan scope / discovery evidence page ──────────────────────────
+
+export function scanScopePage(report: VibeReport): string {
+	const ws = report.meta.workspace;
+	const projects = ws?.projects ?? [];
+	const discoveryEvidence = ws?.discovery?.evidence ?? [];
+	const acceptedEvidence = discoveryEvidence.filter((ev) => ev.kind !== "rejected");
+	const rejectedEvidence = discoveryEvidence.filter((ev) => ev.kind === "rejected");
+	const policy = report.meta.scanPolicy ?? {};
+	const inventory = report.meta.fileInventory ?? {};
+	const payload = scopePayload(report);
+
+	const overviewRows = [
+		renderScopeRow("Discovery mode", ws?.discovery?.mode ?? (ws?.isMonorepo ? "manifest" : "single")),
+		renderScopeRow("Workspace tool", ws?.tool ?? "none"),
+		renderScopeRow("Projects accepted", projects.length),
+		renderScopeRow("Packages", ws?.packages.length ?? 0),
+		renderScopeRow("Source roots", ws?.srcRoots ?? []),
+		renderScopeRow("Files scanned", report.meta.filesScanned ?? "unknown"),
+	].join("");
+
+	const acceptedRows = acceptedEvidence.length
+		? `<div class="ws-evidence scope-evidence">${renderEvidenceChips(acceptedEvidence)}</div>`
+		: `<p class="muted scope-note">No workspace-level acceptance evidence was recorded.</p>`;
+
+	const projectCards = projects.length
+		? projects.map((project) => renderProjectScopeCard(project)).join("")
+		: `<p class="muted scope-note">No project contexts were recorded.</p>`;
+
+	const rejectedRows = rejectedEvidence.length
+		? rejectedEvidence
+				.map((ev) => {
+					const loc = evidenceLocation(ev) || "unknown";
+					return `<div class="scope-rejected"><span class="scope-path">${e(loc)}</span><span class="scope-status scope-unavailable">skipped / unavailable</span><span class="scope-reason">${e(ev.description)}</span></div>`;
+				})
+				.join("")
+		: `<p class="muted scope-note">No rejected discovery candidates were recorded.</p>`;
+
+	const policyRows = [
+		renderScopeRow("Policy version", policy["version"]),
+		renderScopeRow("Ignore hidden directories", policy["ignoreHiddenDirectories"]),
+		renderScopeRow(
+			"Default directory excludes",
+			policy["defaultDirectoryNameValues"] ?? `${policy["defaultDirectoryNames"] ?? 0} configured`,
+		),
+		renderScopeRow("Default file excludes", policy["defaultFilePatternValues"] ?? `${policy["defaultFilePatterns"] ?? 0} configured`),
+		renderScopeRow("Generated path prefixes", policy["generatedPathPrefixValues"] ?? `${policy["generatedPathPrefixes"] ?? 0} configured`),
+		renderScopeRow("Config ignores", policy["configIgnorePatternValues"] ?? `${policy["configIgnorePatterns"] ?? 0} configured`),
+		renderScopeRow("User ignores", policy["userIgnoreNameValues"] ?? `${policy["userIgnoreNames"] ?? 0} configured`),
+		renderScopeRow("Env ignores", policy["envIgnoreNameValues"] ?? `${policy["envIgnoreNames"] ?? 0} configured`),
+		renderScopeRow(
+			"Gitignore directory excludes",
+			policy["gitignoreDirectoryNameValues"] ?? `${policy["gitignoreDirectoryNames"] ?? 0} configured`,
+		),
+	].join("");
+
+	const inventoryRows = [
+		renderScopeRow("Total files", inventory["totalFiles"]),
+		renderScopeRow("Included files", inventory["includedFiles"]),
+		renderScopeRow("Ignored files", inventory["ignoredFiles"]),
+		renderScopeRow("Ignored directories", inventory["ignoredDirectories"]),
+		renderScopeRow("Generated files", inventory["generatedFiles"]),
+		renderScopeRow("Security-sensitive files", inventory["securitySensitiveFiles"]),
+		renderScopeRow("Kinds", inventory["byKind"] ? JSON.stringify(inventory["byKind"]) : undefined),
+	].join("");
+
+	return `
+<div class="scope-head">
+  <div>
+    <h2>Scan Scope</h2>
+    <p class="muted">Deterministic repository discovery evidence, accepted projects, skipped candidates, and effective scan settings.</p>
+  </div>
+  <button class="cp-btn scope-copy" data-prompt="${e(payload)}" title="Copy deterministic discovery evidence JSON">Copy JSON</button>
+</div>
+
+<section class="scope-section">
+  <h3>Discovery Summary</h3>
+  <div class="scope-table">${overviewRows}</div>
+  ${acceptedRows}
+</section>
+
+<section class="scope-section">
+  <h3>Accepted Projects</h3>
+  <div class="scope-projects">${projectCards}</div>
+</section>
+
+<section class="scope-section">
+  <h3>Rejected Candidates</h3>
+  <div class="scope-rejected-list">${rejectedRows}</div>
+</section>
+
+<section class="scope-section">
+  <h3>Effective Scan Policy</h3>
+  <div class="scope-table">${policyRows}</div>
+</section>
+
+<section class="scope-section">
+  <h3>File Inventory</h3>
+  <div class="scope-table">${inventoryRows}</div>
+</section>
+
+<section class="scope-section">
+  <h3>Evidence Payload</h3>
+  <pre class="scope-json">${e(payload)}</pre>
+</section>`;
+}
+
+function renderProjectScopeCard(project: ProjectContext): string {
+	const stack = stackLabel(project);
+	const status =
+		project.stack.language === "unknown"
+			? `<span class="scope-status scope-unavailable">unsupported / unavailable</span>`
+			: `<span class="scope-status scope-scanned">scanned</span>`;
+	const evidence = project.evidence.filter((ev) => ev.kind !== "rejected");
+	const commands = Object.entries(project.toolCommands)
+		.flatMap(([kind, items]) =>
+			(items ?? []).map((cmd) => `<span><b>${e(kind)}</b> <code>${e(cmd.cwd)}</code> ${e(cmd.command.join(" "))}</span>`),
+		)
+		.join("");
+	return `<article class="scope-project">
+  <div class="scope-project-head">
+    <div><span class="scope-path">${e(project.path === "." ? "repo root" : project.path)}</span><span class="scope-kind">${e(project.kind)}</span></div>
+    ${status}
+  </div>
+  <div class="scope-meta">${e(project.name)} · confidence ${Math.round(project.confidence * 100)}% · ${e(stack || "unknown stack")}</div>
+  <div class="scope-table scope-project-table">
+    ${renderScopeRow("Why scanned", evidence.length ? renderEvidenceText(evidence) : "No evidence recorded")}
+    ${renderScopeRow("Source roots", project.srcRoots)}
+    ${renderScopeRow("Test roots", project.testRoots)}
+    ${renderScopeRow("Manifests", project.manifestFiles)}
+    ${renderScopeRow("Configs", project.configFiles)}
+  </div>
+  ${evidence.length ? `<div class="ws-evidence scope-evidence">${renderEvidenceChips(evidence)}</div>` : ""}
+  ${commands ? `<div class="scope-commands">${commands}</div>` : ""}
+</article>`;
+}
+
+function renderEvidenceText(evidence: ProjectDiscoveryEvidence[]): string {
+	return evidence.map((ev) => `${ev.kind}: ${evidenceLocation(ev) || ev.description}`).join("; ");
 }
 
 // ── Single category page ──────────────────────────────────────────
@@ -264,7 +516,7 @@ ${meta.risk ? `<div class="info-panel"><div class="ip-row"><span class="ip-label
 			}
 
 			return `<section class="check-section" id="${c.name}">
-<div class="ch-head"><span class="ch-g" style="color:${sk ? "var(--dim)" : gc(c.grade)}">${sk ? "\u2014" : c.grade}</span><div><b>${e(meta.label)}</b><span class="ch-s">${sk ? "skipped" : `${c.score}/100`} \u00b7 weight ${meta.weight}% \u00b7 ${c.duration}ms \u00b7 ${c.issues.length} issues</span></div><span class="pri" style="color:${pc(meta.priority)}">${meta.priority}</span></div>
+<div class="ch-head"><span class="ch-g" style="color:${sk ? "var(--dim)" : gc(c.grade)}">${sk ? "\u2014" : c.grade}</span><div><b>${e(meta.label)}</b><span class="ch-s">${sk ? "skipped" : `${c.score}/100`} \u00b7 ${e(scoreModeLabel(c, meta))} \u00b7 ${c.duration}ms \u00b7 ${c.issues.length} issues</span></div><span class="pri" style="color:${pc(meta.priority)}">${meta.priority}</span></div>
 ${meta.description ? `<div class="info-panel"><div class="ip-row"><span class="ip-label">What</span><span>${e(meta.description)}</span></div><div class="ip-row"><span class="ip-label">Risk</span><span>${e(meta.risk)}</span></div><div class="ip-row"><span class="ip-label">Fix</span><span>${e(meta.recommendation)}</span></div>${meta.deeperTools?.length ? `<div class="ip-row"><span class="ip-label">Go deeper</span><span class="deeper-tools">${meta.deeperTools.map((t) => `<code>${e(t)}</code>`).join(" ")}</span></div>` : ""}</div>` : ""}
 ${sk ? `<p class="skip-r">${e(det(c).reason || "skipped")}</p>` : ""}
 ${c.name === "architecture" && !sk ? renderArchSection(c.details) : ""}

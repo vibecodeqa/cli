@@ -6,17 +6,43 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
+import type { FileInventory } from "../file-inventory.js";
+import { inventoryFiles } from "../file-inventory.js";
+import { isIgnoredPath } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
-const SKIP_DIRS = new Set(["node_modules", ".git", ".vibe-check", "dist", "build", "coverage", ".next", ".nuxt"]);
+interface HtmlInput {
+	path: string;
+	fullPath: string;
+}
 
-export function runHtmlQuality(cwd: string): CheckResult {
+interface InternalLink {
+	sourceFile: string;
+	href: string;
+	candidates: string[];
+}
+
+function replaceExceptNewlines(value: string): string {
+	return value.replace(/[^\n]/g, " ");
+}
+
+function contentForDomChecks(content: string): string {
+	return content
+		.replace(/<!--[\s\S]*?-->/g, (match) => replaceExceptNewlines(match))
+		.replace(/<script\b([^>]*)>[\s\S]*?<\/script>/gi, (_match, attrs: string) => `<script${attrs}></script>`)
+		.replace(/<style\b([^>]*)>[\s\S]*?<\/style>/gi, (_match, attrs: string) => `<style${attrs}></style>`)
+		.replace(/<svg\b[\s\S]*?<\/svg>/gi, (match) => replaceExceptNewlines(match));
+}
+
+export function runHtmlQuality(cwd: string, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 	const issues: Issue[] = [];
 
-	const htmlFiles = collectHtmlFiles(cwd);
+	const htmlFiles = inventory
+		? inventoryFiles(inventory, { kind: "html" }).map((file) => ({ path: file.path, fullPath: file.fullPath }))
+		: collectHtmlFiles(cwd);
 	if (htmlFiles.length === 0) {
 		return {
 			name: "html-quality",
@@ -28,17 +54,18 @@ export function runHtmlQuality(cwd: string): CheckResult {
 		};
 	}
 
-	const allLinks = new Set<string>();
+	const allLinks: InternalLink[] = [];
 	const titles = new Map<string, string[]>();
 
 	for (const file of htmlFiles) {
-		const relPath = relative(cwd, file);
+		const relPath = file.path;
 		let content: string;
 		try {
-			content = readFileSync(file, "utf-8");
+			content = readFileSync(file.fullPath, "utf-8");
 		} catch {
 			continue;
 		}
+		const domContent = contentForDomChecks(content);
 
 		// ── Meta tags ──
 		if (content.includes("<head")) {
@@ -103,7 +130,7 @@ export function runHtmlQuality(cwd: string): CheckResult {
 		}
 
 		// ── HTML lang ──
-		if (/<html[\s>]/.test(content) && !/<html\s[^>]*lang=/i.test(content)) {
+		if (/<html[\s>]/.test(domContent) && !/<html\s[^>]*lang=/i.test(domContent)) {
 			issues.push({
 				severity: "warning",
 				message: "Missing lang attribute on <html> — screen readers need this",
@@ -114,9 +141,9 @@ export function runHtmlQuality(cwd: string): CheckResult {
 
 		// ── Images ──
 		const imgRegex = /<img\s[^>]*>/gi;
-		for (const imgMatch of content.matchAll(imgRegex)) {
+		for (const imgMatch of domContent.matchAll(imgRegex)) {
 			const tag = imgMatch[0];
-			const line = content.slice(0, imgMatch.index).split("\n").length;
+			const line = domContent.slice(0, imgMatch.index).split("\n").length;
 
 			if (!/alt\s*=/i.test(tag)) {
 				issues.push({ severity: "error", message: "Image missing alt attribute", file: relPath, line, rule: "img-no-alt" });
@@ -145,10 +172,10 @@ export function runHtmlQuality(cwd: string): CheckResult {
 
 		// ── Links ──
 		const linkRegex = /<a\s[^>]*href=["']([^"']+)["'][^>]*>/gi;
-		for (const linkMatch of content.matchAll(linkRegex)) {
+		for (const linkMatch of domContent.matchAll(linkRegex)) {
 			const href = linkMatch[1];
 			const tag = linkMatch[0];
-			const line = content.slice(0, linkMatch.index).split("\n").length;
+			const line = domContent.slice(0, linkMatch.index).split("\n").length;
 
 			// HTTP links on what should be HTTPS
 			if (href.startsWith("http://") && !href.includes("localhost")) {
@@ -167,15 +194,18 @@ export function runHtmlQuality(cwd: string): CheckResult {
 			}
 
 			// Collect internal links for broken link check
-			if (!href.startsWith("http") && !href.startsWith("mailto:") && !href.startsWith("#") && !href.startsWith("javascript:")) {
-				allLinks.add(join(cwd, href.split("#")[0].split("?")[0]));
+			if (isInternalHref(href)) {
+				const link = resolveInternalLink(cwd, file, href);
+				if (link) {
+					allLinks.push(link);
+				}
 			}
 		}
 
 		// ── Heading hierarchy ──
 		const headings: number[] = [];
 		const headingRegex = /<h(\d)/gi;
-		for (const hMatch of content.matchAll(headingRegex)) {
+		for (const hMatch of domContent.matchAll(headingRegex)) {
 			headings.push(parseInt(hMatch[1], 10));
 		}
 		for (let i = 1; i < headings.length; i++) {
@@ -208,7 +238,7 @@ export function runHtmlQuality(cwd: string): CheckResult {
 
 		// ── Security ──
 		// Mixed content (http:// resources on a page)
-		if (/<(?:img|script|link|iframe)\s[^>]*(?:src|href)=["']http:\/\/(?!localhost)/i.test(content)) {
+		if (/<(?:img|script|link|iframe)\s[^>]*(?:src|href)=["']http:\/\/(?!localhost)/i.test(domContent)) {
 			issues.push({
 				severity: "warning",
 				message: "Mixed content: HTTP resource on page — use HTTPS",
@@ -222,9 +252,14 @@ export function runHtmlQuality(cwd: string): CheckResult {
 
 	// Broken internal links
 	for (const link of allLinks) {
-		if (!existsSync(link)) {
-			const relLink = relative(cwd, link);
-			issues.push({ severity: "warning", message: `Broken internal link: ${relLink}`, rule: "broken-link" });
+		if (!link.candidates.some((candidate) => existsSync(candidate))) {
+			const relLink = relative(cwd, link.candidates[0] ?? cwd);
+			issues.push({
+				severity: "warning",
+				message: `Broken internal link: ${link.href} -> ${relLink}`,
+				file: link.sourceFile,
+				rule: "broken-link",
+			});
 		}
 	}
 
@@ -256,25 +291,86 @@ export function runHtmlQuality(cwd: string): CheckResult {
 		name: "html-quality",
 		score,
 		grade: gradeFromScore(score),
-		details: { htmlFiles: htmlFiles.length },
+		details: { htmlFiles: htmlFiles.length, source: inventory ? "file-inventory" : "legacy-walk" },
 		issues,
 		duration: Date.now() - start,
 	};
 }
 
-function collectHtmlFiles(cwd: string, subdir = ""): string[] {
-	const files: string[] = [];
+function isInternalHref(href: string): boolean {
+	return (
+		!href.startsWith("http") &&
+		!href.startsWith("//") &&
+		!href.startsWith("mailto:") &&
+		!href.startsWith("#") &&
+		!href.startsWith("javascript:")
+	);
+}
+
+function resolveInternalLink(cwd: string, file: HtmlInput, href: string): InternalLink | null {
+	const cleanHref = href.split("#")[0]?.split("?")[0] ?? "";
+	if (!cleanHref) return null;
+
+	const isSiteRootAbsolute = cleanHref.startsWith("/");
+	const base = isSiteRootAbsolute ? detectSiteRoot(cwd, file.fullPath) : dirname(file.fullPath);
+	const targetPath = isSiteRootAbsolute ? cleanHref.replace(/^\/+/, "") : cleanHref;
+	const target = join(base, targetPath);
+
+	return {
+		sourceFile: file.path,
+		href: cleanHref,
+		candidates: internalLinkCandidates(target, cleanHref),
+	};
+}
+
+function detectSiteRoot(cwd: string, htmlFile: string): string {
+	const fileDir = dirname(htmlFile);
+	const relDir = relative(cwd, fileDir);
+	const segments = relDir && !relDir.startsWith("..") ? relDir.split(/[\\/]/).filter(Boolean) : [];
+	let current = cwd;
+
+	// Root-absolute static-site links are site-root relative, not page-dir relative.
+	// Prefer the shallowest ancestor with an index page so nested index.html routes
+	// such as /app/terms/ do not become their own site root.
+	if (hasIndexPage(current)) return current;
+	for (const segment of segments) {
+		current = join(current, segment);
+		if (hasIndexPage(current)) return current;
+	}
+	return cwd;
+}
+
+function hasIndexPage(dir: string): boolean {
+	return existsSync(join(dir, "index.html")) || existsSync(join(dir, "index.htm"));
+}
+
+function internalLinkCandidates(target: string, href: string): string[] {
+	const candidates = [target];
+	const lastSegment = href.split("/").filter(Boolean).at(-1) ?? "";
+	const hasExtension = /\.[^/.]+$/.test(lastSegment);
+	if (href.endsWith("/") || !hasExtension) {
+		candidates.push(join(target, "index.html"), join(target, "index.htm"));
+	}
+	if (!href.endsWith("/") && !hasExtension) {
+		candidates.push(`${target}.html`, `${target}.htm`);
+	}
+	return candidates;
+}
+
+function collectHtmlFiles(cwd: string, subdir = ""): HtmlInput[] {
+	const files: HtmlInput[] = [];
 	const dir = subdir ? join(cwd, subdir) : cwd;
 	try {
 		for (const entry of readdirSync(dir)) {
-			if (SKIP_DIRS.has(entry)) continue;
 			const full = join(dir, entry);
+			const relPath = subdir ? join(subdir, entry).replace(/\\/g, "/") : entry;
+			if (isIgnoredPath(relPath)) continue;
 			try {
 				const stat = statSync(full);
 				if (stat.isDirectory()) {
 					files.push(...collectHtmlFiles(cwd, subdir ? join(subdir, entry) : entry));
 				} else if (entry.endsWith(".html") || entry.endsWith(".htm")) {
-					files.push(full);
+					files.push({ path: relPath, fullPath: full });
 				}
 			} catch {
 				/* skip */

@@ -2,7 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { detectWorkspace } from "../detect.js";
+import { buildFileInventory } from "../file-inventory.js";
 import { setGlobalSrcRoots } from "../fs-utils.js";
+import { buildEffectiveScanPolicy } from "../scan-policy.js";
 import { runConfusion } from "./confusion.js";
 
 function makeProject(files: Record<string, string>): string {
@@ -17,6 +20,10 @@ function makeProject(files: Record<string, string>): string {
 }
 
 afterEach(() => setGlobalSrcRoots(undefined));
+
+function inventory(dir: string) {
+	return buildFileInventory(dir, detectWorkspace(dir), buildEffectiveScanPolicy(dir, {}));
+}
 
 describe("runConfusion", () => {
 	it("detects similar filenames", () => {
@@ -54,6 +61,32 @@ describe("runConfusion", () => {
 		const dir = makeProject({});
 		const result = runConfusion(dir);
 		expect(result.score).toBe(100);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("uses FileInventory and excludes ignored/generated source", () => {
+		const dir = makeProject({
+			"src/authentication.ts": "export const authentication = 1;\n",
+			"dist/process.ts": "export function run() { return 1; }\n",
+			".claude/worktrees/agent-a/src/handler.ts": "export function handle() { return 1; }\n",
+		});
+		const result = runConfusion(dir, inventory(dir));
+		expect(result.details).toMatchObject({ filesScanned: 1, source: "file-inventory" });
+		expect(result.issues.some((i) => i.file?.includes(".claude/worktrees") || i.file?.startsWith("dist/"))).toBe(false);
+		expect(result.issues.some((i) => i.rule === "generic-name")).toBe(false);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("reports export collisions as warnings, not errors", () => {
+		const dir = makeProject({
+			"src/api.ts": "export function createClient() { return 'api'; }\n",
+			"src/sdk.ts": "export function createClient() { return 'sdk'; }\n",
+		});
+		const result = runConfusion(dir);
+		const issue = result.issues.find((i) => i.rule === "export-collision");
+		expect(issue).toBeDefined();
+		expect(issue!.severity).toBe("warning");
+		expect(result.issues.filter((i) => i.rule === "export-collision" && i.severity === "error")).toHaveLength(0);
 		rmSync(dir, { recursive: true });
 	});
 

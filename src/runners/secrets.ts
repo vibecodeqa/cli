@@ -6,12 +6,85 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { lintSource } from "@secretlint/core";
 import { creator as secretlintPreset } from "@secretlint/secretlint-rule-preset-recommend";
-import { collectAllFiles } from "../fs-utils.js";
+import { collectAllFiles, isIgnoredPath } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
 
 const SECRETLINT_CONFIG = { rules: [{ id: "@secretlint/secretlint-rule-preset-recommend", rule: secretlintPreset }] };
+
+function isFixtureOrDocsPath(file: string): boolean {
+	return /(?:^|[/\\])(?:__tests__|__fixtures__|fixtures|mocks|__mocks__|test|tests|spec|docs|documentation|examples?)(?:[/\\]|$)|(?:\.test|\.spec)\.[^.]+$|(?:^|[/\\])(?:README|CHANGELOG|CONTRIBUTING)\.md$/i.test(
+		file,
+	);
+}
+
+function hasFixtureContext(file: string, value: string): boolean {
+	if (!isFixtureOrDocsPath(file)) return false;
+	return /\b(?:assert|ciphertext|credential|decrypt|encrypt|example|exportKey|fake|fixture|generated|hardcoded|mask|mock|not\.toContain|placeholder|redact|redacted|roundtrip|round-trip|shape|stub|test|trace|validation)\b/i.test(
+		`${file} ${value}`,
+	);
+}
+
+function isDeterministicFixtureValue(normalized: string): boolean {
+	if (
+		/\b(?:not-a-real|plaintext-value|secretsecret|supersecret|should-never-appear|example|sample|dummy|fake|fixture|placeholder|roundtrip|round-trip|owner-scoped|owner-only|status-example|test-only)\b/i.test(
+			normalized,
+		)
+	) {
+		return true;
+	}
+	if (/-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/.test(normalized)) return true;
+	if (/[Xx]{8,}/.test(normalized)) return true;
+	if (/(?:0123456789abcdef|abcdef0123456789|abcdefghijklmnopqrst|ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij)/.test(normalized)) {
+		return true;
+	}
+	if (/AKIA[0-9A-Z]*EXAMPLE\b/.test(normalized)) return true;
+	if (/\b(?:ghp|ghs|gho)_[a-z]{16,}[a-z0-9]*\b/.test(normalized)) return true;
+	if (/\bsk-[a-z]{12,}[a-z0-9_-]*\b/i.test(normalized) && /(?:abc|test|example|secret|plaintext|not-a-real|x{6,})/i.test(normalized)) {
+		return true;
+	}
+	if (
+		/\b(?:sk|sk-live|sk-proj)-[A-Za-z0-9_-]{16,}\b/.test(normalized) &&
+		/\b(?:hardcoded|redact|redacted|trace|not\.toContain|security-no-hardcoded-secrets)\b/i.test(normalized)
+	) {
+		return true;
+	}
+	return false;
+}
+
+function isLikelyPlaceholderSecret(value: string, file = ""): boolean {
+	const normalized = value.replace(/['"`]/g, "").trim();
+	if (!normalized) return false;
+	if (/\bAuthorization:\s*Bearer\s+(?:YOUR_TOKEN|EXAMPLE_TOKEN|DUMMY_TOKEN|FAKE_TOKEN|TEST_TOKEN)\b/i.test(normalized)) return true;
+	if (/\b(?:YOUR|MY|EXAMPLE|SAMPLE|DUMMY|FAKE|TEST|PLACEHOLDER)[_-]?(?:TOKEN|SECRET|KEY|PASSWORD|API_KEY|AUTH)\b/i.test(normalized)) {
+		return true;
+	}
+	if (/\b(?:example|sample|dummy|fake|fixture|placeholder|round-trip|owner-only|test-only)\b/i.test(normalized)) {
+		return true;
+	}
+	if (/\b(?:token|secret|api[_-]?key|password|auth)\s*[:=]\s*(?:abc123|abcdef|1234567890)[a-z0-9_-]{0,28}\b/i.test(normalized)) return true;
+	if (/^sk-[a-z0-9_-]{6,32}$/i.test(normalized) && /(?:abc|123|000|test|round|owner|fixture|sample|x\d)/i.test(normalized)) {
+		return true;
+	}
+	if (/\bsk-(?:round-trip|owner-only|test|fixture|dummy|fake|sample|x\d)[a-z0-9_-]{3,32}\b/i.test(normalized)) return true;
+	if (/^(?:token=)?(?:abc|abcdef)[a-z0-9]{8,28}$/i.test(normalized)) return true;
+	if (/\btoken=(?:abc|abcdef)[a-z0-9]{8,28}\b/i.test(normalized)) return true;
+	if (hasFixtureContext(file, normalized) && isDeterministicFixtureValue(normalized)) return true;
+	return false;
+}
+
+function contextualizeSecret(issue: Issue, sample = ""): Issue {
+	const context = `${sample} ${issue.message}`;
+	if (!isLikelyPlaceholderSecret(context, issue.file ?? "")) return issue;
+	const severity = isFixtureOrDocsPath(issue.file ?? "") ? "warning" : "info";
+	return {
+		...issue,
+		severity,
+		message: `${issue.message} — likely test/docs placeholder; verify it cannot be used as a real credential`,
+		rule: issue.rule ?? "secret-placeholder",
+	};
+}
 
 /** Human-readable kind from a secretlint message, without leaking the secret value. */
 function secretlintKind(msg: { messageId?: string; ruleId?: string }): string {
@@ -31,14 +104,26 @@ function tryGitleaks(cwd: string, issues: Issue[]): boolean {
 			// Skip our own generated report artifacts — the HTML/JSON we write under
 			// .vibe-check/ embeds sample keys and trips gitleaks on every scan.
 			const file = String(f.File ?? "");
-			if (/(?:^|[/\\])\.vibe-check[/\\]/.test(file)) continue;
-			issues.push({
-				severity: "error",
-				message: `${f.Description || f.RuleID || "Secret detected"} (${f.Match?.slice(0, 8)}...)`,
-				file: f.File,
-				line: f.StartLine,
-				rule: f.RuleID || "secret-detected",
-			});
+			if (isIgnoredPath(file)) continue;
+			let sourceLine = "";
+			try {
+				const sourceLines = readFileSync(join(cwd, file), "utf-8").split("\n");
+				sourceLine = lineWindow(sourceLines, Math.max(0, Number(f.StartLine ?? 1) - 1));
+			} catch {
+				sourceLine = "";
+			}
+			issues.push(
+				contextualizeSecret(
+					{
+						severity: "error",
+						message: `${f.Description || f.RuleID || "Secret detected"} (${f.Match?.slice(0, 8)}...)`,
+						file: f.File,
+						line: f.StartLine,
+						rule: f.RuleID || "secret-detected",
+					},
+					`${String(f.Match ?? "")} ${String(f.Secret ?? "")} ${sourceLine}`,
+				),
+			);
 		}
 		return true;
 	} catch {
@@ -47,6 +132,11 @@ function tryGitleaks(cwd: string, issues: Issue[]): boolean {
 }
 
 const SECRET_PATTERNS: { name: string; pattern: RegExp }[] = [
+	{
+		name: "Credential Placeholder",
+		pattern:
+			/(?:Authorization:\s*Bearer\s+(?:YOUR_TOKEN|EXAMPLE_TOKEN|DUMMY_TOKEN|FAKE_TOKEN|TEST_TOKEN)\b|\btoken=(?:abc|abcdef)[a-z0-9]{8,28}\b|\bsk-(?:round-trip|owner-only|test|fixture|dummy|fake|sample|x\d)[a-z0-9_-]{3,32}\b)/i,
+	},
 	{ name: "AWS Access Key", pattern: /AKIA[0-9A-Z]{16}/ },
 	{
 		name: "AWS Secret Key",
@@ -79,6 +169,10 @@ const SECRET_PATTERNS: { name: string; pattern: RegExp }[] = [
 
 type ScanFile = { path: string; content: string };
 
+function lineWindow(lines: string[], index: number): string {
+	return lines.slice(Math.max(0, index - 3), Math.min(lines.length, index + 4)).join("\n");
+}
+
 function scanPatterns(files: ScanFile[], add: (iss: Issue) => void): void {
 	for (const sf of files) {
 		const lines = sf.content.split("\n");
@@ -87,7 +181,12 @@ function scanPatterns(files: ScanFile[], add: (iss: Issue) => void): void {
 			if (line.trim().startsWith("//") || line.trim().startsWith("*")) continue;
 			for (const { name, pattern } of SECRET_PATTERNS) {
 				if (pattern.test(line))
-					add({ severity: "error", message: `Possible ${name}`, file: sf.path, line: i + 1, rule: "secret-detected" });
+					add(
+						contextualizeSecret(
+							{ severity: "error", message: `Possible ${name}`, file: sf.path, line: i + 1, rule: "secret-detected" },
+							lineWindow(lines, i),
+						),
+					);
 			}
 		}
 	}
@@ -101,13 +200,18 @@ async function scanSecretlint(files: ScanFile[], add: (iss: Issue) => void): Pro
 				options: { config: SECRETLINT_CONFIG },
 			});
 			for (const m of result.messages) {
-				add({
-					severity: "error",
-					message: `Possible ${secretlintKind(m)} — remove and rotate`,
-					file: sf.path,
-					line: m.loc?.start?.line ?? 1,
-					rule: "secret-detected",
-				});
+				add(
+					contextualizeSecret(
+						{
+							severity: "error",
+							message: `Possible ${secretlintKind(m)} — remove and rotate`,
+							file: sf.path,
+							line: m.loc?.start?.line ?? 1,
+							rule: "secret-detected",
+						},
+						lineWindow(sf.content.split("\n"), Math.max(0, (m.loc?.start?.line ?? 1) - 1)),
+					),
+				);
 			}
 		} catch {
 			/* unparseable file — skip */
@@ -119,7 +223,7 @@ async function scanSecretlint(files: ScanFile[], add: (iss: Issue) => void): Pro
  *  formats that a local gitleaks version may not know yet. secretlint is only
  *  needed when gitleaks is unavailable. */
 async function scanBuiltIn(cwd: string, includeSecretlint: boolean, alreadyFound: Issue[] = []): Promise<Issue[]> {
-	const files = collectAllFiles(cwd, { extraExts: true }).filter((sf) => !sf.isTest && !sf.path.includes("__mock"));
+	const files = collectAllFiles(cwd, { extraExts: true }).filter((sf) => !sf.path.includes("__mock"));
 	const issues: Issue[] = [];
 	// Seed the dedup set with what gitleaks already reported so a secret found by
 	// both tools at the same location isn't counted twice (built-in patterns now
@@ -201,8 +305,11 @@ export async function runSecrets(cwd: string): Promise<CheckResult> {
 		}
 	}
 
-	// Score based on issue count (secrets are always critical)
-	const score = issues.length === 0 ? 100 : Math.max(0, Math.round(100 - Math.min(issues.length, 5) * 15));
+	const errorCount = issues.filter((i) => i.severity === "error").length;
+	const warningCount = issues.filter((i) => i.severity === "warning").length;
+	const infoCount = issues.filter((i) => i.severity === "info").length;
+	const penalty = Math.min(errorCount, 5) * 15 + Math.min(warningCount, 5) * 5 + Math.min(infoCount, 5);
+	const score = issues.length === 0 ? 100 : Math.max(0, Math.round(100 - penalty));
 
 	return {
 		name: "secrets",
@@ -210,6 +317,8 @@ export async function runSecrets(cwd: string): Promise<CheckResult> {
 		grade: gradeFromScore(score),
 		details: {
 			secretsFound: issues.length,
+			probableLeaks: errorCount,
+			placeholderOrFixtureFindings: warningCount + infoCount,
 			tool,
 			suggestion: gitleaksResult
 				? "gitleaks scan ran; built-in LLM/service key patterns also checked"
