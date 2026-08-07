@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
+import { discoveryConventions } from "./discovery-conventions.js";
 import type { SourceFile } from "./fs-utils.js";
 import type { EffectiveScanPolicy } from "./scan-policy.js";
 import { evaluatePath } from "./scan-policy.js";
@@ -207,7 +208,7 @@ function fileKind(path: string, ext: string, isTest: boolean, reasons: string[])
 	if (path.startsWith(".env") || basename(path).startsWith(".env")) return "env";
 	if (reasons.includes("lockfile")) return "lockfile";
 	if (isConfigPath(path)) return "config";
-	if ([".ts", ".tsx", ".js", ".jsx", ".dart", ".vue", ".svelte"].includes(ext)) return "source";
+	if (discoveryConventions.sourceFileExtensions.includes(ext)) return "source";
 	if ([".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico"].includes(ext)) return "asset";
 	return "unknown";
 }
@@ -215,24 +216,10 @@ function fileKind(path: string, ext: string, isTest: boolean, reasons: string[])
 function isConfigPath(path: string): boolean {
 	const name = basename(path);
 	return (
-		name === "package.json" ||
-		name === "tsconfig.json" ||
-		name.startsWith("tsconfig.") ||
-		name.startsWith("eslint.config.") ||
-		name === "biome.json" ||
-		name === "biome.jsonc" ||
-		name === "vite.config.ts" ||
-		name === "vite.config.js" ||
-		name === "pubspec.yaml" ||
-		name === "analysis_options.yaml" ||
+		discoveryConventions.projectManifestFiles.includes(name) ||
+		discoveryConventions.projectConfigFiles.includes(name) ||
 		name === "pnpm-workspace.yaml" ||
-		name === "package-lock.json" ||
-		name.startsWith("vite.config.") ||
-		name.startsWith("astro.config.") ||
-		name.startsWith("next.config.") ||
-		name === "wrangler.toml" ||
-		name === "wrangler.json" ||
-		name === "wrangler.jsonc"
+		name === "package-lock.json"
 	);
 }
 
@@ -317,7 +304,7 @@ function addConfigBackedStaticSites(cwd: string, workspace: WorkspaceInfo, colle
 }
 
 function addConventionalStaticSites(cwd: string, collector: StaticSiteCollector): void {
-	for (const rootName of ["site", "docs", "website", "web", "public", "static"]) {
+	for (const rootName of discoveryConventions.staticSiteRootNames) {
 		if (!existsSync(join(cwd, rootName))) continue;
 		if (!hasAnyStaticMarker(cwd, rootName)) continue;
 		collector.ensure(rootName, {

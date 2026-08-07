@@ -1,8 +1,9 @@
 import { join } from "node:path";
+import { discoveryConventions } from "../discovery-conventions.js";
 import { readDeps, type SourceFile } from "../fs-utils.js";
 import type { ProjectContext, WorkspaceInfo } from "../types.js";
 
-const FRONTEND_FRAMEWORKS = new Set(["react", "vue", "svelte"]);
+const FRONTEND_FRAMEWORKS = new Set(discoveryConventions.frontendFrameworks);
 
 export function frontendProjects(workspace?: WorkspaceInfo): ProjectContext[] | null {
 	if (!workspace?.projects) return null;

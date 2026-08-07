@@ -3,6 +3,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { discoveryConventions, projectMarkerFiles } from "./discovery-conventions.js";
 import type { ProjectContext, ProjectDiscoveryEvidence, ProjectToolCommand, StackInfo, WorkspaceInfo, WorkspacePackage } from "./types.js";
 
 /** Detect infrastructure/data components (open vocabulary — see schema's StackInfo.components).
@@ -12,7 +13,7 @@ export function detectComponents(cwd: string, workspace?: WorkspaceInfo): string
 	const dirs = [cwd, ...(workspace?.packages.map((p) => join(cwd, p.path)) ?? [])];
 	for (const dir of dirs) {
 		let wrangler = "";
-		for (const name of ["wrangler.toml", "wrangler.json", "wrangler.jsonc"]) {
+		for (const name of discoveryConventions.componentConfigFiles) {
 			const f = join(dir, name);
 			if (existsSync(f)) {
 				try {
@@ -285,18 +286,20 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 	const discoveryEvidence: ProjectDiscoveryEvidence[] = [];
 
 	// ── Dart/Flutter monorepo (melos) ──
-	if (has("melos.yaml")) {
+	const melos = discoveryConventions.workspaceManifestDefaults.melos;
+	if (has(melos.file)) {
 		tool = "melos";
-		globs = parseYamlList(read("melos.yaml"), "packages");
-		if (globs.length === 0) globs = ["packages/*"];
-		discoveryEvidence.push({ kind: "manifest", file: "melos.yaml", description: "Melos workspace manifest defines package globs" });
+		globs = parseYamlList(read(melos.file), melos.listKey ?? "packages");
+		if (globs.length === 0) globs = melos.defaultGlobs;
+		discoveryEvidence.push({ kind: "manifest", file: melos.file, description: "Melos workspace manifest defines package globs" });
 	}
 
 	// ── Node.js workspace configs ──
-	if (tool === "none" && has("pnpm-workspace.yaml")) {
+	const pnpm = discoveryConventions.workspaceManifestDefaults.pnpm;
+	if (tool === "none" && has(pnpm.file)) {
 		tool = "pnpm";
-		globs = parseYamlList(read("pnpm-workspace.yaml"), "packages");
-		discoveryEvidence.push({ kind: "manifest", file: "pnpm-workspace.yaml", description: "pnpm workspace manifest defines package globs" });
+		globs = parseYamlList(read(pnpm.file), pnpm.listKey ?? "packages");
+		discoveryEvidence.push({ kind: "manifest", file: pnpm.file, description: "pnpm workspace manifest defines package globs" });
 	}
 
 	if (tool === "none") {
@@ -318,15 +321,16 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 		}
 	}
 
-	if (has("lerna.json") && tool === "none") {
+	const lerna = discoveryConventions.workspaceManifestDefaults.lerna;
+	if (has(lerna.file) && tool === "none") {
 		tool = "lerna";
-		const lerna = read("lerna.json");
-		discoveryEvidence.push({ kind: "manifest", file: "lerna.json", description: "Lerna workspace manifest defines package globs" });
+		const lernaContent = read(lerna.file);
+		discoveryEvidence.push({ kind: "manifest", file: lerna.file, description: "Lerna workspace manifest defines package globs" });
 		try {
-			const parsed = JSON.parse(lerna);
-			globs = parsed.packages || ["packages/*"];
+			const parsed = JSON.parse(lernaContent);
+			globs = parsed[lerna.jsonField ?? "packages"] || lerna.defaultGlobs;
 		} catch {
-			globs = ["packages/*"];
+			globs = lerna.defaultGlobs;
 		}
 	}
 
@@ -360,7 +364,7 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 		const knownPaths = new Set(packages.map((p) => p.path));
 		for (const entry of readdirSync(cwd)) {
 			if (knownPaths.has(entry)) continue;
-			if (entry === "node_modules" || entry === ".git" || entry === "dist" || entry === "build" || entry.startsWith(".")) continue;
+			if (shouldSkipConventionEntry(entry)) continue;
 			const full = join(cwd, entry);
 			try {
 				if (!statSync(full).isDirectory()) continue;
@@ -426,7 +430,7 @@ function walkForPackages(cwd: string, dir: string, relBase: string, packages: Wo
 		return;
 	}
 	for (const entry of entries) {
-		if (entry === "node_modules" || entry === ".git" || entry === "dist" || entry === "build") continue;
+		if (discoveryConventions.ignoredConventionEntries.includes(entry)) continue;
 		const full = join(dir, entry);
 		try {
 			if (lstatSync(full).isSymbolicLink() || !statSync(full).isDirectory()) continue;
@@ -435,8 +439,8 @@ function walkForPackages(cwd: string, dir: string, relBase: string, packages: Wo
 		}
 		const relPath = relBase ? `${relBase}/${entry}` : entry;
 
-		// If this dir has a package.json or pubspec.yaml, it's a package
-		if (existsSync(join(full, "package.json")) || existsSync(join(full, "pubspec.yaml"))) {
+		// If this dir has a supported manifest/config marker, it's a package.
+		if (hasSupportedProjectMarker(full)) {
 			addPackage(relPath, full, packages);
 		} else {
 			// Keep looking deeper
@@ -468,24 +472,12 @@ function addPackage(relPath: string, pkgDir: string, packages: WorkspacePackage[
 		}
 	}
 
-	const hasSrc = existsSync(join(pkgDir, "src")) || existsSync(join(pkgDir, "app")) || existsSync(join(pkgDir, "lib"));
+	const hasSrc = discoveryConventions.sourceRoots.some((root) => existsSync(join(pkgDir, root)));
 	// Some packages have code at root (no src/ dir) — check for .ts/.dart files.
 	// Guard readdirSync: an unreadable package dir must not abort detection.
-	const hasRootCode =
-		!hasSrc &&
-		readSafeEntries(pkgDir).some(
-			(f) => f.endsWith(".ts") || f.endsWith(".tsx") || f.endsWith(".js") || f.endsWith(".jsx") || f.endsWith(".dart"),
-		);
-	const hasTests = existsSync(join(pkgDir, "test")) || existsSync(join(pkgDir, "tests")) || existsSync(join(pkgDir, "__tests__")) || hasSrc; // tests often live alongside src in monorepos
-	const hasLinter =
-		existsSync(join(pkgDir, "biome.json")) ||
-		existsSync(join(pkgDir, "biome.jsonc")) ||
-		existsSync(join(pkgDir, "analysis_options.yaml")) ||
-		existsSync(join(pkgDir, ".eslintrc.json")) ||
-		existsSync(join(pkgDir, ".eslintrc.js")) ||
-		existsSync(join(pkgDir, "eslint.config.js")) ||
-		existsSync(join(pkgDir, "eslint.config.ts")) ||
-		existsSync(join(pkgDir, "eslint.config.mjs"));
+	const hasRootCode = !hasSrc && readSafeEntries(pkgDir).some((f) => hasSourceExtension(f));
+	const hasTests = discoveryConventions.testRoots.some((root) => existsSync(join(pkgDir, root))) || hasSrc; // tests often live alongside src in monorepos
+	const hasLinter = discoveryConventions.linterConfigFiles.some((file) => existsSync(join(pkgDir, file)));
 
 	packages.push({ name, path: relPath, hasSrc: hasSrc || hasRootCode, hasRootCode, hasTests, hasLinter });
 }
@@ -497,9 +489,10 @@ function projectId(path: string): string {
 function projectKind(path: string): ProjectContext["kind"] {
 	if (path === ".") return "root";
 	const first = path.split("/")[0] ?? "";
-	if (first === "apps" || first === "web" || first === "client" || first === "frontend") return "app";
-	if (first === "services" || first === "api" || first === "server" || first === "backend" || path.includes("worker")) return "service";
-	if (first === "packages" || first === "libs" || first === "lib" || path.includes("shared")) return "library";
+	const rules = discoveryConventions.projectKindRules;
+	if (rules.appRoots.includes(first)) return "app";
+	if (rules.serviceRoots.includes(first) || rules.servicePathIncludes.some((needle) => path.includes(needle))) return "service";
+	if (rules.libraryRoots.includes(first) || rules.libraryPathIncludes.some((needle) => path.includes(needle))) return "library";
 	return "package";
 }
 
@@ -519,12 +512,13 @@ function projectConfidence(
 	srcRoots: string[],
 	evidence: ProjectDiscoveryEvidence[],
 ): number {
-	let confidence = 0.35;
-	if (manifestFiles.length > 0) confidence += 0.35;
-	if (configFiles.length > 0) confidence += 0.15;
-	if (srcRoots.length > 0) confidence += 0.1;
-	if (evidence.some((item) => item.kind === "manifest")) confidence += 0.05;
-	if (evidence.some((item) => item.kind === "convention")) confidence -= 0.05;
+	const scoring = discoveryConventions.confidenceScoring;
+	let confidence = scoring.base;
+	if (manifestFiles.length > 0) confidence += scoring.manifestFileBonus;
+	if (configFiles.length > 0) confidence += scoring.configFileBonus;
+	if (srcRoots.length > 0) confidence += scoring.sourceRootBonus;
+	if (evidence.some((item) => item.kind === "manifest")) confidence += scoring.manifestEvidenceBonus;
+	if (evidence.some((item) => item.kind === "convention")) confidence -= scoring.conventionEvidencePenalty;
 	return Math.max(0, Math.min(1, Number(confidence.toFixed(2))));
 }
 
@@ -561,46 +555,10 @@ function projectToolCommands(project: {
 function createProjectContext(cwd: string, pkg: WorkspacePackage | null, evidence: ProjectDiscoveryEvidence[]): ProjectContext {
 	const path = pkg?.path ?? ".";
 	const dir = path === "." ? cwd : join(cwd, path);
-	const manifestFiles = existingRelativeFiles(cwd, path, ["package.json", "pubspec.yaml"]);
-	const configFiles = existingRelativeFiles(cwd, path, [
-		"tsconfig.json",
-		"tsconfig.app.json",
-		"tsconfig.base.json",
-		"biome.json",
-		"biome.jsonc",
-		"eslint.config.js",
-		"eslint.config.mjs",
-		"eslint.config.cjs",
-		"eslint.config.ts",
-		".eslintrc",
-		".eslintrc.json",
-		".eslintrc.js",
-		".eslintrc.cjs",
-		".eslintrc.yml",
-		".eslintrc.yaml",
-		"analysis_options.yaml",
-		"vite.config.ts",
-		"vite.config.js",
-		"vite.config.mjs",
-		"vite.config.cjs",
-		"astro.config.ts",
-		"astro.config.js",
-		"astro.config.mjs",
-		"astro.config.cjs",
-		"next.config.ts",
-		"next.config.js",
-		"next.config.mjs",
-		"next.config.cjs",
-		"vitest.config.ts",
-		"vitest.config.js",
-		"jest.config.js",
-		"jest.config.ts",
-		"wrangler.toml",
-		"wrangler.json",
-		"wrangler.jsonc",
-	]);
-	const srcRoots = pkg?.hasRootCode ? [path] : projectRoots(cwd, path, ["src", "app", "lib"]);
-	const testRoots = projectRoots(cwd, path, ["test", "tests", "__tests__", "e2e"]);
+	const manifestFiles = existingRelativeFiles(cwd, path, discoveryConventions.projectManifestFiles);
+	const configFiles = existingRelativeFiles(cwd, path, discoveryConventions.projectConfigFiles);
+	const srcRoots = pkg?.hasRootCode ? [path] : projectRoots(cwd, path, discoveryConventions.sourceRoots);
+	const testRoots = projectRoots(cwd, path, discoveryConventions.testRoots);
 	const stack = detectProjectStack(dir, cwd);
 	const projectEvidence = [
 		...evidence,
@@ -662,18 +620,18 @@ function buildSrcRoots(cwd: string, packages: WorkspacePackage[]): string[] {
 			add(pkg.path);
 		} else {
 			// Source in subdirectories
-			for (const srcDir of ["src", "app", "lib"]) {
+			for (const srcDir of discoveryConventions.sourceRoots) {
 				add(join(pkg.path, srcDir));
 			}
 		}
 		// Test directories
-		for (const testDir of ["test", "tests", "__tests__", "e2e"]) {
+		for (const testDir of discoveryConventions.testRoots) {
 			add(join(pkg.path, testDir));
 		}
 	}
 
 	// Also include root-level dirs if they exist
-	for (const d of ["src", "web/src", "lib", "app"]) add(d);
+	for (const d of discoveryConventions.rootSourceRoots) add(d);
 
 	return srcRoots;
 }
@@ -691,21 +649,12 @@ function detectConventionalLayout(cwd: string): WorkspaceInfo {
 		isMonorepo: false,
 		tool: "none",
 		packages: [],
-		srcRoots: ["src", "web/src", "lib", "app"],
+		srcRoots: discoveryConventions.rootSourceRoots,
 		projects: buildProjectContexts(cwd, [], singleEvidence, true),
 		discovery: { mode: "single", evidence: singleEvidence },
 	};
 
-	// Check for common multi-app layouts
-	const conventions = [
-		["apps", "packages"], // Turborepo/Nx convention
-		["apps", "libs"], // Nx convention
-		["services", "packages"], // Microservices
-		["server", "client"], // Fullstack split
-		["backend", "frontend"], // Fullstack split
-	];
-
-	for (const dirs of conventions) {
+	for (const dirs of discoveryConventions.pairedConventionLayouts) {
 		const existing = dirs.filter((d) => existsSync(join(cwd, d)) && statSync(join(cwd, d)).isDirectory());
 		if (existing.length < 2) continue;
 		const conventionRejectedEvidence: ProjectDiscoveryEvidence[] = [];
@@ -749,9 +698,7 @@ function detectConventionalLayout(cwd: string): WorkspaceInfo {
 				// Only if it has a package.json or source files
 				const dirPath = join(cwd, dir);
 				const hasManifest = hasSupportedProjectMarker(dirPath);
-				const hasCode = readdirSync(dirPath).some(
-					(f) => f.endsWith(".ts") || f.endsWith(".tsx") || f.endsWith(".js") || f.endsWith(".dart"),
-				);
+				const hasCode = readdirSync(dirPath).some((f) => hasSourceExtension(f));
 				if (hasManifest || hasCode) {
 					addPackage(dir, dirPath, packages);
 				} else {
@@ -782,7 +729,7 @@ function detectConventionalLayout(cwd: string): WorkspaceInfo {
 	// pubspec.yaml but the repo root has no melos.yaml or root pubspec.yaml.
 	const packages: WorkspacePackage[] = [];
 	for (const entry of readdirSync(cwd)) {
-		if (entry === "node_modules" || entry === ".git" || entry === "dist" || entry === "build" || entry.startsWith(".")) continue;
+		if (shouldSkipConventionEntry(entry)) continue;
 		const full = join(cwd, entry);
 		try {
 			if (lstatSync(full).isSymbolicLink() || !statSync(full).isDirectory()) continue;
@@ -793,6 +740,7 @@ function detectConventionalLayout(cwd: string): WorkspaceInfo {
 			addPackage(entry, full, packages);
 			continue;
 		}
+		if (!discoveryConventions.conventionalContainerRoots.includes(entry)) continue;
 		// detectWorkspace runs outside the per-runner try/catch, so an unreadable
 		// child directory (EACCES) here would abort the whole scan — skip it.
 		let children: string[];
@@ -844,35 +792,15 @@ function detectConventionalLayout(cwd: string): WorkspaceInfo {
 }
 
 function hasSupportedProjectMarker(dir: string): boolean {
-	return [
-		"package.json",
-		"pubspec.yaml",
-		"tsconfig.json",
-		"tsconfig.app.json",
-		"tsconfig.base.json",
-		"biome.json",
-		"biome.jsonc",
-		"vite.config.ts",
-		"vite.config.js",
-		"vite.config.mjs",
-		"vite.config.cjs",
-		"astro.config.ts",
-		"astro.config.js",
-		"astro.config.mjs",
-		"astro.config.cjs",
-		"next.config.ts",
-		"next.config.js",
-		"next.config.mjs",
-		"next.config.cjs",
-		"wrangler.toml",
-		"wrangler.json",
-		"wrangler.jsonc",
-		"eslint.config.js",
-		"eslint.config.ts",
-		"eslint.config.mjs",
-		"eslint.config.cjs",
-		"analysis_options.yaml",
-	].some((marker) => existsSync(join(dir, marker)));
+	return projectMarkerFiles.some((marker) => existsSync(join(dir, marker)));
+}
+
+function hasSourceExtension(fileName: string): boolean {
+	return discoveryConventions.sourceFileExtensions.some((ext) => fileName.endsWith(ext));
+}
+
+function shouldSkipConventionEntry(entry: string): boolean {
+	return discoveryConventions.ignoredConventionEntries.includes(entry) || entry.startsWith(".");
 }
 
 /** Detect GitHub/GitLab repo URL from git remote. */

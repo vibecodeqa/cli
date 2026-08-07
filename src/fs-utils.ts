@@ -3,6 +3,7 @@
 import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 import defaultExclusions from "./data/default-exclusions.json" with { type: "json" };
+import { discoveryConventions } from "./discovery-conventions.js";
 
 export interface SourceFile {
 	path: string; // relative to cwd
@@ -19,11 +20,11 @@ const DEFAULT_EXCLUDED_DIR_NAMES = new Set(defaultExclusions.directoryNames);
 const DEFAULT_EXCLUDED_FILE_PATTERNS = defaultExclusions.filePatterns;
 const DEFAULT_EXCLUDED_PATH_PREFIXES = defaultExclusions.generatedPathPrefixes;
 const IGNORE_HIDDEN_DIRECTORIES = Boolean(defaultExclusions.ignoreHiddenDirectories);
-const CODE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".dart", ".vue", ".svelte"]);
+const CODE_EXTS = new Set(discoveryConventions.sourceFileExtensions);
 const ALL_EXTS = new Set([...CODE_EXTS, ".json", ".env", ".yaml", ".yml", ".toml", ".html", ".htm", ".md", ".mdx", ".txt", ".sh"]);
 
 /** Default source directories for single-package repos */
-const DEFAULT_SRC_DIRS = ["src", "web/src", "lib", "app"];
+const DEFAULT_SRC_DIRS = discoveryConventions.rootSourceRoots;
 
 /**
  * Set global source roots (called once from cli.ts after workspace detection).

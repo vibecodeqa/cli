@@ -50,6 +50,14 @@ The deterministic pipeline is:
 9. Normalize all findings and tool logs back to repo-root-relative paths.
 10. Emit package-aware metrics, findings, and tool provenance.
 
+Discovery conventions are maintained in
+`src/data/discovery-conventions.json`. Scanner code should read from that
+registry instead of copying path lists into runners or helper modules. The
+registry owns project markers, source/test roots, convention containers,
+static-site roots, project kind rules, and confidence scoring weights.
+
+Precedence is: explicit config > manifest workspace > ecosystem config > conservative convention > single-project fallback.
+
 ## Project Context
 
 Workspace scanning needs a richer package model than a path list:

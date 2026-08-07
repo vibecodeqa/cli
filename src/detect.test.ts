@@ -258,6 +258,54 @@ describe("detectWorkspace", () => {
 		);
 	});
 
+	it("detects registry-backed apps/libs convention layouts", () => {
+		setup({
+			"apps/web/package.json": JSON.stringify({ name: "web", dependencies: { react: "^19" } }),
+			"apps/web/src/App.tsx": "",
+			"apps/tmp/readme.md": "not a project",
+			"libs/ui/package.json": JSON.stringify({ name: "ui" }),
+			"libs/ui/src/index.ts": "",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.discovery?.mode).toBe("convention");
+		expect(ws.projects?.map((p) => p.path).sort()).toEqual([".", "apps/web", "libs/ui"]);
+		expect(ws.projects?.find((p) => p.path === "apps/web")?.kind).toBe("app");
+		expect(ws.projects?.find((p) => p.path === "libs/ui")?.kind).toBe("library");
+		expect(ws.discovery?.evidence).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "rejected", path: "apps/tmp" })]));
+	});
+
+	it("detects registry-backed container roots and shallow nested project markers", () => {
+		setup({
+			"workers/edge/package.json": JSON.stringify({ name: "edge" }),
+			"workers/edge/src/index.ts": "",
+			"functions/handler/tsconfig.json": "{}",
+			"functions/handler/src/index.ts": "",
+			"jobs/sync/package.json": JSON.stringify({ name: "sync" }),
+			"jobs/sync/src/index.ts": "",
+			"tools/cli/package.json": JSON.stringify({ name: "cli" }),
+			"tools/cli/src/index.ts": "",
+			"examples/demo/package.json": JSON.stringify({ name: "demo" }),
+			"examples/demo/src/index.ts": "",
+			"not-a-container/demo/package.json": JSON.stringify({ name: "ignored" }),
+			"not-a-container/demo/src/index.ts": "",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.discovery?.mode).toBe("convention");
+		expect(ws.projects?.map((p) => p.path).sort()).toEqual([
+			".",
+			"examples/demo",
+			"functions/handler",
+			"jobs/sync",
+			"tools/cli",
+			"workers/edge",
+		]);
+		expect(ws.projects?.find((p) => p.path === "workers/edge")?.kind).toBe("service");
+		expect(ws.projects?.find((p) => p.path === "functions/handler")?.kind).toBe("service");
+		expect(ws.projects?.find((p) => p.path === "tools/cli")?.kind).toBe("package");
+	});
+
 	it("handles pnpm-workspace.yaml with comments between entries", () => {
 		setup({
 			"pnpm-workspace.yaml": "packages:\n  - packages/*\n  # shared libs\n  - apps/*\n",
