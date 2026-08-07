@@ -447,26 +447,26 @@ describe("parseReactEslintIssues", () => {
 				messages: [{ severity: 2, message: "Hook is called conditionally", line: 5, ruleId: "react-hooks/rules-of-hooks" }],
 			},
 			{
-				filePath: "../../agents/coder/web/src/CopilotView.tsx",
+				filePath: "../../packages/web/src/CopilotView.tsx",
 				messages: [{ severity: 1, message: "Missing key", line: 8, ruleId: "react/jsx-key" }],
 			},
 		]);
 
-		const issues = parseReactEslintIssues(stdout, "/repo/store/console", "/repo")!;
+		const issues = parseReactEslintIssues(stdout, "/repo/apps/console", "/repo")!;
 
 		expect(issues[0]).toMatchObject({
-			file: "store/console/src/App.tsx",
+			file: "apps/console/src/App.tsx",
 			details: {
-				repoRelativePath: "store/console/src/App.tsx",
+				repoRelativePath: "apps/console/src/App.tsx",
 				toolRelativePath: "src/App.tsx",
-				toolCwd: "/repo/store/console",
+				toolCwd: "/repo/apps/console",
 			},
 		});
 		expect(issues[1]).toMatchObject({
-			file: "agents/coder/web/src/CopilotView.tsx",
+			file: "packages/web/src/CopilotView.tsx",
 			details: {
-				repoRelativePath: "agents/coder/web/src/CopilotView.tsx",
-				toolRelativePath: "../../agents/coder/web/src/CopilotView.tsx",
+				repoRelativePath: "packages/web/src/CopilotView.tsx",
+				toolRelativePath: "../../packages/web/src/CopilotView.tsx",
 			},
 		});
 	});

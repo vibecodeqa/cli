@@ -29,26 +29,26 @@ describe("parseEslintSecurityJson", () => {
 				messages: [{ severity: 1, message: "non-literal require", line: 11, ruleId: "security/detect-non-literal-require" }],
 			},
 			{
-				filePath: "../../agents/coder/web/src/terminal.ts",
+				filePath: "../../packages/web/src/terminal.ts",
 				messages: [{ severity: 2, message: "child process", line: 4, ruleId: "security/detect-child-process" }],
 			},
 		]);
 
-		const issues = parseEslintSecurityJson(out, "/repo", "/repo/store/console")!;
+		const issues = parseEslintSecurityJson(out, "/repo", "/repo/apps/console")!;
 
 		expect(issues[0]).toMatchObject({
-			file: "store/console/src/server.ts",
+			file: "apps/console/src/server.ts",
 			details: {
-				repoRelativePath: "store/console/src/server.ts",
+				repoRelativePath: "apps/console/src/server.ts",
 				toolRelativePath: "src/server.ts",
-				toolCwd: "/repo/store/console",
+				toolCwd: "/repo/apps/console",
 			},
 		});
 		expect(issues[1]).toMatchObject({
-			file: "agents/coder/web/src/terminal.ts",
+			file: "packages/web/src/terminal.ts",
 			details: {
-				repoRelativePath: "agents/coder/web/src/terminal.ts",
-				toolRelativePath: "../../agents/coder/web/src/terminal.ts",
+				repoRelativePath: "packages/web/src/terminal.ts",
+				toolRelativePath: "../../packages/web/src/terminal.ts",
 			},
 		});
 	});
@@ -61,12 +61,12 @@ describe("parseEslintSecurityJson", () => {
 			},
 		]);
 
-		const issues = parseEslintSecurityJson(out, "/repo", "/repo/store/console")!;
+		const issues = parseEslintSecurityJson(out, "/repo", "/repo/apps/console")!;
 
 		expect(issues[0].file).toBeUndefined();
 		expect((issues[0] as any).details).toMatchObject({
 			toolRelativePath: "../../../../outside.ts",
-			toolCwd: "/repo/store/console",
+			toolCwd: "/repo/apps/console",
 			pathStatus: "outside-repo",
 		});
 	});
@@ -139,7 +139,7 @@ describe("runSecurity", () => {
 	});
 
 	it("classifies auth-like browser storage keys as high-signal", () => {
-		const dir = makeProject({ "src/session.ts": 'localStorage.setItem("pags:session", JSON.stringify(session));\n' });
+		const dir = makeProject({ "src/session.ts": 'localStorage.setItem("app:session", JSON.stringify(session));\n' });
 		const result = runSecurity(dir);
 		const storageIssue = result.issues.find((i) => i.rule === "CWE-922");
 		expect(storageIssue?.severity).toBe("error");

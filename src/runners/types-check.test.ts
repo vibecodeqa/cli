@@ -24,16 +24,16 @@ afterEach(() => {
 describe("parseTscOutput", () => {
 	it("normalizes package-relative diagnostics to repo-root paths", () => {
 		const issues: Issue[] = [];
-		parseTscOutput("src/CopilotView.tsx(135,12): error TS2339: Property 'x' does not exist.", issues, "/repo", "/repo/agents/coder/web");
+		parseTscOutput("src/CopilotView.tsx(135,12): error TS2339: Property 'x' does not exist.", issues, "/repo", "/repo/packages/web");
 
 		expect(issues[0]).toMatchObject({
-			file: "agents/coder/web/src/CopilotView.tsx",
+			file: "packages/web/src/CopilotView.tsx",
 			line: 135,
 			rule: "TS2339",
 			details: {
-				repoRelativePath: "agents/coder/web/src/CopilotView.tsx",
+				repoRelativePath: "packages/web/src/CopilotView.tsx",
 				toolRelativePath: "src/CopilotView.tsx",
-				toolCwd: "/repo/agents/coder/web",
+				toolCwd: "/repo/packages/web",
 				pathStatus: "normalized",
 			},
 		});
@@ -41,26 +41,26 @@ describe("parseTscOutput", () => {
 
 	it("normalizes parent-relative diagnostics that resolve inside the repo", () => {
 		const issues: Issue[] = [];
-		parseTscOutput("../../agents/coder/web/src/App.tsx(4,2): error TS2304: Cannot find name 'x'.", issues, "/repo", "/repo/store/console");
+		parseTscOutput("../../packages/web/src/App.tsx(4,2): error TS2304: Cannot find name 'x'.", issues, "/repo", "/repo/apps/console");
 
 		expect(issues[0]).toMatchObject({
-			file: "agents/coder/web/src/App.tsx",
+			file: "packages/web/src/App.tsx",
 			details: {
-				repoRelativePath: "agents/coder/web/src/App.tsx",
-				toolRelativePath: "../../agents/coder/web/src/App.tsx",
-				toolCwd: "/repo/store/console",
+				repoRelativePath: "packages/web/src/App.tsx",
+				toolRelativePath: "../../packages/web/src/App.tsx",
+				toolCwd: "/repo/apps/console",
 			},
 		});
 	});
 
 	it("marks diagnostics outside the repo as non-clickable", () => {
 		const issues: Issue[] = [];
-		parseTscOutput("../../../../outside.ts(1,1): error TS2304: Cannot find name 'x'.", issues, "/repo", "/repo/agents/coder/web");
+		parseTscOutput("../../../../outside.ts(1,1): error TS2304: Cannot find name 'x'.", issues, "/repo", "/repo/packages/web");
 
 		expect(issues[0].file).toBeUndefined();
 		expect((issues[0] as any).details).toMatchObject({
 			toolRelativePath: "../../../../outside.ts",
-			toolCwd: "/repo/agents/coder/web",
+			toolCwd: "/repo/packages/web",
 			pathStatus: "outside-repo",
 		});
 	});

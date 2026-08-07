@@ -34,9 +34,9 @@ describe("html-quality", () => {
 	it("uses FileInventory through scan and omits generated HTML outputs", async () => {
 		mkdirSync(join(dir, "dist"), { recursive: true });
 		mkdirSync(join(dir, ".claude", "worktrees", "agent-a"), { recursive: true });
-		mkdirSync(join(dir, "store", "docs"), { recursive: true });
+		mkdirSync(join(dir, "site", "generated-docs"), { recursive: true });
 		writeFileSync(join(dir, "package.json"), "{}");
-		writeFileSync(join(dir, ".vcqa.json"), JSON.stringify({ ignore: ["store/docs/**"] }));
+		writeFileSync(join(dir, ".vcqa.json"), JSON.stringify({ ignore: ["site/generated-docs/**"] }));
 		writeFileSync(join(dir, "src.ts"), "export const x = 1;\n");
 		writeFileSync(
 			join(dir, "index.html"),
@@ -44,7 +44,7 @@ describe("html-quality", () => {
 		);
 		writeFileSync(join(dir, "dist", "bad.html"), "<html><head></head><body></body></html>");
 		writeFileSync(join(dir, ".claude", "worktrees", "agent-a", "bad.html"), "<html><head></head><body></body></html>");
-		writeFileSync(join(dir, "store", "docs", "bad.html"), "<html><head></head><body></body></html>");
+		writeFileSync(join(dir, "site", "generated-docs", "bad.html"), "<html><head></head><body></body></html>");
 
 		const report = await scan(dir, { skipTests: true, checks: ["html-quality"] });
 		const html = report.checks[0]!;
@@ -52,7 +52,7 @@ describe("html-quality", () => {
 		expect(html.details).toMatchObject({ htmlFiles: 1, source: "file-inventory" });
 		expect(report.meta.scanPolicy).toMatchObject({ configIgnorePatterns: 1 });
 		expect(report.meta.fileInventory).toMatchObject({ includedFiles: expect.any(Number), ignoredDirectories: expect.any(Number) });
-		expect(html.issues.some((issue) => /dist|\.claude|store\/docs/.test(issue.file ?? ""))).toBe(false);
+		expect(html.issues.some((issue) => /dist|\.claude|site\/generated-docs/.test(issue.file ?? ""))).toBe(false);
 	});
 
 	it("detects missing viewport", () => {

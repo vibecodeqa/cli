@@ -234,19 +234,19 @@ describe("detectWorkspace", () => {
 			"workers/host/package.json": JSON.stringify({ name: "host", devDependencies: { typescript: "^5", vitest: "^4" } }),
 			"workers/host/tsconfig.json": "{}",
 			"workers/host/src/index.ts": "",
-			"workers/api/tsconfig.json": "{}",
-			"workers/api/src/index.ts": "",
+			"services/api/tsconfig.json": "{}",
+			"services/api/src/index.ts": "",
 			"workers/tmp/readme.md": "not a project",
 		});
 		const ws = detectWorkspace(TMP);
 		expect(ws.isMonorepo).toBe(true);
 		expect(ws.tool).toBe("none");
 		expect(ws.discovery?.mode).toBe("convention");
-		expect(ws.projects?.map((p) => p.path).sort()).toEqual([".", "workers/api", "workers/host"]);
-		expect(ws.projects?.find((p) => p.path === "workers/api")?.stack.language).toBe("typescript");
-		expect(ws.projects?.find((p) => p.path === "workers/api")?.toolCommands.typecheck?.[0]).toMatchObject({
+		expect(ws.projects?.map((p) => p.path).sort()).toEqual([".", "services/api", "workers/host"]);
+		expect(ws.projects?.find((p) => p.path === "services/api")?.stack.language).toBe("typescript");
+		expect(ws.projects?.find((p) => p.path === "services/api")?.toolCommands.typecheck?.[0]).toMatchObject({
 			tool: "tsc",
-			cwd: "workers/api",
+			cwd: "services/api",
 		});
 		expect(ws.discovery?.evidence).toEqual(
 			expect.arrayContaining([

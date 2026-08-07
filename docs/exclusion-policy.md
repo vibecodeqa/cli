@@ -93,6 +93,11 @@ them. Those belong in project-level config.
 - Keep the registry defensible and cross-project. Standard generated/cache
   output belongs here; project-specific folders belong in `.vcqa.json`,
   `package.json#vcqa.ignore`, or `VCQA_IGNORE`.
+- Do not encode downstream customer, product, or repository names in defaults
+  or production scanner code. If a real repo exposes a false positive, first
+  model the generic shape (`site/generated-docs/**`, `services/api/**`,
+  `apps/web/**`, and similar neutral paths), then add the project-specific path
+  only to that repo's config.
 - Add directory names only when the directory is normally generated or external
   to product source. Avoid broad names such as `bin` when they commonly hold
   checked-in scripts.
@@ -101,6 +106,17 @@ them. Those belong in project-level config.
 - Keep analyzer-specific behavior explicit. Dependency checks may need lockfiles;
   complexity, HTML quality, and dead-code usually should not scan generated
   artifacts.
+
+## Downstream Regression Fixtures
+
+Tests may keep a downstream-shaped fixture only when it reproduces a real false
+positive or false negative that a neutral fixture failed to capture. Mark those
+cases as downstream regressions in the test name or comment, and pair them with a
+neutral fixture that proves the general behavior.
+
+Production code must remain free of repo-specific names such as customer/product
+brands or one-off internal folder layouts. `downstream-fixture-guard.test.ts`
+enforces that boundary for scanner source files.
 
 ## Future Shape
 

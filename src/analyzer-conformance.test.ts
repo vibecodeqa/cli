@@ -37,7 +37,7 @@ function makeInventory(ignore: string[] = []): { inventory: FileInventory; works
 
 function conformanceFixture(): { inventory: FileInventory; workspace: WorkspaceInfo } {
 	writeProject({
-		".vcqa.json": JSON.stringify({ ignore: ["src/generated/**", "store/docs/**"] }),
+		".vcqa.json": JSON.stringify({ ignore: ["src/generated/**", "site/generated-docs/**"] }),
 		"package.json": JSON.stringify({
 			name: "conformance-fixture",
 			dependencies: { react: "^19.0.0" },
@@ -53,7 +53,7 @@ function conformanceFixture(): { inventory: FileInventory; workspace: WorkspaceI
 		"src/App.tsx": 'export function App() { return <img src="/hero.jpg" alt="hero" />; }\n',
 		"src/Card.tsx": 'export function Card() { return <div style={{ backgroundColor: "#123456" }}>card</div>; }\n',
 		"src/generated/Bad.tsx": 'export function Bad() { return <img src="/generated.jpg" style={{ color: "#abcdef" }} />; }\n',
-		"store/docs/bad.html": "<html><head></head><body><img src='bad.jpg'></body></html>\n",
+		"site/generated-docs/bad.html": "<html><head></head><body><img src='bad.jpg'></body></html>\n",
 		".claude/worktrees/agent-a/Bad.tsx": 'export function Bad() { return <img src="/agent.jpg" style={{ color: "#abcdef" }} />; }\n',
 		".claude/worktrees/agent-a/bad.html": "<html><head></head><body><img src='bad.jpg'></body></html>\n",
 		"node_modules/pkg/Bad.tsx": 'export function Bad() { return <img src="/dep.jpg" style={{ color: "#abcdef" }} />; }\n',
@@ -62,10 +62,11 @@ function conformanceFixture(): { inventory: FileInventory; workspace: WorkspaceI
 		"playwright-report/Bad.tsx": 'export function Bad() { return <img src="/report.jpg" style={{ color: "#abcdef" }} />; }\n',
 		".vibe-check/Bad.tsx": 'export function Bad() { return <img src="/vcqa.jpg" style={{ color: "#abcdef" }} />; }\n',
 	});
-	return makeInventory(["src/generated/**", "store/docs/**"]);
+	return makeInventory(["src/generated/**", "site/generated-docs/**"]);
 }
 
-const FORBIDDEN_PATH = /^(?:src\/generated\/|store\/docs\/|\.claude\/|node_modules\/|dist\/|coverage\/|playwright-report\/|\.vibe-check\/)/;
+const FORBIDDEN_PATH =
+	/^(?:src\/generated\/|site\/generated-docs\/|\.claude\/|node_modules\/|dist\/|coverage\/|playwright-report\/|\.vibe-check\/)/;
 
 function forbiddenIssues(analyzer: string, result: CheckResult): Array<{ analyzer: string; file: string; rule?: string }> {
 	return result.issues
@@ -112,6 +113,61 @@ afterEach(() => {
 });
 
 describe("analyzer file-policy conformance", () => {
+	it("covers neutral repo hierarchy shapes in the shared file inventory", () => {
+		writeProject({
+			"pnpm-workspace.yaml":
+				"packages:\n  - apps/*\n  - packages/*\n  - services/*\n  - workers/*\n  - functions/*\n  - jobs/*\n  - tools/*\n  - site/*\n",
+			"package.json": JSON.stringify({ name: "hierarchy-matrix" }),
+			"apps/web/package.json": JSON.stringify({ name: "web", dependencies: { react: "^19.0.0" } }),
+			"apps/web/src/App.tsx": "export function App() { return null; }\n",
+			"packages/core/package.json": JSON.stringify({ name: "core" }),
+			"packages/core/src/index.ts": "export const core = true;\n",
+			"services/api/package.json": JSON.stringify({ name: "api" }),
+			"services/api/src/index.ts": "export const api = true;\n",
+			"workers/edge/package.json": JSON.stringify({ name: "edge" }),
+			"workers/edge/src/index.ts": "export default { fetch() { return new Response('ok'); } };\n",
+			"functions/handler/package.json": JSON.stringify({ name: "handler" }),
+			"functions/handler/src/index.ts": "export const handler = true;\n",
+			"jobs/sync/package.json": JSON.stringify({ name: "sync" }),
+			"jobs/sync/src/index.ts": "export const sync = true;\n",
+			"tools/cli/package.json": JSON.stringify({ name: "cli" }),
+			"tools/cli/src/index.ts": "export const cli = true;\n",
+			"site/docs/package.json": JSON.stringify({ name: "docs-site" }),
+			"site/docs/index.html": "<!doctype html><html lang='en'><head><title>Docs</title></head><body></body></html>\n",
+		});
+
+		const { inventory, workspace } = makeInventory();
+		const expectedProjectPaths = [
+			".",
+			"apps/web",
+			"functions/handler",
+			"jobs/sync",
+			"packages/core",
+			"services/api",
+			"site/docs",
+			"tools/cli",
+			"workers/edge",
+		];
+
+		expect(workspace.projects?.map((project) => project.path).sort()).toEqual(expectedProjectPaths);
+		expect(
+			inventory.files
+				.filter((file) => file.path !== "package.json" && !file.path.endsWith("/package.json"))
+				.map((file) => `${file.path}:${file.projectPath}:${file.kind}`)
+				.sort(),
+		).toEqual([
+			"apps/web/src/App.tsx:apps/web:source",
+			"functions/handler/src/index.ts:functions/handler:source",
+			"jobs/sync/src/index.ts:jobs/sync:source",
+			"packages/core/src/index.ts:packages/core:source",
+			"pnpm-workspace.yaml:.:config",
+			"services/api/src/index.ts:services/api:source",
+			"site/docs/index.html:site/docs:html",
+			"tools/cli/src/index.ts:tools/cli:source",
+			"workers/edge/src/index.ts:workers/edge:source",
+		]);
+	});
+
 	it("keeps ignored and generated paths out of inventory-backed source-quality analyzers", () => {
 		const { inventory, workspace } = conformanceFixture();
 		const results = FILE_DISCOVERY_CONFORMANCE_ANALYZERS.map(({ name, run, expectedRule }) => {

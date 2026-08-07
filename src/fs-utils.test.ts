@@ -148,9 +148,9 @@ describe("readEnvIgnoreNames", () => {
 describe("readGitIgnoreDirectoryNames", () => {
 	it("returns directory ignores but not file ignores", () => {
 		const dir = makeProject({
-			".gitignore": ["store/docs/", ".env", "package-lock.json", "!keep/", "# comment", "dist/"].join("\n"),
+			".gitignore": ["site/generated-docs/", ".env", "package-lock.json", "!keep/", "# comment", "dist/"].join("\n"),
 		});
-		expect(readGitIgnoreDirectoryNames(dir)).toEqual(["store/docs", "dist"]);
+		expect(readGitIgnoreDirectoryNames(dir)).toEqual(["site/generated-docs", "dist"]);
 		rmSync(dir, { recursive: true });
 	});
 });
@@ -298,7 +298,7 @@ describe("isIgnoredPath — external-tool paths honor the scan's ignore", () => 
 	it("matches default generated file patterns from policy data", () => {
 		setGlobalIgnore(undefined);
 		setGlobalIgnoreNames([]);
-		expect(isIgnoredPath("assets/store/screenshot-1-chat.html")).toBe(true);
+		expect(isIgnoredPath("assets/screenshots/screenshot-1-chat.html")).toBe(true);
 		expect(isIgnoredPath("src/app.min.js")).toBe(true);
 		expect(isIgnoredPath("pnpm-lock.yaml")).toBe(true);
 		expect(isIgnoredPath("src/app.ts")).toBe(false);
@@ -307,14 +307,14 @@ describe("isIgnoredPath — external-tool paths honor the scan's ignore", () => 
 
 describe("normalizeToolPath", () => {
 	it("normalizes nested package paths to repo-root-relative paths", () => {
-		expect(normalizeToolPath("/repo", "/repo/agents/coder/web", "src/CopilotView.tsx")).toBe("agents/coder/web/src/CopilotView.tsx");
+		expect(normalizeToolPath("/repo", "/repo/packages/web", "src/CopilotView.tsx")).toBe("packages/web/src/CopilotView.tsx");
 	});
 
 	it("normalizes absolute paths inside the repo", () => {
-		expect(normalizeToolPath("/repo", "/repo/agents/coder/web", "/repo/store/console/src/App.tsx")).toBe("store/console/src/App.tsx");
+		expect(normalizeToolPath("/repo", "/repo/packages/web", "/repo/apps/console/src/App.tsx")).toBe("apps/console/src/App.tsx");
 	});
 
 	it("keeps outside-repo paths unchanged", () => {
-		expect(normalizeToolPath("/repo", "/repo/agents/coder/web", "../../../../outside.ts")).toBe("../../../../outside.ts");
+		expect(normalizeToolPath("/repo", "/repo/packages/web", "../../../../outside.ts")).toBe("../../../../outside.ts");
 	});
 });

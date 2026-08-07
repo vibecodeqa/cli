@@ -71,11 +71,11 @@ describe("runSecrets", () => {
 
 	it("downgrades obvious fixture secrets instead of reporting high-severity leaks", async () => {
 		setup({
-			"workers/api/src/lib/gmail.test.ts": `
+			"services/api/src/lib/gmail.test.ts": `
 				const url = "https://example.test/callback?token=abc123def456ghi789";
 				const second = "https://example.test/callback?token=abcdef0123456789abcdef";
 			`,
-			"workers/api/src/routes/keys.integration.test.ts": `
+			"services/api/src/routes/keys.integration.test.ts": `
 				const roundTrip = "sk-round-trip-1234567890";
 				const ownerOnly = "sk-owner-only-000000";
 				const shortFixture = "sk-x1234567890abc";
@@ -96,13 +96,13 @@ describe("runSecrets", () => {
 				expect(redactCommand("git push https://x-access-token:ghs_secretsecret1234@github.com/o/r main")).toContain("https://***@github.com/o/r main");
 				expect(redactCommand("curl -H 'x: sk-abcdefghijklmnopqrstuv' https://api")).toContain("sk-***");
 			`,
-			"workers/api/src/lib/crypto.test.ts": `
+			"services/api/src/lib/crypto.test.ts": `
 				expect(await decryptKey(ciphertext, dekWrapped, iv, TEST_KEK)).toBe("sk-test-1234567890abcdef");
 				expect(await decryptKey(ciphertext, dekWrapped, iv, TEST_KEK)).toBe("sk-ant-api03-XXXXXXXXXXXXXXXXXXXX");
 				expect(await decryptKey(ciphertext, dekWrapped, iv, TEST_KEK)).toBe("AIzaSyD-XXXXXXXXXXXXXXXXXXXXXXXXXXXX");
 				expect(await decryptKey(ciphertext, dekWrapped, iv, TEST_KEK)).toBe("sk-secret-plaintext-value");
 			`,
-			"workers/api/src/routes/keys.integration.test.ts": `
+			"services/api/src/routes/keys.integration.test.ts": `
 				await json(app, env, "PUT", "/v1/keys/openai", { key: "sk-example-roundtrip-not-a-real-key" }, tok);
 				await json(app, env, "PUT", "/v1/keys/openai", { key: "sk-example-owner-scoped-not-a-real-key" }, tok);
 			`,
@@ -130,7 +130,7 @@ describe("runSecrets", () => {
 					expect(results.find((r) => r.name === "security-no-hardcoded-secrets")?.pass).toBe(false);
 				});
 			`,
-			"workers/api/src/lib/connectors/mcp.test.ts": `
+			"services/api/src/lib/connectors/mcp.test.ts": `
 				it("never writes the bearer token into the trace", async () => {
 					const { ctx, events } = makeCtx({ token: "sk-live-supersecrettoken12345" });
 					expect(JSON.stringify(events)).not.toContain("supersecrettoken");
@@ -144,7 +144,7 @@ describe("runSecrets", () => {
 					expect(JSON.stringify(events)).not.toContain("sk-live-should-never-appear");
 				});
 			`,
-			"workers/api/src/lib/github-app.test.ts": `
+			"services/api/src/lib/github-app.test.ts": `
 				/** Export a generated RSA private key as PKCS#8 PEM. */
 				async function makePem() {
 					return { pem: \`-----BEGIN PRIVATE KEY-----\\n\${b64}\\n-----END PRIVATE KEY-----\` };
@@ -159,7 +159,7 @@ describe("runSecrets", () => {
 	});
 
 	it("downgrades documentation placeholders instead of treating them as leaked credentials", async () => {
-		setup({ "store/get-started/index.html": "<code>curl -H 'Authorization: Bearer YOUR_TOKEN' https://api.example.test</code>\n" });
+		setup({ "site/docs/get-started/index.html": "<code>curl -H 'Authorization: Bearer YOUR_TOKEN' https://api.example.test</code>\n" });
 		const result = await runSecrets(TMP);
 		expect(result.issues.length).toBeGreaterThan(0);
 		expect(result.issues.every((i) => i.severity !== "error")).toBe(true);

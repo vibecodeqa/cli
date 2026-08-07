@@ -31,26 +31,26 @@ describe("parseBiomeLint", () => {
 					severity: "warning",
 					description: "cross package",
 					category: "lint/style/useConst",
-					location: { path: "../../agents/coder/web/src/b.ts" },
+					location: { path: "../../packages/web/src/b.ts" },
 				},
 			],
 		});
-		const issues = parseBiomeLint(out, { repoCwd: "/repo", toolCwd: "/repo/store/console" })!;
+		const issues = parseBiomeLint(out, { repoCwd: "/repo", toolCwd: "/repo/apps/console" })!;
 
 		expect(issues[0]).toMatchObject({
-			file: "store/console/src/a.ts",
+			file: "apps/console/src/a.ts",
 			details: {
-				repoRelativePath: "store/console/src/a.ts",
+				repoRelativePath: "apps/console/src/a.ts",
 				toolRelativePath: "src/a.ts",
-				toolCwd: "/repo/store/console",
+				toolCwd: "/repo/apps/console",
 				pathStatus: "normalized",
 			},
 		});
 		expect(issues[1]).toMatchObject({
-			file: "agents/coder/web/src/b.ts",
+			file: "packages/web/src/b.ts",
 			details: {
-				repoRelativePath: "agents/coder/web/src/b.ts",
-				toolRelativePath: "../../agents/coder/web/src/b.ts",
+				repoRelativePath: "packages/web/src/b.ts",
+				toolRelativePath: "../../packages/web/src/b.ts",
 			},
 		});
 	});
@@ -95,28 +95,28 @@ describe("parseEslintJson", () => {
 				messages: [{ severity: 2, message: "broken", line: 7, ruleId: "react/no-unknown-property" }],
 			},
 			{
-				filePath: "../../agents/coder/web/src/CopilotView.tsx",
+				filePath: "../../packages/web/src/CopilotView.tsx",
 				messages: [{ severity: 1, message: "warn", line: 2, ruleId: "no-console" }],
 			},
 		]);
 
-		const issues = parseEslintJson(out, { repoCwd: "/repo", toolCwd: "/repo/store/console" });
+		const issues = parseEslintJson(out, { repoCwd: "/repo", toolCwd: "/repo/apps/console" });
 
 		expect(issues[0]).toMatchObject({
 			severity: "error",
-			file: "store/console/src/App.tsx",
+			file: "apps/console/src/App.tsx",
 			details: {
-				repoRelativePath: "store/console/src/App.tsx",
+				repoRelativePath: "apps/console/src/App.tsx",
 				toolRelativePath: "src/App.tsx",
-				toolCwd: "/repo/store/console",
+				toolCwd: "/repo/apps/console",
 			},
 		});
 		expect(issues[1]).toMatchObject({
 			severity: "warning",
-			file: "agents/coder/web/src/CopilotView.tsx",
+			file: "packages/web/src/CopilotView.tsx",
 			details: {
-				repoRelativePath: "agents/coder/web/src/CopilotView.tsx",
-				toolRelativePath: "../../agents/coder/web/src/CopilotView.tsx",
+				repoRelativePath: "packages/web/src/CopilotView.tsx",
+				toolRelativePath: "../../packages/web/src/CopilotView.tsx",
 			},
 		});
 	});
@@ -129,12 +129,12 @@ describe("parseEslintJson", () => {
 			},
 		]);
 
-		const issues = parseEslintJson(out, { repoCwd: "/repo", toolCwd: "/repo/store/console" });
+		const issues = parseEslintJson(out, { repoCwd: "/repo", toolCwd: "/repo/apps/console" });
 
 		expect(issues[0].file).toBeUndefined();
 		expect((issues[0] as any).details).toMatchObject({
 			toolRelativePath: "../../../../outside.ts",
-			toolCwd: "/repo/store/console",
+			toolCwd: "/repo/apps/console",
 			pathStatus: "outside-repo",
 		});
 	});

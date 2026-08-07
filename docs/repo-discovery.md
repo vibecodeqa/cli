@@ -107,9 +107,12 @@ Accepted deterministic sources:
   `pubspec.yaml`
 - package-local tool config: `tsconfig.json`, `biome.json`,
   `eslint.config.*`, `vitest.config.*`, `pubspec.yaml`
-- conservative folder conventions: `apps/*`, `packages/*`, `workers/*`,
-  `jobs/*`, `services/*`, `libs/*`, plus shallow nested folders under those
-  roots when they contain a supported manifest or tool config
+- manifest-backed package roots such as `apps/*`, `packages/*`, `services/*`,
+  `workers/*`, `functions/*`, `jobs/*`, `tools/*`, and `site/*`
+- conservative convention-only layouts currently recognized without a manifest:
+  `apps/*` with `packages/*` or `libs/*`, `services/*` with `packages/*`,
+  `server/` with `client/`, `backend/` with `frontend/`, plus shallow child
+  manifests discovered under neutral top-level directories
 - user config: explicit include/exclude/project roots
 
 Unsupported language markers must not be enabled globally until VCQA can produce
@@ -150,6 +153,20 @@ Pro/AI:
 - chat over architecture topics and decisions
 
 If AI is unavailable, the scan must still run correctly.
+
+## Anti-Overfitting Rules
+
+Discovery defaults must describe ecosystem conventions, not a specific repo.
+Neutral fixture roots such as `apps/web`, `packages/core`, `services/api`,
+`workers/edge`, `functions/handler`, `jobs/sync`, `tools/cli`, and `site/docs`
+are acceptable because they model common shapes. Customer, product, or
+downstream repository names belong in that repository's `.vcqa.json`,
+`package.json#vcqa`, environment config, or explicitly labeled downstream
+regression tests.
+
+When a downstream scan reveals a bug, add or update the neutral fixture first.
+Keep downstream-shaped fixtures only when they reproduce behavior that cannot be
+captured generically, and label them as downstream regressions.
 
 ## Acceptance Criteria
 

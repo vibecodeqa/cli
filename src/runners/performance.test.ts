@@ -129,8 +129,8 @@ JSON
 		const dir = makeProject({
 			"package.json": "{}",
 			"src/app.ts": "export const app = 1;\n",
-			"store/console/package.json": "{}",
-			"store/console/knip.json": '{"entry":["src/index.ts"]}',
+			"apps/console/package.json": "{}",
+			"apps/console/knip.json": '{"entry":["src/index.ts"]}',
 		});
 		const binDir = join(dir, "bin");
 		mkdirSync(binDir, { recursive: true });
@@ -139,7 +139,7 @@ JSON
 			fakeNpx,
 			`#!/bin/sh
 cat <<'JSON'
-{"issues":[{"file":"src/dead.ts","files":[{"name":"src/dead.ts"}]},{"file":"../../agents/coder/web/src/orphan.ts","files":[{"name":"../../agents/coder/web/src/orphan.ts"}]}]}
+{"issues":[{"file":"src/dead.ts","files":[{"name":"src/dead.ts"}]},{"file":"../../packages/web/src/orphan.ts","files":[{"name":"../../packages/web/src/orphan.ts"}]}]}
 JSON
 `,
 		);
@@ -151,20 +151,20 @@ JSON
 				isMonorepo: true,
 				tool: "pnpm",
 				srcRoots: [],
-				packages: [{ name: "console", path: "store/console", hasSrc: true, hasRootCode: false, hasTests: false, hasLinter: false }],
+				packages: [{ name: "console", path: "apps/console", hasSrc: true, hasRootCode: false, hasTests: false, hasLinter: false }],
 			});
 			const files = ((result.details as any).deadCode.files as any[]).map((item) => item.file);
 
-			expect(files).toEqual(["store/console/src/dead.ts", "agents/coder/web/src/orphan.ts"]);
+			expect(files).toEqual(["apps/console/src/dead.ts", "packages/web/src/orphan.ts"]);
 			expect((result.details as any).deadCode.files[0].details).toMatchObject({
-				repoRelativePath: "store/console/src/dead.ts",
+				repoRelativePath: "apps/console/src/dead.ts",
 				toolRelativePath: "src/dead.ts",
-				toolCwd: join(dir, "store/console"),
+				toolCwd: join(dir, "apps/console"),
 				pathStatus: "normalized",
 			});
 			expect((result.details as any).deadCode.files[1].details).toMatchObject({
-				repoRelativePath: "agents/coder/web/src/orphan.ts",
-				toolRelativePath: "../../agents/coder/web/src/orphan.ts",
+				repoRelativePath: "packages/web/src/orphan.ts",
+				toolRelativePath: "../../packages/web/src/orphan.ts",
 			});
 		} finally {
 			process.env.PATH = oldPath;

@@ -268,8 +268,8 @@ describe("runTesting", () => {
 			numFailedTests: 0,
 			testResults: [{ name: "src/index.test.ts", status: "passed", assertionResults: [] }],
 		});
-		const report = parseTestExecutionReport(output, "/repo/agents/coder/web", "/repo");
-		expect(report?.suites[0].file).toBe("agents/coder/web/src/index.test.ts");
+		const report = parseTestExecutionReport(output, "/repo/packages/web", "/repo");
+		expect(report?.suites[0].file).toBe("packages/web/src/index.test.ts");
 	});
 
 	it("normalizes parent-relative suite paths that resolve inside the repo", () => {
@@ -277,10 +277,10 @@ describe("runTesting", () => {
 			numTotalTests: 1,
 			numPassedTests: 1,
 			numFailedTests: 0,
-			testResults: [{ name: "../../agents/coder/web/src/copilot.test.ts", status: "passed", assertionResults: [] }],
+			testResults: [{ name: "../../packages/web/src/copilot.test.ts", status: "passed", assertionResults: [] }],
 		});
-		const report = parseTestExecutionReport(output, "/repo/store/console", "/repo");
-		expect(report?.suites[0].file).toBe("agents/coder/web/src/copilot.test.ts");
+		const report = parseTestExecutionReport(output, "/repo/apps/console", "/repo");
+		expect(report?.suites[0].file).toBe("packages/web/src/copilot.test.ts");
 	});
 
 	it("normalizes mixed monorepo package test outcomes", () => {

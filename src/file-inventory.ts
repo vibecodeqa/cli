@@ -194,6 +194,8 @@ function isConfigPath(path: string): boolean {
 		name === "vite.config.js" ||
 		name === "pubspec.yaml" ||
 		name === "analysis_options.yaml" ||
+		name === "pnpm-workspace.yaml" ||
+		name === "package-lock.json" ||
 		name === "wrangler.toml"
 	);
 }
