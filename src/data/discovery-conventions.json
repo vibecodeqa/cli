@@ -15,9 +15,41 @@
       "file": "lerna.json",
       "jsonField": "packages",
       "defaultGlobs": ["packages/*"]
+    },
+    "goWork": {
+      "file": "go.work",
+      "defaultGlobs": []
+    },
+    "cargo": {
+      "file": "Cargo.toml",
+      "defaultGlobs": []
+    },
+    "maven": {
+      "file": "pom.xml",
+      "defaultGlobs": []
+    },
+    "gradle": {
+      "file": "settings.gradle",
+      "defaultGlobs": []
+    },
+    "gradleKts": {
+      "file": "settings.gradle.kts",
+      "defaultGlobs": []
+    },
+    "uv": {
+      "file": "pyproject.toml",
+      "defaultGlobs": []
+    },
+    "rush": {
+      "file": "rush.json",
+      "defaultGlobs": []
+    },
+    "pants": {
+      "file": "pants.toml",
+      "defaultGlobs": []
     }
   },
-  "projectManifestFiles": ["package.json", "pubspec.yaml"],
+  "projectManifestFiles": ["package.json", "pubspec.yaml", "go.mod", "Cargo.toml", "pom.xml", "pyproject.toml"],
   "projectConfigFiles": [
     "tsconfig.json",
     "tsconfig.app.json",
@@ -51,14 +83,101 @@
     "vitest.config.js",
     "jest.config.js",
     "jest.config.ts",
+    "go.work",
+    "settings.gradle",
+    "settings.gradle.kts",
+    "build.gradle",
+    "build.gradle.kts",
+    "rush.json",
+    "pants.toml",
+    "BUILD",
+    "BUILD.bazel",
     "wrangler.toml",
     "wrangler.json",
     "wrangler.jsonc"
   ],
-  "sourceRoots": ["src", "app", "lib"],
-  "rootSourceRoots": ["src", "web/src", "lib", "app"],
-  "testRoots": ["test", "tests", "__tests__", "e2e"],
+  "sourceRoots": ["src", "app", "lib", "cmd", "internal", "pkg", "src/main/java", "src/main/kotlin", "src/main/python"],
+  "rootSourceRoots": ["src", "web/src", "lib", "app", "cmd", "internal", "pkg", "src/main/java", "src/main/kotlin", "src/main/python"],
+  "testRoots": ["test", "tests", "__tests__", "e2e", "src/test/java", "src/test/kotlin", "src/test/python"],
   "sourceFileExtensions": [".ts", ".tsx", ".js", ".jsx", ".dart", ".vue", ".svelte"],
+  "discoverySourceFileExtensions": [".go", ".rs", ".java", ".kt", ".kts", ".py"],
+  "ecosystemProfiles": {
+    "go": {
+      "language": "go",
+      "framework": "none",
+      "bundler": "none",
+      "testRunner": "go_test",
+      "linter": "unknown",
+      "packageManager": "go",
+      "supported": false,
+      "manifests": ["go.mod"],
+      "workspaceManifests": ["go.work"],
+      "sourceRoots": ["cmd", "internal", "pkg"],
+      "testRoots": ["."]
+    },
+    "rust": {
+      "language": "rust",
+      "framework": "none",
+      "bundler": "none",
+      "testRunner": "cargo_test",
+      "linter": "clippy",
+      "packageManager": "cargo",
+      "supported": false,
+      "manifests": ["Cargo.toml"],
+      "sourceRoots": ["src"],
+      "testRoots": ["tests"]
+    },
+    "java-maven": {
+      "language": "java",
+      "framework": "unknown",
+      "bundler": "none",
+      "testRunner": "maven_test",
+      "linter": "unknown",
+      "packageManager": "maven",
+      "supported": false,
+      "manifests": ["pom.xml"],
+      "sourceRoots": ["src/main/java"],
+      "testRoots": ["src/test/java"]
+    },
+    "java-gradle": {
+      "language": "java",
+      "framework": "unknown",
+      "bundler": "none",
+      "testRunner": "gradle_test",
+      "linter": "unknown",
+      "packageManager": "gradle",
+      "supported": false,
+      "manifests": ["build.gradle", "build.gradle.kts"],
+      "workspaceManifests": ["settings.gradle", "settings.gradle.kts"],
+      "sourceRoots": ["src/main/java", "src/main/kotlin"],
+      "testRoots": ["src/test/java", "src/test/kotlin"]
+    },
+    "python": {
+      "language": "python",
+      "framework": "unknown",
+      "bundler": "none",
+      "testRunner": "pytest",
+      "linter": "unknown",
+      "packageManager": "uv",
+      "supported": false,
+      "manifests": ["pyproject.toml"],
+      "sourceRoots": ["src"],
+      "testRoots": ["tests"]
+    },
+    "pants": {
+      "language": "unknown",
+      "framework": "unknown",
+      "bundler": "none",
+      "testRunner": "unknown",
+      "linter": "unknown",
+      "packageManager": "pants",
+      "supported": false,
+      "manifests": ["BUILD", "BUILD.bazel"],
+      "workspaceManifests": ["pants.toml"],
+      "sourceRoots": ["src"],
+      "testRoots": ["tests"]
+    }
+  },
   "frontendFrameworks": ["react", "vue", "svelte"],
   "projectKindRules": {
     "appRoots": ["apps", "web", "client", "frontend"],

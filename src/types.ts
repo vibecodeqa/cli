@@ -42,6 +42,11 @@ export interface ProjectToolCommand {
 	command: string[];
 }
 
+export interface ProjectSupport {
+	status: "supported" | "unsupported";
+	reason?: string;
+}
+
 export interface ProjectContext {
 	id: string;
 	name: string;
@@ -54,6 +59,7 @@ export interface ProjectContext {
 	manifestFiles: string[];
 	evidence: ProjectDiscoveryEvidence[];
 	confidence: number;
+	support: ProjectSupport;
 	toolCommands: {
 		lint?: ProjectToolCommand[];
 		typecheck?: ProjectToolCommand[];

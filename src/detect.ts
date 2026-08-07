@@ -4,7 +4,15 @@ import { execSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { discoveryConventions, projectMarkerFiles } from "./discovery-conventions.js";
-import type { ProjectContext, ProjectDiscoveryEvidence, ProjectToolCommand, StackInfo, WorkspaceInfo, WorkspacePackage } from "./types.js";
+import type {
+	ProjectContext,
+	ProjectDiscoveryEvidence,
+	ProjectSupport,
+	ProjectToolCommand,
+	StackInfo,
+	WorkspaceInfo,
+	WorkspacePackage,
+} from "./types.js";
 
 /** Detect infrastructure/data components (open vocabulary — see schema's StackInfo.components).
  *  Looks at the root and workspace package dirs for wrangler config and migration dirs. */
@@ -82,6 +90,9 @@ export function detectStack(cwd: string, workspace?: WorkspaceInfo): StackInfo {
 			packageManager: "pub",
 		});
 	}
+
+	const nonNode = detectNonNodeStack(cwd);
+	if (nonNode) return withComponents(nonNode);
 
 	// ── Node.js/TypeScript detection ──
 	const pkg = read("package.json");
@@ -168,6 +179,9 @@ function detectProjectStack(projectDir: string, rootCwd: string): StackInfo {
 		};
 	}
 
+	const nonNode = detectNonNodeStack(projectDir);
+	if (nonNode) return { ...nonNode, components: mergeComponents(nonNode.components, detectComponents(projectDir)) };
+
 	let allDeps: Record<string, string> = {};
 	const pkg = read("package.json");
 	try {
@@ -233,6 +247,37 @@ function detectProjectStack(projectDir: string, rootCwd: string): StackInfo {
 	return components.length > 0 ? { ...stack, components } : stack;
 }
 
+function mergeComponents(...groups: Array<string[] | undefined>): string[] | undefined {
+	const components = [...new Set(groups.flatMap((group) => group ?? []))].sort();
+	return components.length > 0 ? components : undefined;
+}
+
+function stackFromProfile(profileId: string): StackInfo {
+	const profile = discoveryConventions.ecosystemProfiles?.[profileId];
+	return {
+		language: (profile?.language ?? "unknown") as StackInfo["language"],
+		framework: (profile?.framework ?? "unknown") as StackInfo["framework"],
+		bundler: (profile?.bundler ?? "none") as StackInfo["bundler"],
+		testRunner: (profile?.testRunner ?? "unknown") as StackInfo["testRunner"],
+		linter: (profile?.linter ?? "unknown") as StackInfo["linter"],
+		packageManager: (profile?.packageManager ?? "unknown") as StackInfo["packageManager"],
+		components: ["unsupported-ecosystem", profileId],
+	};
+}
+
+function detectNonNodeStack(projectDir: string): StackInfo | null {
+	const has = (f: string) => existsSync(join(projectDir, f));
+	if (has("go.mod") || has("go.work")) return stackFromProfile("go");
+	if (has("Cargo.toml")) return stackFromProfile("rust");
+	if (has("pom.xml")) return stackFromProfile("java-maven");
+	if (has("settings.gradle") || has("settings.gradle.kts") || has("build.gradle") || has("build.gradle.kts")) {
+		return stackFromProfile("java-gradle");
+	}
+	if (has("pyproject.toml")) return stackFromProfile("python");
+	if (has("pants.toml") || has("BUILD") || has("BUILD.bazel")) return stackFromProfile("pants");
+	return null;
+}
+
 /**
  * Parse a YAML list under a given key. Handles:
  * - Block-style with comments/blank lines between entries
@@ -283,6 +328,7 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 	// Detect workspace tool
 	let tool: WorkspaceInfo["tool"] = "none";
 	let globs: string[] = [];
+	let excludedGlobs: string[] = [];
 	const discoveryEvidence: ProjectDiscoveryEvidence[] = [];
 
 	// ── Dart/Flutter monorepo (melos) ──
@@ -334,6 +380,71 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 		}
 	}
 
+	const rush = discoveryConventions.workspaceManifestDefaults.rush;
+	if (has(rush.file) && tool === "none") {
+		tool = "rush";
+		globs = parseRushProjectFolders(read(rush.file));
+		discoveryEvidence.push({ kind: "manifest", file: rush.file, description: "Rush workspace manifest defines project folders" });
+	}
+
+	const goWork = discoveryConventions.workspaceManifestDefaults.goWork;
+	if (has(goWork.file) && tool === "none") {
+		tool = "go";
+		globs = parseGoWorkUse(read(goWork.file));
+		discoveryEvidence.push({ kind: "manifest", file: goWork.file, description: "Go workspace manifest defines module directories" });
+	}
+
+	const cargo = discoveryConventions.workspaceManifestDefaults.cargo;
+	if (has(cargo.file) && tool === "none") {
+		const content = read(cargo.file);
+		const members = parseTomlStringArray(content, "workspace", "members");
+		if (members.length > 0) {
+			tool = "cargo";
+			excludedGlobs = parseTomlStringArray(content, "workspace", "exclude");
+			globs = filterWorkspacePatterns(members, excludedGlobs);
+			discoveryEvidence.push({ kind: "manifest", file: cargo.file, description: "Cargo workspace manifest defines members" });
+		}
+	}
+
+	const maven = discoveryConventions.workspaceManifestDefaults.maven;
+	if (has(maven.file) && tool === "none") {
+		const modules = parsePomModules(read(maven.file));
+		if (modules.length > 0) {
+			tool = "maven";
+			globs = modules;
+			discoveryEvidence.push({ kind: "manifest", file: maven.file, description: "Maven parent POM defines modules" });
+		}
+	}
+
+	const gradleFile = has("settings.gradle") ? "settings.gradle" : "settings.gradle.kts";
+	if (has(gradleFile) && tool === "none") {
+		const projects = parseGradleIncludes(read(gradleFile));
+		if (projects.length > 0) {
+			tool = "gradle";
+			globs = projects;
+			discoveryEvidence.push({ kind: "manifest", file: gradleFile, description: "Gradle settings file defines included projects" });
+		}
+	}
+
+	const uv = discoveryConventions.workspaceManifestDefaults.uv;
+	if (has(uv.file) && tool === "none") {
+		const content = read(uv.file);
+		const members = parseTomlStringArray(content, "tool.uv.workspace", "members");
+		if (members.length > 0) {
+			tool = "uv";
+			excludedGlobs = parseTomlStringArray(content, "tool.uv.workspace", "exclude");
+			globs = filterWorkspacePatterns(members, excludedGlobs);
+			discoveryEvidence.push({ kind: "manifest", file: uv.file, description: "uv workspace config defines Python package members" });
+		}
+	}
+
+	const pants = discoveryConventions.workspaceManifestDefaults.pants;
+	if (has(pants.file) && tool === "none") {
+		tool = "pants";
+		globs = findPantsBuildPackageDirs(cwd);
+		discoveryEvidence.push({ kind: "manifest", file: pants.file, description: "Pants build root detected BUILD-backed project directories" });
+	}
+
 	// Detect orchestration tools (overlay on top of workspace tool)
 	if (has("turbo.json") && tool !== "none" && tool !== "melos") {
 		tool = "turborepo";
@@ -356,6 +467,12 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 	const packages: WorkspacePackage[] = [];
 	for (const glob of globs) {
 		resolveGlob(cwd, glob, packages);
+	}
+	if (excludedGlobs.length > 0) {
+		const excluded = excludedGlobs.map(globToRegExp);
+		for (let i = packages.length - 1; i >= 0; i--) {
+			if (excluded.some((pattern) => pattern.test(packages[i]!.path))) packages.splice(i, 1);
+		}
 	}
 
 	// For melos monorepos: also detect sibling directories with package.json
@@ -390,6 +507,8 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 
 /** Resolve a workspace glob/path to package directories. */
 function resolveGlob(cwd: string, pattern: string, packages: WorkspacePackage[]): void {
+	pattern = normalizeWorkspacePath(pattern);
+	if (!pattern || pattern === ".") return;
 	if (pattern.includes("**")) {
 		// Recursive glob — e.g. "packages/**"
 		const base = pattern.replace(/\/?\*\*.*$/, "");
@@ -460,6 +579,8 @@ function readSafeEntries(dir: string): string[] {
 
 /** Add a single package to the list, detecting its capabilities. */
 function addPackage(relPath: string, pkgDir: string, packages: WorkspacePackage[]): void {
+	relPath = normalizeWorkspacePath(relPath);
+	if (!relPath || packages.some((pkg) => pkg.path === relPath)) return;
 	// Accept packages with or without package.json (some workspaces use them loosely)
 	const pkgJsonPath = join(pkgDir, "package.json");
 	let name = relPath.split("/").pop() || relPath;
@@ -552,6 +673,17 @@ function projectToolCommands(project: {
 	return commands;
 }
 
+function projectSupport(stack: StackInfo): ProjectSupport {
+	const supportedLanguages = new Set<StackInfo["language"]>(["typescript", "javascript", "dart"]);
+	if (stack.components?.includes("unsupported-ecosystem") || !supportedLanguages.has(stack.language)) {
+		return {
+			status: "unsupported",
+			reason: "Project was discovered from deterministic manifests, but VCQA analyzers for this ecosystem are not available yet.",
+		};
+	}
+	return { status: "supported" };
+}
+
 function createProjectContext(cwd: string, pkg: WorkspacePackage | null, evidence: ProjectDiscoveryEvidence[]): ProjectContext {
 	const path = pkg?.path ?? ".";
 	const dir = path === "." ? cwd : join(cwd, path);
@@ -566,6 +698,7 @@ function createProjectContext(cwd: string, pkg: WorkspacePackage | null, evidenc
 		...configFiles.map((file) => ({ kind: "config", file, description: "Project config found" }) satisfies ProjectDiscoveryEvidence),
 	];
 	const toolCommands = projectToolCommands({ path, stack, configFiles, manifestFiles, testRoots });
+	const support = projectSupport(stack);
 	return {
 		id: projectId(path),
 		name: pkg?.name ?? "root",
@@ -578,6 +711,7 @@ function createProjectContext(cwd: string, pkg: WorkspacePackage | null, evidenc
 		manifestFiles,
 		evidence: projectEvidence,
 		confidence: projectConfidence(manifestFiles, configFiles, srcRoots, projectEvidence),
+		support,
 		toolCommands,
 	};
 }
@@ -796,7 +930,140 @@ function hasSupportedProjectMarker(dir: string): boolean {
 }
 
 function hasSourceExtension(fileName: string): boolean {
-	return discoveryConventions.sourceFileExtensions.some((ext) => fileName.endsWith(ext));
+	const extensions = [...discoveryConventions.sourceFileExtensions, ...(discoveryConventions.discoverySourceFileExtensions ?? [])];
+	return extensions.some((ext) => fileName.endsWith(ext));
+}
+
+function normalizeWorkspacePath(value: string): string {
+	return value
+		.trim()
+		.replace(/^['"]|['"]$/g, "")
+		.replace(/\\/g, "/")
+		.replace(/^\.\//, "")
+		.replace(/\/$/, "");
+}
+
+function parseGoWorkUse(content: string): string[] {
+	const paths: string[] = [];
+	let inUseBlock = false;
+	for (const raw of content.split("\n")) {
+		const line = raw.replace(/\/\/.*$/, "").trim();
+		if (!line) continue;
+		if (line.startsWith("use (")) {
+			inUseBlock = true;
+			continue;
+		}
+		if (inUseBlock && line === ")") {
+			inUseBlock = false;
+			continue;
+		}
+		if (inUseBlock) {
+			paths.push(line);
+			continue;
+		}
+		const single = line.match(/^use\s+(.+)$/);
+		if (single) paths.push(single[1]);
+	}
+	return paths.map(normalizeWorkspacePath).filter(Boolean);
+}
+
+function tomlSection(content: string, section: string): string {
+	const lines = content.split("\n");
+	const header = `[${section}]`;
+	const collected: string[] = [];
+	let inSection = false;
+	for (const raw of lines) {
+		const line = raw.trim();
+		if (line === header) {
+			inSection = true;
+			continue;
+		}
+		if (inSection && line.startsWith("[") && line.endsWith("]")) break;
+		if (inSection) collected.push(raw);
+	}
+	return collected.join("\n");
+}
+
+function parseTomlStringArray(content: string, section: string, key: string): string[] {
+	const body = tomlSection(content, section);
+	const match = body.match(new RegExp(`^\\s*${key}\\s*=\\s*\\[([\\s\\S]*?)]`, "m"));
+	if (!match) return [];
+	return match[1]
+		.split(",")
+		.map((entry) => normalizeWorkspacePath(entry.replace(/#.*$/, "")))
+		.filter(Boolean);
+}
+
+function parsePomModules(content: string): string[] {
+	return [...content.matchAll(/<module>\s*([^<]+?)\s*<\/module>/g)].map((match) => normalizeWorkspacePath(match[1])).filter(Boolean);
+}
+
+function parseGradleIncludes(content: string): string[] {
+	const projects: string[] = [];
+	for (const match of content.matchAll(/include\s*(?:\(([^)]*)\)|([^\n]+))/g)) {
+		const body = match[1] ?? match[2] ?? "";
+		for (const entry of body.split(",")) {
+			const path = normalizeWorkspacePath(entry)
+				.replace(/^:+/, "")
+				.replace(/:+/g, "/");
+			if (path) projects.push(path);
+		}
+	}
+	return [...new Set(projects)];
+}
+
+function parseRushProjectFolders(content: string): string[] {
+	try {
+		const parsed = JSON.parse(content);
+		if (!Array.isArray(parsed.projects)) return [];
+		return parsed.projects
+			.map((project: { projectFolder?: unknown }) => String(project.projectFolder ?? ""))
+			.map(normalizeWorkspacePath)
+			.filter(Boolean);
+	} catch {
+		return [];
+	}
+}
+
+function filterWorkspacePatterns(members: string[], excludes: string[]): string[] {
+	if (excludes.length === 0) return members;
+	const excluded = excludes.map(globToRegExp);
+	return members.filter((member) => !excluded.some((pattern) => pattern.test(normalizeWorkspacePath(member))));
+}
+
+function globToRegExp(glob: string): RegExp {
+	const escaped = normalizeWorkspacePath(glob)
+		.replace(/[.+^${}()|[\]\\]/g, "\\$&")
+		.replace(/\*/g, "[^/]*");
+	return new RegExp(`^${escaped}$`);
+}
+
+function findPantsBuildPackageDirs(cwd: string): string[] {
+	const packages: string[] = [];
+	const walk = (dir: string, rel: string) => {
+		let entries: string[];
+		try {
+			entries = readdirSync(dir);
+		} catch {
+			return;
+		}
+		if (entries.includes("BUILD") || entries.includes("BUILD.bazel")) {
+			if (rel) packages.push(rel);
+			return;
+		}
+		for (const entry of entries) {
+			if (shouldSkipConventionEntry(entry)) continue;
+			const full = join(dir, entry);
+			try {
+				if (lstatSync(full).isSymbolicLink() || !statSync(full).isDirectory()) continue;
+			} catch {
+				continue;
+			}
+			walk(full, rel ? `${rel}/${entry}` : entry);
+		}
+	};
+	walk(cwd, "");
+	return packages;
 }
 
 function shouldSkipConventionEntry(entry: string): boolean {

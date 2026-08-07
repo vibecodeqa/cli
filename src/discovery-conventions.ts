@@ -9,6 +9,23 @@ export interface DiscoveryConventions {
 	rootSourceRoots: string[];
 	testRoots: string[];
 	sourceFileExtensions: string[];
+	discoverySourceFileExtensions?: string[];
+	ecosystemProfiles?: Record<
+		string,
+		{
+			language: string;
+			framework: string;
+			bundler: string;
+			testRunner: string;
+			linter: string;
+			packageManager: string;
+			supported: boolean;
+			manifests: string[];
+			workspaceManifests?: string[];
+			sourceRoots: string[];
+			testRoots: string[];
+		}
+	>;
 	frontendFrameworks: string[];
 	projectKindRules: {
 		appRoots: string[];

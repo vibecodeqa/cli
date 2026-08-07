@@ -412,7 +412,7 @@ export function scanScopePage(report: VibeReport): string {
 function renderProjectScopeCard(project: ProjectContext): string {
 	const stack = stackLabel(project);
 	const status =
-		project.stack.language === "unknown"
+		project.support?.status === "unsupported" || project.stack.language === "unknown"
 			? `<span class="scope-status scope-unavailable">unsupported / unavailable</span>`
 			: `<span class="scope-status scope-scanned">scanned</span>`;
 	const evidence = project.evidence.filter((ev) => ev.kind !== "rejected");
@@ -433,6 +433,7 @@ function renderProjectScopeCard(project: ProjectContext): string {
     ${renderScopeRow("Test roots", project.testRoots)}
     ${renderScopeRow("Manifests", project.manifestFiles)}
     ${renderScopeRow("Configs", project.configFiles)}
+    ${renderScopeRow("Analyzer support", project.support?.status === "unsupported" ? project.support.reason : "Supported")}
   </div>
   ${evidence.length ? `<div class="ws-evidence scope-evidence">${renderEvidenceChips(evidence)}</div>` : ""}
   ${commands ? `<div class="scope-commands">${commands}</div>` : ""}

@@ -411,6 +411,125 @@ describe("detectStack with workspace aggregation", () => {
 	});
 });
 
+describe("manifest-backed ecosystem discovery", () => {
+	afterEach(() => cleanup());
+
+	it("detects Go workspaces as discovery-only unsupported project contexts", () => {
+		setup({
+			"go.work": "go 1.22\nuse (\n  ./services/api\n  ./libs/core\n)\n",
+			"services/api/go.mod": "module example.com/api\n",
+			"services/api/main.go": "package main\n",
+			"libs/core/go.mod": "module example.com/core\n",
+			"libs/core/core.go": "package core\n",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.tool).toBe("go");
+		expect(ws.projects?.map((p) => p.path).sort()).toEqual([".", "libs/core", "services/api"]);
+		const api = ws.projects?.find((p) => p.path === "services/api");
+		expect(api?.stack.language).toBe("go");
+		expect(api?.support.status).toBe("unsupported");
+		expect(api?.toolCommands).toEqual({});
+	});
+
+	it("detects Cargo workspace members as discovery-only unsupported project contexts", () => {
+		setup({
+			"Cargo.toml": '[workspace]\nmembers = ["crates/core", "apps/cli"]\n',
+			"crates/core/Cargo.toml": '[package]\nname = "core"\n',
+			"crates/core/src/lib.rs": "pub fn core() {}\n",
+			"apps/cli/Cargo.toml": '[package]\nname = "cli"\n',
+			"apps/cli/src/main.rs": "fn main() {}\n",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.tool).toBe("cargo");
+		expect(ws.projects?.map((p) => p.path).sort()).toEqual([".", "apps/cli", "crates/core"]);
+		expect(ws.projects?.find((p) => p.path === "crates/core")?.stack.language).toBe("rust");
+	});
+
+	it("detects Maven modules as discovery-only unsupported project contexts", () => {
+		setup({
+			"pom.xml": "<project><modules><module>services/api</module><module>libs/core</module></modules></project>",
+			"services/api/pom.xml": "<project />",
+			"services/api/src/main/java/App.java": "class App {}",
+			"libs/core/pom.xml": "<project />",
+			"libs/core/src/main/java/Core.java": "class Core {}",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.tool).toBe("maven");
+		expect(ws.projects?.map((p) => p.path).sort()).toEqual([".", "libs/core", "services/api"]);
+		expect(ws.projects?.find((p) => p.path === "libs/core")?.stack.packageManager).toBe("maven");
+	});
+
+	it("detects Gradle included projects as discovery-only unsupported project contexts", () => {
+		setup({
+			"settings.gradle": "pluginManagement {}\ndependencyResolutionManagement {}\ninclude ':app', ':library:core'\n",
+			"app/build.gradle": "",
+			"app/src/main/java/App.java": "class App {}",
+			"library/core/build.gradle.kts": "",
+			"library/core/src/main/kotlin/Core.kt": "class Core",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.tool).toBe("gradle");
+		expect(ws.projects?.map((p) => p.path).sort()).toEqual([".", "app", "library/core"]);
+		expect(ws.projects?.find((p) => p.path === "app")?.stack.language).toBe("java");
+	});
+
+	it("detects uv workspace members and honors excludes", () => {
+		setup({
+			"pyproject.toml": '[tool.uv.workspace]\nmembers = ["packages/*"]\nexclude = ["packages/skip"]\n',
+			"packages/api/pyproject.toml": "[project]\nname = 'api'\n",
+			"packages/api/src/api/__init__.py": "",
+			"packages/core/pyproject.toml": "[project]\nname = 'core'\n",
+			"packages/core/src/core/__init__.py": "",
+			"packages/skip/pyproject.toml": "[project]\nname = 'skip'\n",
+			"packages/skip/src/skip/__init__.py": "",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.tool).toBe("uv");
+		expect(ws.projects?.map((p) => p.path).sort()).toEqual([".", "packages/api", "packages/core"]);
+		expect(ws.projects?.find((p) => p.path === "packages/api")?.stack.language).toBe("python");
+	});
+
+	it("detects Rush project folders without changing Node project support", () => {
+		setup({
+			"rush.json": JSON.stringify({
+				projects: [
+					{ packageName: "@org/web", projectFolder: "apps/web" },
+					{ packageName: "@org/sdk", projectFolder: "packages/sdk" },
+				],
+			}),
+			"apps/web/package.json": JSON.stringify({ name: "@org/web", dependencies: { react: "^19" }, devDependencies: { typescript: "^5" } }),
+			"apps/web/src/App.tsx": "",
+			"packages/sdk/package.json": JSON.stringify({ name: "@org/sdk", devDependencies: { typescript: "^5" } }),
+			"packages/sdk/src/index.ts": "",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.tool).toBe("rush");
+		expect(ws.projects?.map((p) => p.path).sort()).toEqual([".", "apps/web", "packages/sdk"]);
+		expect(ws.projects?.find((p) => p.path === "apps/web")?.support.status).toBe("supported");
+	});
+
+	it("detects Pants BUILD-backed project directories as discovery-only unsupported contexts", () => {
+		setup({
+			"pants.toml": "[GLOBAL]\nbackend_packages = []\n",
+			"src/python/app/BUILD": "python_sources()\n",
+			"src/python/app/main.py": "",
+			"src/python/lib/BUILD.bazel": "python_sources()\n",
+			"src/python/lib/core.py": "",
+		});
+		const ws = detectWorkspace(TMP);
+		expect(ws.isMonorepo).toBe(true);
+		expect(ws.tool).toBe("pants");
+		expect(ws.projects?.map((p) => p.path).sort()).toEqual([".", "src/python/app", "src/python/lib"]);
+		expect(ws.projects?.find((p) => p.path === "src/python/app")?.support.status).toBe("unsupported");
+	});
+});
+
 describe("parseYamlList", () => {
 	it("parses block-style list", () => {
 		const yaml = "packages:\n  - packages/*\n  - apps/*\n";

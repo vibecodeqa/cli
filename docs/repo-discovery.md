@@ -137,11 +137,15 @@ unless a future explicit include mode says otherwise.
 Accepted deterministic sources:
 
 - workspace manifests: `pnpm-workspace.yaml`, `package.json#workspaces`,
-  `lerna.json`, `nx.json`, `turbo.json`, `melos.yaml`
+  `lerna.json`, `nx.json`, `turbo.json`, `melos.yaml`, `go.work`,
+  Cargo `[workspace]`, Maven parent `pom.xml#modules`, Gradle
+  `settings.gradle(.kts)`, uv `[tool.uv.workspace]`, `rush.json`, and
+  `pants.toml` with `BUILD` files
 - project manifests from enabled language profiles: `package.json`,
-  `pubspec.yaml`
+  `pubspec.yaml`, `go.mod`, `Cargo.toml`, `pom.xml`, `pyproject.toml`
 - package-local tool config: `tsconfig.json`, `biome.json`,
-  `eslint.config.*`, `vitest.config.*`, `pubspec.yaml`
+  `eslint.config.*`, `vitest.config.*`, `pubspec.yaml`, `build.gradle(.kts)`,
+  `settings.gradle(.kts)`, `pants.toml`, `BUILD`
 - manifest-backed package roots such as `apps/*`, `packages/*`, `services/*`,
   `workers/*`, `functions/*`, `jobs/*`, `tools/*`, and `site/*`
 - conservative convention-only layouts currently recognized without a manifest:
@@ -150,10 +154,11 @@ Accepted deterministic sources:
   manifests discovered under neutral top-level directories
 - user config: explicit include/exclude/project roots
 
-Unsupported language markers must not be enabled globally until VCQA can produce
-honest results for that language. For example, discovering `.sln` or `pom.xml`
-before .NET/Java analyzers are ready would mostly create skipped checks and a
-misleading report.
+Unsupported language markers may be enabled only as discovery-only profiles.
+Those projects must appear in scope evidence as unsupported/unavailable, must
+not get package-level delegated tool commands, and must not turn unrelated
+checks into failures. Analyzer support is a separate milestone from project
+discovery.
 
 ## Scoping Rules
 
