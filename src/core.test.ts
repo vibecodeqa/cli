@@ -171,7 +171,8 @@ describe("core API", () => {
 		writeFileSync(join(TMP, "migrations", "0001_init.sql"), "CREATE TABLE users (id TEXT PRIMARY KEY);\n");
 		writeFileSync(
 			join(TMP, "src", "index.ts"),
-			"export default { fetch(_req: Request, env: { DB: D1Database }, id = 'u1') { return env.DB.prepare(`SELECT id FROM users WHERE id = '${id}'`).first(); } };\n",
+			"export default { fetch(_req: Request, env: { DB: D1Database }, id = 'u1') { return env.DB.prepare(`SELECT id FROM users WHERE id = '$" +
+				"{id}'`).first(); } };\n",
 		);
 
 		const report = await scan(TMP, { skipTests: true, checks: ["cloudflare-workers", "sqlite-d1"] });

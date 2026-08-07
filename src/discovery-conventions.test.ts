@@ -17,9 +17,9 @@ describe("discovery convention registry", () => {
 		expect(duplicates(discoveryConventions.testRoots)).toEqual([]);
 		expect(duplicates(discoveryConventions.sourceFileExtensions)).toEqual([]);
 		expect(duplicates(discoveryConventions.discoverySourceFileExtensions ?? [])).toEqual([]);
-		expect((discoveryConventions.discoverySourceFileExtensions ?? []).filter((ext) => discoveryConventions.sourceFileExtensions.includes(ext))).toEqual(
-			[],
-		);
+		expect(
+			(discoveryConventions.discoverySourceFileExtensions ?? []).filter((ext) => discoveryConventions.sourceFileExtensions.includes(ext)),
+		).toEqual([]);
 		expect(duplicates(discoveryConventions.conventionalContainerRoots)).toEqual([]);
 		expect(duplicates(discoveryConventions.staticSiteRootNames)).toEqual([]);
 		expect(duplicates(projectMarkerFiles)).toEqual([]);

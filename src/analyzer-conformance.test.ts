@@ -49,7 +49,9 @@ function conformanceFixture(): { inventory: FileInventory; workspace: WorkspaceI
 		"index.html":
 			'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="description" content="Conformance fixture page"><meta property="og:title" content="Conformance"><link rel="canonical" href="https://example.test/"><link rel="icon" href="/favicon.ico"></head><body><h1>Fixture</h1></body></html>\n',
 		"src/index.ts":
-			'import { randomUUID } from "node:crypto";\nexport default { fetch(_req: Request, env: { PUBLIC_FLAG: string }) { return new Response(`${env.PUBLIC_FLAG}:${randomUUID()}`); } };\n',
+			'import { randomUUID } from "node:crypto";\nexport default { fetch(_req: Request, env: { PUBLIC_FLAG: string }) { return new Response(`$' +
+			"{env.PUBLIC_FLAG}:$" +
+			"{randomUUID()}`); } };\n",
 		"src/App.tsx": 'export function App() { return <img src="/hero.jpg" alt="hero" />; }\n',
 		"src/Card.tsx": 'export function Card() { return <div style={{ backgroundColor: "#123456" }}>card</div>; }\n',
 		"src/generated/Bad.tsx": 'export function Bad() { return <img src="/generated.jpg" style={{ color: "#abcdef" }} />; }\n',

@@ -442,7 +442,11 @@ export function detectWorkspace(cwd: string): WorkspaceInfo {
 	if (has(pants.file) && tool === "none") {
 		tool = "pants";
 		globs = findPantsBuildPackageDirs(cwd);
-		discoveryEvidence.push({ kind: "manifest", file: pants.file, description: "Pants build root detected BUILD-backed project directories" });
+		discoveryEvidence.push({
+			kind: "manifest",
+			file: pants.file,
+			description: "Pants build root detected BUILD-backed project directories",
+		});
 	}
 
 	// Detect orchestration tools (overlay on top of workspace tool)
@@ -1003,9 +1007,7 @@ function parseGradleIncludes(content: string): string[] {
 	for (const match of content.matchAll(/include\s*(?:\(([^)]*)\)|([^\n]+))/g)) {
 		const body = match[1] ?? match[2] ?? "";
 		for (const entry of body.split(",")) {
-			const path = normalizeWorkspacePath(entry)
-				.replace(/^:+/, "")
-				.replace(/:+/g, "/");
+			const path = normalizeWorkspacePath(entry).replace(/^:+/, "").replace(/:+/g, "/");
 			if (path) projects.push(path);
 		}
 	}
