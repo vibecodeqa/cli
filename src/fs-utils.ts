@@ -20,7 +20,7 @@ const DEFAULT_EXCLUDED_FILE_PATTERNS = defaultExclusions.filePatterns;
 const DEFAULT_EXCLUDED_PATH_PREFIXES = defaultExclusions.generatedPathPrefixes;
 const IGNORE_HIDDEN_DIRECTORIES = Boolean(defaultExclusions.ignoreHiddenDirectories);
 const CODE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".dart", ".vue", ".svelte"]);
-const ALL_EXTS = new Set([...CODE_EXTS, ".json", ".env", ".yaml", ".yml", ".toml"]);
+const ALL_EXTS = new Set([...CODE_EXTS, ".json", ".env", ".yaml", ".yml", ".toml", ".html", ".htm", ".md", ".mdx", ".txt", ".sh"]);
 
 /** Default source directories for single-package repos */
 const DEFAULT_SRC_DIRS = ["src", "web/src", "lib", "app"];

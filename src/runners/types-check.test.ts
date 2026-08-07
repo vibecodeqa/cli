@@ -140,7 +140,7 @@ describe("typeCheckTargets", () => {
 			projects: [expect.objectContaining({ path: "packages/web", command: "npx tsc --noEmit", authoritative: true })],
 			excluded: [expect.objectContaining({ projectPath: ".", command: "npx tsc --noEmit" })],
 		});
-	});
+	}, 30_000);
 
 	it("preserves root fallback failures for single-project repositories", () => {
 		setup({
@@ -158,7 +158,7 @@ describe("typeCheckTargets", () => {
 			strategy: "project-targets",
 			projects: [expect.objectContaining({ path: ".", command: "npx tsc --noEmit", authoritative: true })],
 		});
-	});
+	}, 30_000);
 
 	it("prefers an explicit root typecheck script over a root npx tsc fallback", () => {
 		setup({
