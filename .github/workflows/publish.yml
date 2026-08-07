@@ -34,10 +34,10 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Lint
         run: pnpm lint
-      - name: Test
-        run: pnpm test
       - name: Build
         run: pnpm build && chmod +x dist/cli.js
+      - name: Test
+        run: pnpm test
       - name: Decide whether to publish
         id: decide
         run: |
