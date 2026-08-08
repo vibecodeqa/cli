@@ -87,6 +87,105 @@ describe("runSecurity", () => {
 		rmSync(dir, { recursive: true });
 	});
 
+	it("keeps unsanitized dangerouslySetInnerHTML at error severity", () => {
+		const dir = makeProject({
+			"src/Comment.tsx": [
+				"export function Comment({ userInput }: { userInput: string }) {",
+				"\treturn <div dangerouslySetInnerHTML={{ __html: userInput }} />;",
+				"}",
+			].join("\n"),
+		});
+		const result = runSecurity(dir);
+		const xss = result.issues.filter((i) => i.rule === "CWE-79" && i.file === "src/Comment.tsx");
+		expect(xss).toHaveLength(1);
+		expect(xss[0].severity).toBe("error");
+		rmSync(dir, { recursive: true });
+	});
+
+	it("downgrades dangerouslySetInnerHTML fed by a sanitizer call on the same line", () => {
+		const dir = makeProject({
+			"src/Code.tsx": [
+				'import DOMPurify from "dompurify";',
+				"export function Code({ raw }: { raw: string }) {",
+				"\treturn <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(raw) }} />;",
+				"}",
+			].join("\n"),
+		});
+		const result = runSecurity(dir);
+		const xss = result.issues.filter((i) => i.rule === "CWE-79" && i.file === "src/Code.tsx");
+		expect(xss).toHaveLength(1);
+		expect(xss[0].severity).toBe("info");
+		expect(xss[0].message).toContain("DOMPurify");
+		rmSync(dir, { recursive: true });
+	});
+
+	it("downgrades dangerouslySetInnerHTML fed by highlight.js through a local", () => {
+		const dir = makeProject({
+			"src/Highlighted.tsx": [
+				'import hljs from "highlight.js/lib/common";',
+				'import "highlight.js/styles/github-dark.css";',
+				"export function Highlighted({ code, lang }: { code: string; lang: string }) {",
+				"\tconst html = useMemo(() => {",
+				"\t\tif (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;",
+				"\t\treturn hljs.highlightAuto(code).value;",
+				"\t}, [code, lang]);",
+				'\treturn <pre><code className="hljs" dangerouslySetInnerHTML={{ __html: html }} /></pre>;',
+				"}",
+			].join("\n"),
+		});
+		const result = runSecurity(dir);
+		const xss = result.issues.filter((i) => i.rule === "CWE-79" && i.file === "src/Highlighted.tsx");
+		expect(xss).toHaveLength(1);
+		expect(xss[0].severity).toBe("info");
+		expect(xss[0].message).toContain("highlight.js");
+		rmSync(dir, { recursive: true });
+	});
+
+	it("traces dangerouslySetInnerHTML through a local helper that wraps the sanitizer", () => {
+		const dir = makeProject({
+			"src/Diff.tsx": [
+				'import hljs from "highlight.js/lib/common";',
+				"function hl(line: string, lang: string): string {",
+				"\tif (lang && hljs.getLanguage(lang)) return hljs.highlight(line, { language: lang }).value;",
+				"\treturn line;",
+				"}",
+				"export function Diff({ rows, lang }: { rows: string[]; lang: string }) {",
+				"\tconst hlRows = rows.map((r) => hl(r, lang));",
+				'\treturn <div>{hlRows.map((h, k) => <code key={k} dangerouslySetInnerHTML={{ __html: hlRows[k] ?? "" }} />)}</div>;',
+				"}",
+			].join("\n"),
+		});
+		const result = runSecurity(dir);
+		const xss = result.issues.filter((i) => i.rule === "CWE-79" && i.file === "src/Diff.tsx");
+		expect(xss).toHaveLength(1);
+		expect(xss[0].severity).toBe("info");
+		expect(xss[0].message).toContain("highlight.js");
+		rmSync(dir, { recursive: true });
+	});
+
+	it("still reports an untraced dangerouslySetInnerHTML in a file that imports a sanitizer", () => {
+		const dir = makeProject({
+			"src/Mixed.tsx": [
+				'import hljs from "highlight.js/lib/common";',
+				"export function Mixed({ code, comment }: { code: string; comment: string }) {",
+				"\tconst html = hljs.highlightAuto(code).value;",
+				"\treturn (",
+				"\t\t<div>",
+				"\t\t\t<code dangerouslySetInnerHTML={{ __html: html }} />",
+				"\t\t\t<p dangerouslySetInnerHTML={{ __html: comment }} />",
+				"\t\t</div>",
+				"\t);",
+				"}",
+			].join("\n"),
+		});
+		const result = runSecurity(dir);
+		const xss = result.issues.filter((i) => i.rule === "CWE-79" && i.file === "src/Mixed.tsx");
+		expect(xss.map((i) => i.severity)).toEqual(["info", "warning"]);
+		expect(xss[1].message).toContain("highlight.js");
+		expect(xss[1].message).toContain("not traced");
+		rmSync(dir, { recursive: true });
+	});
+
 	it("detects eval()", () => {
 		const dir = makeProject({ "src/app.ts": "eval(userInput);\n" });
 		const result = runSecurity(dir);

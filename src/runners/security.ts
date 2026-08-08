@@ -300,6 +300,193 @@ const PATTERNS: SecurityPattern[] = [
 	},
 ];
 
+/**
+ * Modules whose output is HTML-escaped or sanitized. Rendering their result through an
+ * HTML sink is evidence *against* an XSS finding, so the `dangerouslySetInnerHTML` rule
+ * grades its severity by whether one of these produced the string.
+ */
+const SANITIZER_MODULES: { match: RegExp; label: string }[] = [
+	{ match: /^(?:isomorphic-)?dompurify$/i, label: "DOMPurify" },
+	{ match: /^sanitize-html$/i, label: "sanitize-html" },
+	{ match: /^xss$/i, label: "xss" },
+	{ match: /^escape-html$/i, label: "escape-html" },
+	{ match: /^he$/i, label: "he" },
+	{ match: /^highlight\.js(?:\/.*)?$/i, label: "highlight.js" },
+	{ match: /^shiki(?:\/.*)?$/i, label: "shiki" },
+	{ match: /^prismjs(?:\/.*)?$/i, label: "Prism" },
+];
+
+function sanitizerModuleLabel(specifier: string): string | null {
+	if (/\.(?:css|scss|sass|less)$/i.test(specifier)) return null; // theme imports are not sanitizers
+	for (const mod of SANITIZER_MODULES) if (mod.match.test(specifier)) return mod.label;
+	return null;
+}
+
+/** Local names bound to an import clause (`a`, `* as a`, `{ a, b as c }`). */
+function importClauseBindings(clause: string): string[] {
+	const names: string[] = [];
+	const withoutBraces = clause.replace(/\{([^}]*)\}/g, (_full, inner: string) => {
+		for (const part of inner.split(",")) {
+			const name = part
+				.trim()
+				.replace(/^type\s+/, "")
+				.split(/\s+as\s+/)
+				.pop()
+				?.trim();
+			if (name && /^[A-Za-z_$][\w$]*$/.test(name)) names.push(name);
+		}
+		return "";
+	});
+	for (const part of withoutBraces.split(",")) {
+		const name = part
+			.trim()
+			.replace(/^type\s+/, "")
+			.replace(/^\*\s+as\s+/, "")
+			.trim();
+		if (name && /^[A-Za-z_$][\w$]*$/.test(name)) names.push(name);
+	}
+	return names;
+}
+
+/** Reads a balanced expression/body starting at `from`; stops at the end of the statement. */
+function readBalancedSource(content: string, from: number, limit = 4000): string {
+	let depth = 0;
+	let opened = false;
+	let quote = "";
+	const end = Math.min(content.length, from + limit);
+	for (let i = from; i < end; i++) {
+		const char = content[i];
+		if (quote) {
+			if (char === "\\") i++;
+			else if (char === quote) quote = "";
+			continue;
+		}
+		if (char === '"' || char === "'" || char === "`") {
+			quote = char;
+			continue;
+		}
+		if (char === "{" || char === "(" || char === "[") {
+			depth++;
+			opened = true;
+		} else if (char === "}" || char === ")" || char === "]") {
+			if (depth === 0) return content.slice(from, i);
+			depth--;
+		} else if (depth === 0 && (char === ";" || (char === "\n" && opened))) {
+			return content.slice(from, i);
+		}
+	}
+	return content.slice(from, end);
+}
+
+/** Does `text` call one of the sanitizer bindings (directly or via a member such as `hljs.highlight`)? */
+function sanitizerCallLabel(text: string, bindings: Map<string, string>): string | null {
+	for (const [name, label] of bindings) {
+		if (new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*(?:\\.\\s*\\w+\\s*)*\\(`).test(text)) return label;
+	}
+	return null;
+}
+
+/** Sanitizer evidence for one file: imported module labels + names that yield sanitized HTML. */
+interface SanitizerScope {
+	/** Local name → sanitizer label, for imports and for local helpers that wrap them. */
+	bindings: Map<string, string>;
+	/** Labels of sanitizer modules the file imports at all. */
+	imported: string[];
+}
+
+/**
+ * Sanitizer bindings for one file: the imported names plus local helpers that wrap them
+ * (e.g. `function hl(line) { return hljs.highlight(line).value; }`).
+ */
+function sanitizerScope(content: string): SanitizerScope {
+	const bindings = new Map<string, string>();
+	const imported = new Set<string>();
+	for (const match of content.matchAll(/import\s+([^;'"]*?)\s+from\s*["']([^"']+)["']/g)) {
+		const label = sanitizerModuleLabel(match[2]);
+		if (!label) continue;
+		imported.add(label);
+		for (const name of importClauseBindings(match[1])) bindings.set(name, label);
+	}
+	for (const match of content.matchAll(/(?:const|let|var)\s+([^=;]+?)\s*=\s*require\(\s*["']([^"']+)["']\s*\)/g)) {
+		const label = sanitizerModuleLabel(match[2]);
+		if (!label) continue;
+		imported.add(label);
+		for (const name of importClauseBindings(match[1])) bindings.set(name, label);
+	}
+	for (const match of content.matchAll(/import\s*\(\s*["']([^"']+)["']\s*\)/g)) {
+		const label = sanitizerModuleLabel(match[1]);
+		if (label) imported.add(label);
+	}
+	// Two passes so a helper calling a helper is still recognised.
+	const declaration = /\b(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|const|let|var)\s+([A-Za-z_$][\w$]*)/g;
+	for (let pass = 0; pass < 2; pass++) {
+		for (const match of content.matchAll(declaration)) {
+			const name = match[1];
+			if (bindings.has(name)) continue;
+			const start = (match.index ?? 0) + match[0].length;
+			const label = sanitizerCallLabel(readBalancedSource(content, start), bindings);
+			if (label) bindings.set(name, label);
+		}
+	}
+	return { bindings, imported: [...imported] };
+}
+
+/** The expression assigned to `__html` at or just after `lineIndex`. */
+function dangerousHtmlValue(lines: string[], lineIndex: number): string {
+	const window = lines.slice(lineIndex, Math.min(lines.length, lineIndex + 6)).join("\n");
+	const at = window.indexOf("__html");
+	if (at < 0) return "";
+	const colon = window.indexOf(":", at);
+	if (colon < 0) return "";
+	return readBalancedSource(window, colon + 1, 400).trim();
+}
+
+const EXPRESSION_KEYWORDS = new Set(["true", "false", "null", "undefined", "new", "typeof", "await", "return", "this", "void"]);
+
+/** The expression plus the local declarations of the identifiers it mentions (bounded, 2 hops). */
+function expressionWithLocalSources(expression: string, content: string, depth = 2): string {
+	if (depth <= 0) return expression;
+	let combined = expression;
+	for (const match of expression.matchAll(/[A-Za-z_$][\w$]*/g)) {
+		const name = match[0];
+		if (EXPRESSION_KEYWORDS.has(name)) continue;
+		const decl = new RegExp(`\\b(?:const|let|var|function)\\s+${name}\\b`).exec(content);
+		if (!decl) continue;
+		const body = readBalancedSource(content, (decl.index ?? 0) + decl[0].length);
+		combined += `\n${expressionWithLocalSources(body, content, depth - 1)}`;
+	}
+	return combined;
+}
+
+/**
+ * Grades a `dangerouslySetInnerHTML` hit by the provenance of the HTML it renders:
+ * traced to a sanitizer → info, sanitizer present in the file → warning, otherwise the
+ * original error. Returning the pattern default keeps unsanitized sinks at `error`.
+ */
+function classifyDangerousHtml(
+	pattern: SecurityPattern,
+	lines: string[],
+	lineIndex: number,
+	content: string,
+	scope: SanitizerScope,
+): Pick<Issue, "severity" | "message"> {
+	const { bindings, imported } = scope;
+	if (imported.length === 0) return { severity: pattern.severity, message: pattern.message };
+
+	const expression = dangerousHtmlValue(lines, lineIndex);
+	const traced = expression ? sanitizerCallLabel(expressionWithLocalSources(expression, content), bindings) : null;
+	if (traced) {
+		return {
+			severity: "info",
+			message: `XSS: dangerouslySetInnerHTML renders ${traced} output, which escapes the HTML it produces — verify no unsanitized input is concatenated in`,
+		};
+	}
+	return {
+		severity: "warning",
+		message: `XSS: dangerouslySetInnerHTML bypasses React protection — ${imported.join("/")} is imported in this file but the rendered HTML was not traced to it; confirm the input is sanitized`,
+	};
+}
+
 function findSecureCookieHelpers(files: { rawContent?: string; content: string }[]): Set<string> {
 	const helpers = new Set<string>();
 	const declaration = /\b(?:export\s+)?(?:function|const)\s+([A-Za-z_$][\w$]*)\b/g;
@@ -391,13 +578,25 @@ function classifyBrowserStorageLine(line: string): BrowserStorageClassification 
 	};
 }
 
+interface FileScanContext {
+	lines: string[];
+	lineIndex: number;
+	content: string;
+	sanitizers: SanitizerScope;
+}
+
 function contextualizePatternIssue(
 	pattern: SecurityPattern,
 	line: string,
 	file: string,
 	context: string,
 	secureCookieHelpers: Set<string>,
+	fileContext: FileScanContext,
 ): Pick<Issue, "severity" | "message"> | null {
+	if (pattern.name === "dangerouslySetInnerHTML") {
+		return classifyDangerousHtml(pattern, fileContext.lines, fileContext.lineIndex, fileContext.content, fileContext.sanitizers);
+	}
+
 	if (
 		pattern.name === "token in localStorage key" ||
 		pattern.name === "token var in localStorage" ||
@@ -482,6 +681,8 @@ export function runSecurity(cwd: string, inventory?: FileInventory): CheckResult
 		// For SFC files (.vue/.svelte), scan both script AND template for security patterns
 		const scanContent = sf.rawContent || sf.content;
 		const lines = scanContent.split("\n");
+		// Computed lazily: only the HTML-sink rules need it, and most files never hit them.
+		let fileSanitizers: SanitizerScope | undefined;
 
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];
@@ -503,7 +704,13 @@ export function runSecurity(cwd: string, inventory?: FileInventory): CheckResult
 
 			for (const p of PATTERNS) {
 				if (p.pattern.test(line)) {
-					const contextualIssue = contextualizePatternIssue(p, line, sf.path, contextWindow(lines, i), secureCookieHelpers);
+					if (!fileSanitizers) fileSanitizers = sanitizerScope(scanContent);
+					const contextualIssue = contextualizePatternIssue(p, line, sf.path, contextWindow(lines, i), secureCookieHelpers, {
+						lines,
+						lineIndex: i,
+						content: scanContent,
+						sanitizers: fileSanitizers,
+					});
 					if (!contextualIssue) continue;
 					issues.push({
 						severity: contextualIssue.severity,
