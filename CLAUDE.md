@@ -31,10 +31,13 @@ To cut a release:
 2. Bump `version` in `package.json` and add a `CHANGELOG.md` entry.
 3. Push to `main`.
 
-The workflow triggers on pushes touching `src/**`, `package.json`, or the
-workflow file. It builds, runs the full test suite, then compares the local
-`package.json` version against the published npm version — **it publishes only
-when they differ.** So a code change without a version bump will NOT ship
+The workflow triggers on pushes to `main` touching `package.json`,
+`pnpm-lock.yaml`, `src/**`, `docs/**`, `README.md`, `CONTRIBUTING.md`, or the
+workflow file itself — note that this includes docs-only and README-only
+pushes, which do start the job (`CLAUDE.md` itself is not in the filter). It
+builds, runs the full test suite, then compares the local `package.json`
+version against the published npm version — **it publishes only when they
+differ.** So a code change without a version bump will NOT ship
 (this is the trap that stranded the `pruneNestedRoots` fix in 0.44.0: the code
 was committed but the version was never bumped, so CI kept skipping publish).
 
