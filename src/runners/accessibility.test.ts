@@ -91,6 +91,98 @@ describe("runAccessibility", () => {
 		rmSync(dir, { recursive: true });
 	});
 
+	it("does not flag buttons whose label comes from a JSX expression", () => {
+		const dir = makeProject({
+			"Labels.tsx": `export function Labels({ repo, scanning, copied }) {
+  return (
+    <div>
+      <button className="a" onClick={view}>{repo.name}</button>
+      <button className="b" onClick={scan}>{scanning ? "Queued" : "Scan"}</button>
+      <button className="c" onClick={copy}><span className="x">{copied}</span></button>
+      <button className="d" onClick={save}>{t("actions.save")}</button>
+    </div>
+  );
+}`,
+		});
+		const result = runAccessibility(dir);
+		expect(result.issues.filter((i) => i.rule === "button-name")).toHaveLength(0);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("does not flag a multi-line button whose label follows a long handler", () => {
+		const dir = makeProject({
+			"Card.tsx": `export function Card({ repo, scanning }) {
+  return (
+    <button
+      className="btn-ghost"
+      style={{ fontSize: "0.65rem", padding: "0.2rem 0.5rem" }}
+      disabled={scanning === repo.fullName}
+      onClick={async (e) => {
+        e.stopPropagation();
+        setScanning(repo.fullName);
+        try {
+          await fetch(\`/api/repos/\${repo.fullName}/scan\`, { method: "POST" });
+        } catch { /* trigger failed */ }
+        setTimeout(() => setScanning(null), 3000);
+      }}
+    >
+      {scanning === repo.fullName ? "Queued" : "Scan"}
+    </button>
+  );
+}`,
+		});
+		const result = runAccessibility(dir);
+		expect(result.issues.filter((i) => i.rule === "button-name")).toHaveLength(0);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("still flags icon-only buttons with no accessible name", () => {
+		const dir = makeProject({
+			"Icons.tsx": `export function Icons() {
+  return (
+    <div>
+      <button className="a" onClick={close}><Icon /></button>
+      <button className="b" onClick={close}>{<CloseIcon />}</button>
+      <button className="c" onClick={close}>&times;</button>
+      <button className="d" onClick={close} />
+    </div>
+  );
+}`,
+		});
+		const result = runAccessibility(dir);
+		expect(result.issues.filter((i) => i.rule === "button-name")).toHaveLength(4);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("respects an explicit accessible name on an icon-only button", () => {
+		const dir = makeProject({
+			"Close.tsx": `export function Close() {
+  return <button aria-label="Close dialog" onClick={close}><Icon /></button>;
+}`,
+		});
+		const result = runAccessibility(dir);
+		expect(result.issues.filter((i) => i.rule === "button-name")).toHaveLength(0);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("reports button-name on the line that opens the button", () => {
+		const source = `export function Toolbar() {
+  return (
+    <div>
+      <span>Toolbar</span>
+      <button className="close" onClick={close}><Icon /></button>
+    </div>
+  );
+}`;
+		const dir = makeProject({ "Toolbar.tsx": source });
+		const result = runAccessibility(dir);
+		const lines = source.split("\n");
+		const found = result.issues.filter((i) => i.rule === "button-name");
+		expect(found).toHaveLength(1);
+		for (const found_issue of found) expect(lines[(found_issue.line ?? 0) - 1]).toContain("<button");
+		rmSync(dir, { recursive: true });
+	});
+
 	it("runs as a first-class React/Vite accessibility group", () => {
 		const dir = makeReactViteProject({
 			"App.tsx": `export function App() {

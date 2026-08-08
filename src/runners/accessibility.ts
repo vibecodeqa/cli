@@ -140,28 +140,145 @@ function openingTag(lines: string[], start: number, maxLines = 8): string {
 	return tag;
 }
 
-function elementBlock(lines: string[], start: number, closingTag: string, maxLines = 12): string {
-	let block = "";
-	for (let i = start; i < Math.min(lines.length, start + maxLines); i++) {
-		block += `${lines[i]} `;
-		if (lines[i].includes(closingTag)) break;
-	}
-	return block;
-}
-
 function hasExplicitName(text: string): boolean {
 	return /\b(?:aria-label|aria-labelledby|title)=/.test(text);
 }
 
-function hasVisibleTextInElement(block: string, tagName: string): boolean {
-	const match = block.match(new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "i"));
-	if (!match?.[1]) return false;
-	const text = match[1]
-		.replace(/\{[^}]*}/g, " ")
-		.replace(/<[^>]*>/g, " ")
-		.replace(/&nbsp;/g, " ")
-		.trim();
-	return /[\p{L}\p{N}]/u.test(text);
+/** End index (inclusive) of the tag opening at `from`, ignoring `>` inside strings and `{}` expressions. */
+function tagEnd(source: string, from: number): { end: number; selfClosing: boolean } | null {
+	let depth = 0;
+	let quote = "";
+	for (let i = from; i < source.length; i++) {
+		const char = source[i];
+		if (quote) {
+			if (char === "\\") i++;
+			else if (char === quote) quote = "";
+			continue;
+		}
+		if (char === '"' || char === "'" || char === "`") quote = char;
+		else if (char === "{" || char === "(" || char === "[") depth++;
+		else if (char === "}" || char === ")" || char === "]") depth--;
+		else if (char === ">" && depth <= 0) return { end: i, selfClosing: /\/\s*$/.test(source.slice(from, i)) };
+	}
+	return null;
+}
+
+/** End index (exclusive) of the balanced `{...}` expression starting at `from`. */
+function expressionEnd(source: string, from: number): number {
+	let depth = 0;
+	let quote = "";
+	for (let i = from; i < source.length; i++) {
+		const char = source[i];
+		if (quote) {
+			if (char === "\\") i++;
+			else if (char === quote) quote = "";
+			continue;
+		}
+		if (char === '"' || char === "'" || char === "`") quote = char;
+		else if (char === "{") depth++;
+		else if (char === "}") {
+			depth--;
+			if (depth === 0) return i + 1;
+		}
+	}
+	return source.length;
+}
+
+interface JsxChildren {
+	/** The element's own source, opening tag through closing tag (or as far as it was read). */
+	raw: string;
+	/** Literal text between tags, with nested tag markup (and its attributes) removed. */
+	text: string;
+	/** Each `{...}` child expression, in order. */
+	expressions: string[];
+	/** False when the closing tag was not reached inside the window — the element is unknown, not empty. */
+	terminated: boolean;
+}
+
+/**
+ * Children of the `<tagName>` element opening at `from`. Nested elements are walked, so
+ * `<button><span>{label}</span></button>` yields the `{label}` expression; attribute
+ * expressions belong to the tag and are skipped.
+ */
+function jsxChildren(source: string, from: number, tagName: string): JsxChildren {
+	const open = tagEnd(source, from);
+	if (!open) return { raw: source.slice(from), text: "", expressions: [], terminated: false };
+	if (open.selfClosing) return { raw: source.slice(from, open.end + 1), text: "", expressions: [], terminated: true };
+
+	const closing = `</${tagName}`;
+	const opening = `<${tagName}`;
+	let text = "";
+	const expressions: string[] = [];
+	let depth = 0;
+	for (let i = open.end + 1; i < source.length; i++) {
+		const char = source[i];
+		if (char === "{") {
+			const end = expressionEnd(source, i);
+			expressions.push(source.slice(i + 1, Math.max(i + 1, end - 1)));
+			i = end - 1;
+			continue;
+		}
+		if (char === "<") {
+			const isClose = source.startsWith(closing, i) && !/[\w:-]/.test(source[i + closing.length] ?? "");
+			const isOpen = source.startsWith(opening, i) && !/[\w:-]/.test(source[i + opening.length] ?? "");
+			const tag = tagEnd(source, i);
+			if (!tag) break;
+			if (isClose) {
+				if (depth === 0) return { raw: source.slice(from, tag.end + 1), text, expressions, terminated: true };
+				depth--;
+			} else if (isOpen && !tag.selfClosing) depth++;
+			i = tag.end;
+			continue;
+		}
+		text += char;
+	}
+	return { raw: source.slice(from), text, expressions, terminated: false };
+}
+
+/** Strips JSX tag markup (and its attributes) but keeps the text between tags. */
+function stripJsxTags(source: string): string {
+	let out = "";
+	for (let i = 0; i < source.length; i++) {
+		if (source[i] === "<") {
+			const tag = tagEnd(source, i);
+			if (!tag) break;
+			i = tag.end;
+			continue;
+		}
+		out += source[i];
+	}
+	return out;
+}
+
+function hasReadableText(value: string): boolean {
+	return /[\p{L}\p{N}]/u.test(value.replace(/&[a-z]+;|&#\d+;/gi, " "));
+}
+
+/**
+ * Does a `{...}` child supply an accessible name? A string literal, ternary, identifier or
+ * call all name the element at runtime; only an expression that is nothing but rendered
+ * elements (`{<Icon />}`) leaves the button unnamed.
+ */
+function expressionNamesElement(expression: string): boolean {
+	const withoutComments = expression.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
+	return hasReadableText(stripJsxTags(withoutComments));
+}
+
+/** Do the element's children supply a visible/dynamic accessible name? */
+function childrenNameElement(children: JsxChildren): boolean {
+	if (hasReadableText(children.text)) return true;
+	return children.expressions.some(expressionNamesElement);
+}
+
+/** Character offset of each line's first character in the joined source. */
+function lineStartOffsets(lines: string[]): number[] {
+	const offsets: number[] = [];
+	let at = 0;
+	for (const line of lines) {
+		offsets.push(at);
+		at += line.length + 1;
+	}
+	return offsets;
 }
 
 function staticIdValues(source: string): string[] {
@@ -333,6 +450,7 @@ export function runAccessibility(cwd: string, workspace?: WorkspaceInfo, invento
 		// For SFCs, use raw content (includes template) for a11y checks
 		const source = f.rawContent || f.content;
 		const lines = source.split("\n");
+		const lineOffsets = lineStartOffsets(lines);
 		const idValues = staticIdValues(source);
 		const ids = new Set(idValues);
 		const seenIds = new Map<string, number>();
@@ -385,9 +503,11 @@ export function runAccessibility(cwd: string, workspace?: WorkspaceInfo, invento
 			}
 
 			// 2. Icon-only button without an accessible name
-			if (/<button\b/.test(trimmed)) {
-				const block = elementBlock(lines, i, "</button>", 12);
-				if (!hasExplicitName(block) && !hasVisibleTextInElement(block, "button")) {
+			const buttonAt = line.indexOf("<button");
+			if (buttonAt >= 0 && /<button\b/.test(line)) {
+				const button = jsxChildren(source, lineOffsets[i] + buttonAt, "button");
+				// An element whose closing tag was never reached is unknown, not unnamed.
+				if (button.terminated && !hasExplicitName(button.raw) && !childrenNameElement(button)) {
 					buttonName++;
 					issues.push(
 						issue({
