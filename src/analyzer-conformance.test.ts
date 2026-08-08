@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { scan } from "./core.js";
 import { detectWorkspace } from "./detect.js";
-import { buildFileInventory, type FileInventory } from "./file-inventory.js";
+import { buildFileInventory, type FileInventory, inventoryHas } from "./file-inventory.js";
 import { setGlobalIgnore, setGlobalIgnoreNames, setGlobalSrcRoots } from "./fs-utils.js";
 import { runCloudflareWorkers } from "./runners/cloudflare-workers.js";
 import { runFrontendHealth } from "./runners/frontend-health.js";
@@ -69,6 +69,23 @@ function conformanceFixture(): { inventory: FileInventory; workspace: WorkspaceI
 
 const FORBIDDEN_PATH =
 	/^(?:src\/generated\/|site\/generated-docs\/|\.claude\/|node_modules\/|dist\/|coverage\/|playwright-report\/|\.vibe-check\/)/;
+
+/** Repo-level markers a check may name as "the place to fix" even when the file
+ *  does not exist and so cannot be in the inventory (e.g. env-validation telling
+ *  you to add `.env` to a `.gitignore` you do not have yet). Everything else must
+ *  be a file the inventory actually holds. Keep this list short and boring — it is
+ *  the escape hatch, and a growing escape hatch means a runner is walking on its
+ *  own again. */
+const REPO_LEVEL_PATHS = new Set([
+	".gitignore",
+	".env.example",
+	"package.json",
+	"README.md",
+	"CHANGELOG.md",
+	"CONTRIBUTING.md",
+	"LICENSE",
+	"tsconfig.json",
+]);
 
 function forbiddenIssues(analyzer: string, result: CheckResult): Array<{ analyzer: string; file: string; rule?: string }> {
 	return result.issues
@@ -294,6 +311,74 @@ describe("analyzer file-policy conformance", () => {
 			process.stdout.write = originalWrite;
 		}
 	});
+
+	it("keeps every finding in a full scan traceable to the one FileInventory", async () => {
+		writeProject({
+			".vcqa.json": JSON.stringify({ ignore: ["src/generated/**"] }),
+			".gitignore": ".env\n",
+			"package.json": JSON.stringify({ name: "inventory-trace", dependencies: { react: "^19.0.0" } }),
+			"index.html": "<html><head></head><body><img src='hero.jpg'></body></html>\n",
+			"src/App.tsx": 'export function App() { try { risky() } catch {} return <div style={{ color: "#123456" }} />; }\n',
+			"src/index.ts": "export const x: any = 1;\n",
+			"src/App.test.ts": "it('x', () => { expect(1).toBe(1); });\n",
+			// Every one of these is a path some runner used to reach with its own walk.
+			"src/generated/Bad.tsx": 'export function Bad() { try { risky() } catch {} return <img src="/g.jpg" />; }\n',
+			"src/app.min.js": 'var a=1;try{b()}catch(e){};var k="sk-proj-AAAAAAAAAAAAAAAAAAAAAA";\n',
+			"dist/Bad.tsx": 'export function Bad() { try { risky() } catch {} return <img src="/d.jpg" />; }\n',
+			"dist/index.html": "<html><head></head><body><img src='d.jpg'></body></html>\n",
+			"coverage/Bad.tsx": 'export function Bad() { try { risky() } catch {} return <img src="/c.jpg" />; }\n',
+			"playwright-report/Bad.tsx": 'export function Bad() { try { risky() } catch {} return <img src="/p.jpg" />; }\n',
+			"node_modules/pkg/Bad.tsx": 'export function Bad() { try { risky() } catch {} return <img src="/n.jpg" />; }\n',
+			".claude/worktrees/agent-a/Bad.tsx": 'export function Bad() { try { risky() } catch {} return <img src="/a.jpg" />; }\n',
+			".claude/worktrees/agent-a/index.html": "<html><head></head><body><img src='a.jpg'></body></html>\n",
+			"pnpm-lock.yaml": "lockfileVersion: 9\n",
+			".env": "OPENAI_API_KEY=sk-proj-ABCDEFGHIJKLMNOPQRSTUV\n",
+		});
+
+		const report = await scan(dir, { skipTests: true });
+		const { inventory } = makeInventory(["src/generated/**"]);
+		const findings = report.checks.flatMap((check) =>
+			check.issues
+				.filter((issue) => typeof issue.file === "string" && issue.file)
+				.map((issue) => ({ check: check.name, file: issue.file! })),
+		);
+
+		// Nothing the policy excluded may be named by any finding, from any check,
+		// however that check discovers its files.
+		expect(findings.filter((finding) => FORBIDDEN_PATH.test(finding.file))).toEqual([]);
+		// And every remaining finding names a file the inventory actually holds, or
+		// one of the repo-level markers a check may point at even when absent.
+		expect(findings.filter((finding) => !inventoryHas(inventory, finding.file) && !REPO_LEVEL_PATHS.has(finding.file))).toEqual([]);
+		// The scan must still have found the real defects — otherwise "no forbidden
+		// findings" would pass on an empty result set.
+		expect(findings.some((finding) => finding.file === "src/App.tsx")).toBe(true);
+		expect(findings.some((finding) => finding.file === "index.html")).toBe(true);
+		// The config-ignored .env stays visible to secrets: the security override.
+		expect(
+			report.checks
+				.find((check) => check.name === "secrets")
+				?.issues.some((issue) => issue.file === ".env" && issue.rule === "env-secret-value"),
+		).toBe(true);
+
+		const summary = report.meta.fileInventory as {
+			byKind: Record<string, number>;
+			ignoredByReason: Record<string, number>;
+			ignoredFiles: number;
+			ignoredDirectories: number;
+		};
+		expect(summary.byKind).toMatchObject({ source: 2, test: 1, html: 1, env: 1, config: 1 });
+		expect(summary.ignoredByReason).toMatchObject({ lockfile: 1, "generated-file": 1, "config-ignore": 1 });
+		expect(summary.ignoredByReason["build-output"]).toBeGreaterThanOrEqual(1);
+		expect(summary.ignoredByReason["agent-artifact"]).toBeGreaterThanOrEqual(1);
+		expect(summary.ignoredByReason.dependency).toBeGreaterThanOrEqual(1);
+		expect(summary.ignoredByReason["test-output"]).toBeGreaterThanOrEqual(2);
+		// Rejected files inside walked directories are retained with their reasons.
+		// Ignored directories are pruned whole and never enumerated — which is why
+		// dist/ and src/generated/ contribute no entries here, only one reason count.
+		expect(inventory.ignoredFiles.map((file) => file.path).sort()).toEqual(["pnpm-lock.yaml", "src/app.min.js"]);
+		expect(inventory.ignoredFiles.map((file) => file.reasons)).toEqual([["lockfile"], ["generated-file"]]);
+		expect(inventory.ignoredFiles.some((file) => FORBIDDEN_PATH.test(file.path))).toBe(false);
+	}, 120_000);
 
 	it("allows security-sensitive .env exceptions while keeping generated agent artifacts ignored", async () => {
 		writeProject({

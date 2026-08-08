@@ -23,6 +23,7 @@ import {
 	MemoryStore,
 	Statistic,
 } from "@jscpd/core";
+import { type FileInventory, inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles, readDeps, type SourceFile } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -45,7 +46,7 @@ interface Clone {
 	snippet: string;
 }
 
-export async function runDuplication(cwd: string): Promise<CheckResult> {
+export async function runDuplication(cwd: string, inventory?: FileInventory): Promise<CheckResult> {
 	const start = Date.now();
 
 	// Try jscpd if it's an explicit project dependency (opt-in, not auto-npx)
@@ -56,7 +57,9 @@ export async function runDuplication(cwd: string): Promise<CheckResult> {
 		return jscpdResult;
 	}
 
-	const files = getProductionFiles(cwd);
+	// One file universe: the scan-wide inventory when the scan built one, the
+	// legacy walk only for direct callers that never ran a scan.
+	const files = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 	if (files.length < 2) {
 		return {
 			name: "duplication",

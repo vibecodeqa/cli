@@ -8,6 +8,9 @@ import type { ProjectContext, WorkspaceInfo } from "./types.js";
 
 export type InventoryFileKind = "source" | "test" | "html" | "doc" | "config" | "env" | "lockfile" | "asset" | "unknown";
 
+const CODE_EXTS = new Set(discoveryConventions.sourceFileExtensions);
+const ALL_TEXT_EXTS = new Set([...CODE_EXTS, ".json", ".env", ".yaml", ".yml", ".toml", ".html", ".htm", ".md", ".mdx", ".txt", ".sh"]);
+
 export interface InventoryFile {
 	path: string;
 	fullPath: string;
@@ -55,6 +58,13 @@ export interface FileInventory {
 	 *  classify or explain a path the walk never produced (#71). */
 	policy: EffectiveScanPolicy;
 	files: InventoryFile[];
+	/** Files the walk reached and the policy rejected, each carrying its reason
+	 *  codes. Ignored *directories* are pruned and never enumerated — that is the
+	 *  traversal boundary — so this list stays small: lockfiles, minified bundles,
+	 *  source maps, generated `.g.dart`, and the like. It exists so a runner that
+	 *  legitimately needs a rejected path (Flutter's generated-code ratio) can ask
+	 *  the inventory instead of walking the repo itself. */
+	ignoredFiles: InventoryFile[];
 	staticSites: StaticSiteContext[];
 	summary: {
 		totalFiles: number;
@@ -64,14 +74,26 @@ export interface FileInventory {
 		generatedFiles: number;
 		securitySensitiveFiles: number;
 		staticSiteRoots: number;
+		/** Included files by inventory class. */
 		byKind: Record<string, number>;
+		/** Skipped paths by policy reason code — the audit trail for everything the
+		 *  scan chose not to look at. Directories counted once, not per descendant. */
+		ignoredByReason: Record<string, number>;
 	};
+}
+
+interface WalkCounts {
+	totalFiles: number;
+	ignoredFiles: number;
+	ignoredDirectories: number;
+	ignoredByReason: Record<string, number>;
 }
 
 export function buildFileInventory(cwd: string, workspace: WorkspaceInfo, policy: EffectiveScanPolicy): FileInventory {
 	const files: InventoryFile[] = [];
-	const counts = { totalFiles: 0, ignoredFiles: 0, ignoredDirectories: 0 };
-	walk(cwd, "", workspace, policy, files, counts);
+	const ignoredFiles: InventoryFile[] = [];
+	const counts: WalkCounts = { totalFiles: 0, ignoredFiles: 0, ignoredDirectories: 0, ignoredByReason: {} };
+	walk(cwd, "", workspace, policy, files, ignoredFiles, counts);
 	const byKind: Record<string, number> = {};
 	for (const file of files) byKind[file.kind] = (byKind[file.kind] ?? 0) + 1;
 	const staticSites = detectStaticSiteContexts(cwd, workspace, files);
@@ -79,6 +101,7 @@ export function buildFileInventory(cwd: string, workspace: WorkspaceInfo, policy
 		root: cwd,
 		policy,
 		files,
+		ignoredFiles,
 		staticSites,
 		summary: {
 			totalFiles: counts.totalFiles,
@@ -89,16 +112,19 @@ export function buildFileInventory(cwd: string, workspace: WorkspaceInfo, policy
 			securitySensitiveFiles: files.filter((file) => file.securitySensitive).length,
 			staticSiteRoots: staticSites.length,
 			byKind,
+			ignoredByReason: counts.ignoredByReason,
 		},
 	};
 }
 
 export function inventoryFiles(
 	inventory: FileInventory,
-	opts: { kind?: InventoryFileKind; includeGenerated?: boolean } = {},
+	opts: { kind?: InventoryFileKind; includeGenerated?: boolean; includeIgnored?: boolean; ext?: string } = {},
 ): InventoryFile[] {
-	return inventory.files.filter((file) => {
+	const pool = opts.includeIgnored ? [...inventory.files, ...inventory.ignoredFiles] : inventory.files;
+	return pool.filter((file) => {
 		if (opts.kind && file.kind !== opts.kind) return false;
+		if (opts.ext && file.ext !== opts.ext) return false;
 		if (!opts.includeGenerated && file.generated) return false;
 		return true;
 	});
@@ -137,21 +163,37 @@ export function inventorySourceFiles(inventory: FileInventory, opts: { includeTe
 			if (file.generated || file.size > 1_000_000) return false;
 			return true;
 		})
-		.map((file) => {
-			const raw = readInventoryText(file);
-			const isSfc = file.ext === ".vue" || file.ext === ".svelte";
-			const content = isSfc ? extractScript(raw) : raw;
-			return {
-				path: file.path,
-				fullPath: file.fullPath,
-				base: basename(file.path, file.ext),
-				ext: file.ext,
-				content,
-				rawContent: isSfc ? raw : undefined,
-				lines: content.split("\n").length,
-				isTest: file.isTest,
-			};
-		});
+		.map(toSourceFile);
+}
+
+/** Test files only, from the one inventory. Replaces getTestFiles(cwd). */
+export function inventoryTestFiles(inventory: FileInventory): SourceFile[] {
+	return inventorySourceFiles(inventory, { includeTests: true }).filter((file) => file.isTest);
+}
+
+/** Whole-repo file universe — the inventory equivalent of collectAllFiles(). For
+ *  checks that legitimately look beyond source (secrets, repo hygiene). */
+export function inventoryAllFiles(inventory: FileInventory, opts: { extraExts?: boolean; includeGenerated?: boolean } = {}): SourceFile[] {
+	const exts = opts.extraExts ? ALL_TEXT_EXTS : CODE_EXTS;
+	return inventory.files
+		.filter((file) => exts.has(file.ext) && file.size <= 1_000_000 && (opts.includeGenerated || !file.generated))
+		.map(toSourceFile);
+}
+
+function toSourceFile(file: InventoryFile): SourceFile {
+	const raw = readInventoryText(file);
+	const isSfc = file.ext === ".vue" || file.ext === ".svelte";
+	const content = isSfc ? extractScript(raw) : raw;
+	return {
+		path: file.path,
+		fullPath: file.fullPath,
+		base: basename(file.path, file.ext),
+		ext: file.ext,
+		content,
+		rawContent: isSfc ? raw : undefined,
+		lines: content.split("\n").length,
+		isTest: file.isTest,
+	};
 }
 
 function walk(
@@ -160,7 +202,8 @@ function walk(
 	workspace: WorkspaceInfo,
 	policy: EffectiveScanPolicy,
 	out: InventoryFile[],
-	counts: { totalFiles: number; ignoredFiles: number; ignoredDirectories: number },
+	rejected: InventoryFile[],
+	counts: WalkCounts,
 ): void {
 	const dir = prefix ? join(cwd, prefix) : cwd;
 	let entries: string[];
@@ -180,21 +223,31 @@ function walk(
 			if (stat.isDirectory()) {
 				if (decision.ignored) {
 					counts.ignoredDirectories++;
+					countReasons(counts, decision.reasons);
 					continue;
 				}
-				walk(cwd, relPath, workspace, policy, out, counts);
+				walk(cwd, relPath, workspace, policy, out, rejected, counts);
 				continue;
 			}
 
 			counts.totalFiles++;
 			if (decision.excluded) {
 				counts.ignoredFiles++;
+				countReasons(counts, decision.reasons);
+				rejected.push(classifyFile(relPath, fullPath, stat.size, workspace, decision));
 				continue;
 			}
 			out.push(classifyFile(relPath, fullPath, stat.size, workspace, decision));
 		} catch {
 			/* skip unreadable paths */
 		}
+	}
+}
+
+function countReasons(counts: WalkCounts, reasons: string[]): void {
+	for (const reason of reasons) {
+		if (reason === "security-sensitive") continue; // not a reason to skip anything
+		counts.ignoredByReason[reason] = (counts.ignoredByReason[reason] ?? 0) + 1;
 	}
 }
 

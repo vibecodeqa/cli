@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { lintSource } from "@secretlint/core";
 import { creator as secretlintPreset } from "@secretlint/secretlint-rule-preset-recommend";
+import { type FileInventory, inventoryAllFiles } from "../file-inventory.js";
 import { collectAllFiles, isIgnoredPath } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -222,8 +223,18 @@ async function scanSecretlint(files: ScanFile[], add: (iss: Issue) => void): Pro
 /** Built-in scan: curated patterns always run because they cover LLM/service key
  *  formats that a local gitleaks version may not know yet. secretlint is only
  *  needed when gitleaks is unavailable. */
-async function scanBuiltIn(cwd: string, includeSecretlint: boolean, alreadyFound: Issue[] = []): Promise<Issue[]> {
-	const files = collectAllFiles(cwd, { extraExts: true }).filter((sf) => !sf.path.includes("__mock"));
+async function scanBuiltIn(
+	cwd: string,
+	includeSecretlint: boolean,
+	alreadyFound: Issue[] = [],
+	inventory?: FileInventory,
+): Promise<Issue[]> {
+	// The scan-wide inventory when there is one; the legacy walk only for direct
+	// callers. The .env audit below deliberately reads outside both — a committed
+	// .env is the finding, and the policy's security override exists to allow it.
+	const files = (inventory ? inventoryAllFiles(inventory, { extraExts: true }) : collectAllFiles(cwd, { extraExts: true })).filter(
+		(sf) => !sf.path.includes("__mock"),
+	);
 	const issues: Issue[] = [];
 	// Seed the dedup set with what gitleaks already reported so a secret found by
 	// both tools at the same location isn't counted twice (built-in patterns now
@@ -241,7 +252,7 @@ async function scanBuiltIn(cwd: string, includeSecretlint: boolean, alreadyFound
 	return issues;
 }
 
-export async function runSecrets(cwd: string): Promise<CheckResult> {
+export async function runSecrets(cwd: string, inventory?: FileInventory): Promise<CheckResult> {
 	const start = Date.now();
 	const issues: Issue[] = [];
 
@@ -249,7 +260,7 @@ export async function runSecrets(cwd: string): Promise<CheckResult> {
 	const gitleaksResult = tryGitleaks(cwd, issues);
 	const tool = gitleaksResult ? "gitleaks" : "secretlint";
 
-	issues.push(...(await scanBuiltIn(cwd, !gitleaksResult, issues)));
+	issues.push(...(await scanBuiltIn(cwd, !gitleaksResult, issues, inventory)));
 
 	// ── .env file audit ──
 	const envFiles = [".env", ".env.local", ".env.production", ".env.development"];

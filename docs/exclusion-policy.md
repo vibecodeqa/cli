@@ -81,6 +81,65 @@ intentional: `.env` being ignored by git is good hygiene, but it must not preven
 security analyzers from inspecting it. Directory `.gitignore` rules are imported
 because they usually describe generated or bulky traversal boundaries.
 
+## The File Inventory
+
+The policy decides; the `FileInventory` is the answer it produced. `core.ts`
+builds exactly one per scan, before any runner runs, and hands it to every
+runner that consumes files. A runner asks the inventory for the files it needs
+— it does not walk the repo.
+
+```ts
+inventorySourceFiles(inv, { includeTests })  // source (and test) files
+inventoryTestFiles(inv)                      // test files only
+inventoryAllFiles(inv, { extraExts })        // whole-repo universe
+inventoryFiles(inv, { kind, ext, includeGenerated, includeIgnored })
+```
+
+`inventory.files` is what the scan may look at. `inventory.ignoredFiles` is what
+the walk reached and the policy rejected, each entry carrying its reason codes.
+Ignored *directories* are pruned whole and never enumerated — that is the
+traversal boundary, and it is what keeps `node_modules` off the heap — so the
+rejected list stays small: lockfiles, minified bundles, source maps, generated
+`.g.dart`.
+
+That list exists for one narrow case: a check that *measures* something the scan
+otherwise excludes. `flutter` reports a generated-to-handwritten Dart ratio, so
+it needs `*.g.dart` paths the policy rejects. It asks the inventory with
+`includeIgnored: true` rather than re-walking the repo behind a private skip
+list. Reach for it only with that kind of justification.
+
+Report metadata carries `meta.fileInventory` with counts by class (`byKind`) and
+by ignored reason (`ignoredByReason`), so a reader can audit what the scan looked
+at and why it skipped the rest.
+
+### Walks that remain, and why
+
+Every runner that scans repo *content* takes the inventory. What is left is
+deliberate:
+
+- **External tool adapters** — `lint` (biome/eslint/dart analyze) and `types`
+  (tsc) let the tool do its own discovery, then normalize emitted paths to
+  repo-root-relative and filter them through `isIgnoredPath()`. Same policy,
+  applied after the fact.
+- **Targeted, non-recursive reads of known paths** — `env-validation` listing
+  root `.env*`, `container-health` listing root Dockerfiles/compose files,
+  `lint` and `best-practices` reading `.github/workflows/`, `sqlite-d1` reading
+  a migrations directory. These name a specific location; they cannot leak an
+  ignored subtree.
+- **`dependencies` reading `node_modules/`** — the dependency tree is
+  deliberately outside the scan universe, and inspecting it is the whole check.
+- **`flutter`'s `findPubspecDirs`** — project discovery, not file scanning.
+- **Legacy fallbacks** — several runners keep their old walk for direct callers
+  that never ran a scan and so have no inventory. The scan never takes those
+  paths; `core.ts` always passes the inventory.
+
+`analyzer-conformance.test.ts` enforces the boundary: it runs a full scan over a
+fixture seeded with `dist/`, `coverage/`, `playwright-report/`, `node_modules/`,
+`.claude/worktrees/`, a config-ignored directory, a lockfile and a minified
+bundle, then asserts that no finding from any check names an excluded path and
+that every finding names a file the inventory holds (or one of a short list of
+repo-level markers a check may point at when the file does not exist).
+
 ## Reason Codes
 
 Every policy match records evidence with a source, matched value, precedence,

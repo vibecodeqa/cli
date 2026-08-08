@@ -8,6 +8,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { type FileInventory, inventoryFiles } from "../file-inventory.js";
 import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
@@ -32,9 +33,9 @@ interface FlutterPackage {
 	assetEntries: number;
 }
 
-export function runFlutter(cwd: string, workspace?: WorkspaceInfo): CheckResult {
+export function runFlutter(cwd: string, workspace?: WorkspaceInfo, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
-	const packages = findFlutterPackages(cwd, workspace);
+	const packages = findFlutterPackages(cwd, workspace, inventory);
 
 	if (packages.length === 0) {
 		return {
@@ -172,7 +173,7 @@ function packageIssues(pkg: FlutterPackage, rootAnalysis: boolean): Issue[] {
 	return issues;
 }
 
-function findFlutterPackages(cwd: string, workspace?: WorkspaceInfo): FlutterPackage[] {
+function findFlutterPackages(cwd: string, workspace?: WorkspaceInfo, inventory?: FileInventory): FlutterPackage[] {
 	const candidates = new Set<string>();
 	const projectCandidates = (workspace?.projects ?? [])
 		.filter((project) => project.stack.language === "dart" || project.stack.framework === "flutter")
@@ -204,7 +205,7 @@ function findFlutterPackages(cwd: string, workspace?: WorkspaceInfo): FlutterPac
 		const isFlutter = hasPubspecKey(pubspec, "flutter");
 		const hasFlutterTest = hasPubspecKey(pubspec, "flutter_test");
 		if (!isFlutter && !hasFlutterTest) continue;
-		const files = walkDartFiles(dir);
+		const files = inventory ? inventoryDartFiles(inventory, relPath) : walkDartFiles(dir);
 		const testFiles = files.filter((f) => f.startsWith("test/") || f.startsWith("integration_test/") || f.startsWith("test_driver/"));
 		packages.push({
 			name: readPubspecName(pubspec) || (relPath === "." ? "." : relPath.split("/").at(-1) || relPath),
@@ -258,6 +259,21 @@ function findPubspecDirs(root: string, dir: string, depth: number): string[] {
 		found.push(...findPubspecDirs(root, full, depth - 1));
 	}
 	return found;
+}
+
+/** Package-relative .dart paths from the scan-wide inventory.
+ *
+ *  Generated Dart (`*.g.dart` and friends) is excluded by the shared policy, but
+ *  this check *measures* it — the generated-to-handwritten ratio is the finding.
+ *  So it reads the inventory's rejected-file list rather than re-walking the repo
+ *  with a private skip list. Ignored directories (build/, .dart_tool/) were
+ *  pruned during the walk and cannot come back through here. */
+function inventoryDartFiles(inventory: FileInventory, packagePath: string): string[] {
+	const prefix = packagePath === "." || packagePath === "" ? "" : `${packagePath.replace(/\/+$/, "")}/`;
+	return inventoryFiles(inventory, { ext: ".dart", includeGenerated: true, includeIgnored: true })
+		.filter((file) => file.path.startsWith(prefix))
+		.map((file) => file.path.slice(prefix.length))
+		.sort();
 }
 
 function walkDartFiles(dir: string, prefix = ""): string[] {

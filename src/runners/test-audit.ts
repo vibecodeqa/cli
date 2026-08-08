@@ -21,6 +21,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { type FileInventory, inventoryTestFiles } from "../file-inventory.js";
 import { getTestFiles } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -35,7 +36,7 @@ interface AuditCache {
 	files: Record<string, CacheEntry>;
 }
 
-export async function runTestAudit(cwd: string): Promise<CheckResult> {
+export async function runTestAudit(cwd: string, inventory?: FileInventory): Promise<CheckResult> {
 	const start = Date.now();
 	const proKey = process.env.VCQA_PRO_KEY || "";
 
@@ -56,7 +57,7 @@ export async function runTestAudit(cwd: string): Promise<CheckResult> {
 		};
 	}
 
-	const testFiles = getTestFiles(cwd);
+	const testFiles = inventory ? inventoryTestFiles(inventory) : getTestFiles(cwd);
 	if (testFiles.length === 0) {
 		return {
 			name: "test-audit",

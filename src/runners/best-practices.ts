@@ -12,6 +12,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { type FileInventory, inventoryAllFiles } from "../file-inventory.js";
 import { collectAllFiles, readDeps } from "../fs-utils.js";
 import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
@@ -512,7 +513,7 @@ function checkGitPractices(cwd: string, has: HasFn, read: ReadFn): CategoryResul
 	return { practices, followed, issues };
 }
 
-function checkMonitoring(cwd: string): CategoryResult {
+function checkMonitoring(cwd: string, inventory?: FileInventory): CategoryResult {
 	const issues: Issue[] = [];
 	let practices = 0;
 	let followed = 0;
@@ -538,7 +539,7 @@ function checkMonitoring(cwd: string): CategoryResult {
 	// Health check endpoint — only for server/API/worker projects
 	if (isServer) {
 		practices++;
-		const allFiles = collectAllFiles(cwd);
+		const allFiles = inventory ? inventoryAllFiles(inventory) : collectAllFiles(cwd);
 		const hasHealthEndpoint = allFiles.some((f) =>
 			/["'`]\/health["'`]|["'`]\/healthz["'`]|["'`]\/readyz["'`]|\.get\s*\(\s*["'`]\/health/.test(f.content),
 		);
@@ -636,7 +637,7 @@ function checkAPIConfig(cwd: string, read: ReadFn): CategoryResult {
 	return { practices, followed, issues };
 }
 
-export function runBestPractices(cwd: string, workspace?: WorkspaceInfo): CheckResult {
+export function runBestPractices(cwd: string, workspace?: WorkspaceInfo, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
 
 	const has: HasFn = (f: string) => existsSync(join(cwd, f));
@@ -657,7 +658,7 @@ export function runBestPractices(cwd: string, workspace?: WorkspaceInfo): CheckR
 		checkTesting(has, read),
 		checkDocker(has, read),
 		checkGitPractices(cwd, has, read),
-		checkMonitoring(cwd),
+		checkMonitoring(cwd, inventory),
 		checkAPIConfig(cwd, read),
 	];
 
