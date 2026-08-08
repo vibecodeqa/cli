@@ -27,7 +27,7 @@ reproduce (and which local publishes would undermine).
 
 To cut a release:
 
-1. Land the code fix on `main` (via PR or push).
+1. Land the code fix on `main`.
 2. Bump `version` in `package.json` and add a `CHANGELOG.md` entry.
 3. Push to `main`.
 
