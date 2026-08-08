@@ -18,6 +18,27 @@ node dist/cli.js --skip-tests --top # fast scan + top issues
 node dist/cli.js --help             # show all flags
 ```
 
+## Delivery — trunk-based, no pull requests
+
+Commit directly to `main`. Do not create branches and do not open pull requests —
+not for features, not for fixes, not for dependency bumps. There is no review gate
+to satisfy and no PR path to npm: `main` is the only ref that ships.
+
+This applies to bots as well as people. Dependabot **version updates** were removed
+on 2026-08-08 (#84) — `.github/dependabot.yml` is deleted and the 7 PRs it had open
+were closed unmerged — so nothing opens a PR here any more. The accepted cost is
+that nothing reports stale dependencies either; run `pnpm outdated` by hand before
+a release. Two major bumps were discarded with those PRs (`actions/checkout` 4→7,
+`actions/setup-node` 4→7), so the workflow pins are now yours to watch.
+
+Dependabot **security alerts** are a different feature and are still on. They are a
+notification surface only — `automated-security-fixes` is disabled, so alerts open
+no PRs and do not conflict with this rule.
+
+`CONTRIBUTING.md` still describes a fork-and-PR flow. That is for outside
+contributors who have no write access to this repo; it is not the workflow for
+committers or agents working here.
+
 ## Releasing — CI only, never local
 
 **Never run `npm publish` locally.** Publishing is fully automated by
