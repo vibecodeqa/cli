@@ -3,7 +3,8 @@
 import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { discoveryConventions } from "./discovery-conventions.js";
-import { defaultExclusionPolicy as defaultExclusions } from "./exclusion-policy.js";
+import type { EffectiveScanPolicy } from "./scan-policy.js";
+import { evaluatePath, scanPolicyFromInputs } from "./scan-policy.js";
 
 export interface SourceFile {
 	path: string; // relative to cwd
@@ -16,10 +17,6 @@ export interface SourceFile {
 	isTest: boolean;
 }
 
-const DEFAULT_EXCLUDED_DIR_NAMES = new Set(defaultExclusions.directoryNames);
-const DEFAULT_EXCLUDED_FILE_PATTERNS = defaultExclusions.filePatterns;
-const DEFAULT_EXCLUDED_PATH_PREFIXES = defaultExclusions.generatedPathPrefixes;
-const IGNORE_HIDDEN_DIRECTORIES = Boolean(defaultExclusions.ignoreHiddenDirectories);
 const CODE_EXTS = new Set(discoveryConventions.sourceFileExtensions);
 const ALL_EXTS = new Set([...CODE_EXTS, ".json", ".env", ".yaml", ".yml", ".toml", ".html", ".htm", ".md", ".mdx", ".txt", ".sh"]);
 
@@ -36,9 +33,31 @@ export function setGlobalSrcRoots(roots: string[] | undefined): void {
 	_globalSrcRoots = roots;
 }
 
+// Every ignore decision in this module — the walkers and the external-tool path
+// filter alike — is answered by one engine: scan-policy's evaluatePath(). This
+// module holds no second copy of the matching rules (#71). The scan installs the
+// real EffectiveScanPolicy via setGlobalScanPolicy(); callers that never ran a
+// full scan get an equivalent policy derived from the loose globals below.
+let _installedPolicy: EffectiveScanPolicy | undefined;
+let _derivedPolicy: EffectiveScanPolicy | undefined;
+
+/** Install the scan's EffectiveScanPolicy as the one the shared walkers use.
+ *  Call after setGlobalIgnore/setGlobalIgnoreNames — those reset it. */
+export function setGlobalScanPolicy(policy: EffectiveScanPolicy | undefined): void {
+	_installedPolicy = policy;
+	_derivedPolicy = undefined;
+}
+
+export function activeScanPolicy(): EffectiveScanPolicy {
+	if (_installedPolicy) return _installedPolicy;
+	_derivedPolicy ??= scanPolicyFromInputs({ ignore: _globalIgnore, ignoreNames: [..._globalIgnoreNames, ..._globalIgnoreSubpaths] });
+	return _derivedPolicy;
+}
+
 let _globalIgnore: string[] | undefined;
 export function setGlobalIgnore(patterns: string[] | undefined): void {
 	_globalIgnore = patterns;
+	setGlobalScanPolicy(undefined);
 }
 
 // Extra directory/file *names* to skip, matched per path segment exactly like
@@ -54,44 +73,10 @@ export function setGlobalIgnoreNames(names: Iterable<string> | undefined): void 
 	// a slash are matched as a slash-bounded sub-path against the relative path.
 	_globalIgnoreNames = new Set(all.filter((n) => !n.includes("/")));
 	_globalIgnoreSubpaths = all.filter((n) => n.includes("/")).map((n) => n.replace(/^\/+|\/+$/g, ""));
-}
-function matchesIgnoreSubpath(relPath: string): boolean {
-	if (_globalIgnoreSubpaths.length === 0) return false;
-	const bounded = `/${relPath}/`;
-	return _globalIgnoreSubpaths.some((sp) => bounded.includes(`/${sp}/`));
-}
-/** Parse VCQA_IGNORE (comma/newline/whitespace separated segment names). */
-export function readEnvIgnoreNames(env: string | undefined): string[] {
-	if (!env) return [];
-	return [
-		...new Set(
-			env
-				.split(/[\s,]+/)
-				.map((s) => s.trim())
-				.filter(Boolean),
-		),
-	];
+	setGlobalScanPolicy(undefined);
 }
 
-/** Read directory entries from the repo's .gitignore. File ignores are not
- *  merged globally because security checks may still need to inspect ignored
- *  secret files such as .env. */
-export function readGitIgnoreDirectoryNames(cwd: string): string[] {
-	let raw: string;
-	try {
-		raw = readFileSync(join(cwd, ".gitignore"), "utf-8");
-	} catch {
-		return [];
-	}
-	const names = raw
-		.split("\n")
-		.map((line) => line.trim())
-		.filter((line) => line && !line.startsWith("#") && !line.startsWith("!"))
-		.filter((line) => line.endsWith("/"))
-		.map((line) => line.replace(/^\/+|\/+$/g, ""))
-		.filter(Boolean);
-	return [...new Set(names)];
-}
+export { readEnvIgnoreNames, readGitIgnoreDirectoryNames } from "./scan-policy.js";
 
 /**
  * Drop any root nested inside another root in the same list, and collapse exact
@@ -177,59 +162,17 @@ function extractScript(content: string): string {
 	return scripts.length > 0 ? scripts.join("\n") : content;
 }
 
-function shouldIgnore(relPath: string): boolean {
-	if (!_globalIgnore) return false;
-	return _globalIgnore.some((pattern) => {
-		// Simple glob: "generated/**" matches "generated/foo.ts"
-		// "*.generated.ts" matches "foo.generated.ts"
-		if (pattern.endsWith("/**")) {
-			const prefix = pattern.slice(0, -3);
-			return relPath.startsWith(`${prefix}/`) || relPath === prefix;
-		}
-		if (pattern.startsWith("*")) {
-			return relPath.endsWith(pattern.slice(1));
-		}
-		return relPath.startsWith(pattern);
-	});
-}
-
-/** Whether a path (relative to the scan root) is excluded by the active ignore
- *  config — the same rules the file walker applies. External tools (biome, tsc,
- *  eslint) scan the filesystem directly and don't know our ignore, so a runner
- *  filters the paths they report through this to stay consistent with the walk. */
+/** Whether a path (relative to the scan root) is excluded by the active scan
+ *  policy — the same decision, from the same engine, that the file walker
+ *  applies. External tools (biome, tsc, eslint, gitleaks) scan the filesystem
+ *  directly and don't know our ignore, so a runner filters the paths they report
+ *  through this to stay consistent with the walk.
+ *
+ *  Security-sensitive files that are only ignored by project/user config are NOT
+ *  reported as ignored here: the policy's security override keeps them visible to
+ *  narrow security checks (see docs/exclusion-policy.md). */
 export function isIgnoredPath(relPath: string): boolean {
-	if (shouldIgnore(relPath) || matchesIgnoreSubpath(relPath) || matchesDefaultPathPrefix(relPath) || matchesDefaultFilePattern(relPath))
-		return true;
-	// A segment is ignored if it's a default exclusion, a configured ignore name, or
-	// matches the explicit hidden-directory mode from the default policy. The walker
-	// uses the same rule so external tools like Biome do not score files the rest of
-	// the scan never saw.
-	return relPath.split("/").some((seg) => {
-		if (seg === "." || seg === "..") return false;
-		return (IGNORE_HIDDEN_DIRECTORIES && seg.startsWith(".")) || DEFAULT_EXCLUDED_DIR_NAMES.has(seg) || _globalIgnoreNames.has(seg);
-	});
-}
-
-function matchesDefaultPathPrefix(relPath: string): boolean {
-	const clean = relPath.replace(/^\/+|\/+$/g, "");
-	return DEFAULT_EXCLUDED_PATH_PREFIXES.some((prefix) => clean === prefix || clean.startsWith(`${prefix}/`));
-}
-
-function matchesDefaultFilePattern(relPath: string): boolean {
-	const fileName = basename(relPath);
-	return DEFAULT_EXCLUDED_FILE_PATTERNS.some((pattern) => matchesPathPattern(relPath, fileName, pattern));
-}
-
-function matchesPathPattern(relPath: string, fileName: string, pattern: string): boolean {
-	if (pattern.startsWith("*.") || pattern.startsWith("*")) return fileName.endsWith(pattern.slice(1));
-	if (pattern.endsWith("*")) return fileName.startsWith(pattern.slice(0, -1));
-	const star = pattern.indexOf("*");
-	if (star >= 0) {
-		const before = pattern.slice(0, star);
-		const after = pattern.slice(star + 1);
-		return fileName.startsWith(before) && fileName.endsWith(after);
-	}
-	return relPath === pattern || fileName === pattern;
+	return evaluatePath(activeScanPolicy(), relPath).excluded;
 }
 
 /** Normalize a file path emitted by an external tool into a repo-root-relative
@@ -258,17 +201,17 @@ function walk(dir: string, cwd: string, out: SourceFile[], exts: Set<string>, se
 }
 
 function walkEntry(dir: string, entry: string, cwd: string, out: SourceFile[], exts: Set<string>, seen: Set<string>): void {
-	if (shouldSkipEntryName(entry)) return;
 	const full = join(dir, entry);
 	const relPath = full.replace(`${cwd}/`, "");
-	if (shouldIgnore(relPath) || matchesIgnoreSubpath(relPath) || matchesDefaultPathPrefix(relPath) || matchesDefaultFilePattern(relPath))
-		return;
+	// One engine decides. A path the policy excludes is never walked and never
+	// collected, whichever rule matched it.
+	if (evaluatePath(activeScanPolicy(), relPath).excluded) return;
 	try {
 		// Skip symlinks to prevent traversal attacks (H3)
 		if (lstatSync(full).isSymbolicLink()) return;
 		const stat = statSync(full);
 		if (stat.isDirectory()) {
-			if (!shouldSkipDirectoryName(entry)) walk(full, cwd, out, exts, seen);
+			walk(full, cwd, out, exts, seen);
 			return;
 		}
 		pushSourceFile(entry, full, relPath, stat.size, out, exts, seen);
@@ -317,12 +260,4 @@ function isTestPath(entry: string, relPath: string): boolean {
 		relPath.includes("/tests/") ||
 		relPath.startsWith("tests/")
 	);
-}
-
-function shouldSkipEntryName(entry: string): boolean {
-	return DEFAULT_EXCLUDED_DIR_NAMES.has(entry) || _globalIgnoreNames.has(entry);
-}
-
-function shouldSkipDirectoryName(entry: string): boolean {
-	return IGNORE_HIDDEN_DIRECTORIES && entry.startsWith(".");
 }

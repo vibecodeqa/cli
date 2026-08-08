@@ -1,7 +1,7 @@
-import { basename } from "node:path";
+import { readFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import type { VcqaConfig } from "./config.js";
 import { defaultExclusionPolicy as defaultExclusions } from "./exclusion-policy.js";
-import { readEnvIgnoreNames, readGitIgnoreDirectoryNames } from "./fs-utils.js";
 
 export type PolicyAction = "include" | "exclude" | "include-security-sensitive";
 export type PathClassification = "normal" | "generated" | "lockfile" | "security-sensitive";
@@ -84,6 +84,39 @@ const GENERATED_REASON_CODES = new Set<PolicyReasonCode>([
 ]);
 const SECURITY_OVERRIDABLE_REASONS = new Set<PolicyReasonCode>(["config-ignore", "user-ignore", "env-ignore", "gitignore-directory"]);
 
+/** Parse VCQA_IGNORE (comma/newline/whitespace separated segment names). */
+export function readEnvIgnoreNames(env: string | undefined): string[] {
+	if (!env) return [];
+	return [
+		...new Set(
+			env
+				.split(/[\s,]+/)
+				.map((s) => s.trim())
+				.filter(Boolean),
+		),
+	];
+}
+
+/** Read directory entries from the repo's .gitignore. File ignores are not
+ *  merged globally because security checks may still need to inspect ignored
+ *  secret files such as .env. */
+export function readGitIgnoreDirectoryNames(cwd: string): string[] {
+	let raw: string;
+	try {
+		raw = readFileSync(join(cwd, ".gitignore"), "utf-8");
+	} catch {
+		return [];
+	}
+	const names = raw
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line && !line.startsWith("#") && !line.startsWith("!"))
+		.filter((line) => line.endsWith("/"))
+		.map((line) => line.replace(/^\/+|\/+$/g, ""))
+		.filter(Boolean);
+	return [...new Set(names)];
+}
+
 export function buildEffectiveScanPolicy(
 	cwd: string,
 	config: VcqaConfig,
@@ -104,6 +137,40 @@ export function buildEffectiveScanPolicy(
 
 export function policyIgnoreNames(policy: EffectiveScanPolicy): string[] {
 	return [...new Set([...policy.userIgnoreNames, ...policy.envIgnoreNames, ...policy.gitignoreDirectoryNames])];
+}
+
+/** Build a policy from loose ignore inputs, for callers that never ran a full
+ *  scan (direct runner calls, tests, external-tool path filtering). Same
+ *  defaults and same matcher as the scan-built policy — only the provenance of
+ *  the project/user inputs is coarser. */
+export function scanPolicyFromInputs(inputs: { ignore?: string[]; ignoreNames?: Iterable<string> } = {}): EffectiveScanPolicy {
+	return {
+		version: Number(defaultExclusions.version ?? 1),
+		ignoreHiddenDirectories: Boolean(defaultExclusions.ignoreHiddenDirectories),
+		defaultDirectoryNames: [...defaultExclusions.directoryNames],
+		defaultFilePatterns: [...defaultExclusions.filePatterns],
+		generatedPathPrefixes: [...defaultExclusions.generatedPathPrefixes],
+		configIgnorePatterns: [...(inputs.ignore ?? [])],
+		userIgnoreNames: [...new Set(inputs.ignoreNames ?? [])],
+		envIgnoreNames: [],
+		gitignoreDirectoryNames: [],
+	};
+}
+
+/** One-line, human-readable answer to "why was this path skipped?". Every
+ *  excluded path is explainable: the reason codes come straight from the
+ *  evidence the policy recorded while deciding. */
+export function explainPath(policy: EffectiveScanPolicy, relPath: string): string {
+	const decision = evaluatePath(policy, relPath);
+	if (decision.action === "include") return `included: no ignore rule matched (classification: ${decision.classification})`;
+	const evidence = decision.evidence
+		.filter((item) => item.source !== "security-sensitive")
+		.map((item) => `${item.reason} via ${item.source} "${item.value}"`)
+		.join("; ");
+	if (decision.action === "include-security-sensitive") {
+		return `included for security-sensitive checks only (ignored for normal analyzers by ${evidence})`;
+	}
+	return `excluded: ${evidence}`;
 }
 
 export function evaluatePath(policy: EffectiveScanPolicy, relPath: string): PolicyDecision {

@@ -2,8 +2,8 @@ import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node
 import { basename, dirname, extname, join } from "node:path";
 import { discoveryConventions } from "./discovery-conventions.js";
 import type { SourceFile } from "./fs-utils.js";
-import type { EffectiveScanPolicy } from "./scan-policy.js";
-import { evaluatePath } from "./scan-policy.js";
+import type { EffectiveScanPolicy, PathClassification, PolicyDecision } from "./scan-policy.js";
+import { evaluatePath, explainPath } from "./scan-policy.js";
 import type { ProjectContext, WorkspaceInfo } from "./types.js";
 
 export type InventoryFileKind = "source" | "test" | "html" | "doc" | "config" | "env" | "lockfile" | "asset" | "unknown";
@@ -50,6 +50,10 @@ interface StaticSiteCollector {
 
 export interface FileInventory {
 	root: string;
+	/** The one EffectiveScanPolicy this inventory was built from. Carried here so
+	 *  every runner that receives the inventory receives the same policy, and can
+	 *  classify or explain a path the walk never produced (#71). */
+	policy: EffectiveScanPolicy;
 	files: InventoryFile[];
 	staticSites: StaticSiteContext[];
 	summary: {
@@ -73,6 +77,7 @@ export function buildFileInventory(cwd: string, workspace: WorkspaceInfo, policy
 	const staticSites = detectStaticSiteContexts(cwd, workspace, files);
 	return {
 		root: cwd,
+		policy,
 		files,
 		staticSites,
 		summary: {
@@ -97,6 +102,31 @@ export function inventoryFiles(
 		if (!opts.includeGenerated && file.generated) return false;
 		return true;
 	});
+}
+
+/** Is this repo-relative path excluded from the scan? Answered by the same
+ *  policy the inventory was built from — the `ctx.isIgnored(path)` surface. */
+export function inventoryIsIgnored(inventory: FileInventory, relPath: string): boolean {
+	return evaluatePath(inventory.policy, relPath).excluded;
+}
+
+/** Full policy decision for a path, whether or not the walk produced it —
+ *  the `ctx.classify(path)` surface. */
+export function inventoryClassify(inventory: FileInventory, relPath: string): PolicyDecision & { classification: PathClassification } {
+	return evaluatePath(inventory.policy, relPath);
+}
+
+/** Human-readable reason a path was kept or skipped. */
+export function inventoryExplain(inventory: FileInventory, relPath: string): string {
+	return explainPath(inventory.policy, relPath);
+}
+
+/** Does the inventory know this repo-relative path? Findings that name a file the
+ *  inventory never saw are either repo-level or came from a walk that bypassed the
+ *  policy. */
+export function inventoryHas(inventory: FileInventory, relPath: string): boolean {
+	const clean = relPath.replace(/\\/g, "/").replace(/^\.\/|^\/+/g, "");
+	return inventory.files.some((file) => file.path === clean);
 }
 
 export function inventorySourceFiles(inventory: FileInventory, opts: { includeTests?: boolean } = {}): SourceFile[] {

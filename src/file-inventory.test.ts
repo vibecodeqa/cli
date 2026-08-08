@@ -9,8 +9,9 @@ import {
 	defaultExclusionPolicy as defaultExclusions,
 	defaultExclusionTokens,
 } from "./exclusion-policy.js";
-import { buildFileInventory } from "./file-inventory.js";
-import { buildEffectiveScanPolicy, evaluatePath, scanPolicySummary } from "./scan-policy.js";
+import { buildFileInventory, inventoryClassify, inventoryExplain, inventoryHas, inventoryIsIgnored } from "./file-inventory.js";
+import { collectAllFiles, isIgnoredPath, setGlobalIgnore, setGlobalIgnoreNames, setGlobalScanPolicy } from "./fs-utils.js";
+import { buildEffectiveScanPolicy, evaluatePath, explainPath, scanPolicySummary } from "./scan-policy.js";
 
 let dir: string;
 
@@ -19,6 +20,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	setGlobalIgnore(undefined);
+	setGlobalIgnoreNames([]);
+	setGlobalScanPolicy(undefined);
 	rmSync(dir, { recursive: true, force: true });
 });
 
@@ -213,6 +217,82 @@ describe("effective scan policy and file inventory", () => {
 		expect(inventory.summary.byKind).toMatchObject({ env: 1, html: 1, source: 1, test: 1 });
 		expect(inventory.summary.ignoredDirectories).toBeGreaterThanOrEqual(2);
 		expect(inventory.summary.securitySensitiveFiles).toBe(1);
+	});
+
+	it("carries the policy on the inventory so runners can classify and explain any path", () => {
+		writeFileSync(join(dir, ".gitignore"), "tmp-output/\n");
+		mkdirSync(join(dir, "src"), { recursive: true });
+		writeFileSync(join(dir, "package.json"), "{}");
+		writeFileSync(join(dir, "src", "index.ts"), "export const x = 1;\n");
+		writeFileSync(join(dir, ".env"), "TOKEN=secret\n");
+		const policy = buildEffectiveScanPolicy(dir, { ignore: [".env"] });
+		const inventory = buildFileInventory(dir, detectWorkspace(dir), policy);
+
+		expect(inventory.policy).toBe(policy);
+		expect(inventoryIsIgnored(inventory, "dist/app.js")).toBe(true);
+		expect(inventoryIsIgnored(inventory, "src/index.ts")).toBe(false);
+		// Ignored by config, still visible to security checks — so not "excluded".
+		expect(inventoryIsIgnored(inventory, ".env")).toBe(false);
+		expect(inventoryClassify(inventory, ".claude/worktrees/a/x.ts")).toMatchObject({
+			action: "exclude",
+			classification: "generated",
+			reasons: ["agent-artifact"],
+		});
+		expect(inventoryHas(inventory, "src/index.ts")).toBe(true);
+		expect(inventoryHas(inventory, "dist/app.js")).toBe(false);
+		expect(inventoryExplain(inventory, "tmp-output/report.html")).toBe(
+			'excluded: gitignore-directory via gitignore-directory "tmp-output"',
+		);
+		expect(inventoryExplain(inventory, ".env")).toBe(
+			'included for security-sensitive checks only (ignored for normal analyzers by config-ignore via config-ignore ".env")',
+		);
+		expect(inventoryExplain(inventory, "src/index.ts")).toBe("included: no ignore rule matched (classification: normal)");
+	});
+
+	it("answers every ignore question from one engine — walker, tool filter, and inventory agree", () => {
+		mkdirSync(join(dir, "src", "generated"), { recursive: true });
+		mkdirSync(join(dir, "src", "keep"), { recursive: true });
+		mkdirSync(join(dir, "dist"), { recursive: true });
+		mkdirSync(join(dir, ".claude", "worktrees", "agent-a"), { recursive: true });
+		mkdirSync(join(dir, "node_modules", "pkg"), { recursive: true });
+		mkdirSync(join(dir, "local-cache"), { recursive: true });
+		writeFileSync(join(dir, "package.json"), "{}");
+		writeFileSync(join(dir, "src", "keep", "index.ts"), "export const x = 1;\n");
+		writeFileSync(join(dir, "src", "generated", "api.ts"), "export const api = 1;\n");
+		writeFileSync(join(dir, "src", "keep", "bundle.min.js"), "var a=1;\n");
+		writeFileSync(join(dir, "dist", "app.js"), "var a=1;\n");
+		writeFileSync(join(dir, ".claude", "worktrees", "agent-a", "leak.ts"), "export const y = 2;\n");
+		writeFileSync(join(dir, "node_modules", "pkg", "index.js"), "module.exports = 1;\n");
+		writeFileSync(join(dir, "local-cache", "blob.ts"), "export const z = 3;\n");
+
+		const policy = buildEffectiveScanPolicy(dir, { ignore: ["src/generated/**"] }, { ignoreNames: ["local-cache"] });
+		setGlobalIgnore(["src/generated/**"]);
+		setGlobalIgnoreNames(["local-cache"]);
+		setGlobalScanPolicy(policy);
+
+		const inventory = buildFileInventory(dir, detectWorkspace(dir), policy);
+		const walked = collectAllFiles(dir, { extraExts: true }).map((file) => file.path);
+		const candidates = [
+			"src/keep/index.ts",
+			"src/generated/api.ts",
+			"src/keep/bundle.min.js",
+			"dist/app.js",
+			".claude/worktrees/agent-a/leak.ts",
+			"node_modules/pkg/index.js",
+			"local-cache/blob.ts",
+		];
+
+		// The shared walker's universe is exactly the paths the policy includes.
+		expect(walked.sort()).toEqual(["package.json", "src/keep/index.ts"]);
+		expect(candidates.filter((path) => !isIgnoredPath(path))).toEqual(["src/keep/index.ts"]);
+		expect(candidates.filter((path) => inventory.files.some((file) => file.path === path))).toEqual(["src/keep/index.ts"]);
+		// Same answer, same reasons, whichever door you knock on.
+		for (const path of candidates) {
+			expect(isIgnoredPath(path), path).toBe(evaluatePath(policy, path).excluded);
+			expect(isIgnoredPath(path), path).toBe(inventoryIsIgnored(inventory, path));
+		}
+		expect(explainPath(policy, "local-cache/blob.ts")).toBe('excluded: user-ignore via user-ignore "local-cache"');
+		expect(explainPath(policy, "src/keep/bundle.min.js")).toBe('excluded: generated-file via default-file-pattern "*.min.js"');
 	});
 
 	it("detects static site roots, public roots, and output roots with evidence", () => {

@@ -10,6 +10,44 @@ copies of directory names. External tool adapters should normalize emitted paths
 to repo-root-relative paths, then filter findings through the same effective
 policy behavior.
 
+## One Engine
+
+`evaluatePath(policy, relPath)` in `src/scan-policy.ts` is the only place the
+matching rules live. Everything else calls it:
+
+- `buildFileInventory()` walks with it, so the inventory is the policy's own
+  answer about the repo.
+- `fs-utils`' shared walkers (`collectSourceFiles`, `collectAllFiles`,
+  `getProductionFiles`, `getTestFiles`) call it per entry.
+- `isIgnoredPath()` — the filter runners apply to Biome/ESLint/tsc/gitleaks
+  output — is `evaluatePath(...).excluded` and nothing else.
+
+`core.ts` installs the scan's policy with `setGlobalScanPolicy()` after
+`setGlobalIgnore()`/`setGlobalIgnoreNames()` (both of which reset it). A caller
+that never ran a full scan — a direct runner call or a unit test — gets an
+equivalent policy derived from those globals via `scanPolicyFromInputs()`, so
+the rules are identical and only the evidence provenance is coarser.
+
+Runners receive the policy through the `FileInventory` they are handed:
+
+```ts
+inventory.policy                          // the EffectiveScanPolicy itself
+inventoryIsIgnored(inventory, path)       // ctx.isIgnored(path)
+inventoryClassify(inventory, path)        // ctx.classify(path) — full decision
+inventoryExplain(inventory, path)         // one-line reason, for UI and logs
+inventoryHas(inventory, path)             // did the walk actually produce it?
+```
+
+Do not add a second copy of the directory names, glob matching, or hidden-file
+rules anywhere. If a runner needs a different universe, it needs a different
+*query* against the inventory, not a different *policy*.
+
+Note that `isIgnoredPath()` reports the `exclude` action only. A
+security-sensitive file that is merely ignored by project config
+(`include-security-sensitive`) is not "ignored" for this purpose — that is the
+override working as designed, and secrets findings in a config-ignored `.env`
+survive the filter.
+
 ## Effective Precedence
 
 The policy records an action and evidence for every evaluated path:
@@ -59,7 +97,9 @@ and reason code. Current reason codes include:
 Reports expose a compact `meta.scanPolicy` summary with counts, values, reason
 codes, precedence labels, and the security override mode. The summary is meant
 for UI display and auditability; detailed per-path evidence is available from
-`evaluatePath()`.
+`evaluatePath()`, and a one-line human-readable form from `explainPath()`. Every
+path the scan skips is explainable this way — including paths the walk never
+produced, since the policy can be asked about a path directly.
 
 App, MCP, and plugin consumers should read the shared registry from:
 

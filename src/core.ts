@@ -13,7 +13,7 @@ import { CHECK_META, type CheckMeta, getCheckMeta } from "./check-meta.js";
 import { getCheckIgnore, isCheckEnabled, loadConfig, type VcqaConfig } from "./config.js";
 import { detectRepoUrl, detectStack, detectWorkspace } from "./detect.js";
 import { buildFileInventory } from "./file-inventory.js";
-import { setGlobalIgnore, setGlobalIgnoreNames, setGlobalSrcRoots } from "./fs-utils.js";
+import { setGlobalIgnore, setGlobalIgnoreNames, setGlobalScanPolicy, setGlobalSrcRoots } from "./fs-utils.js";
 import { withIssueFingerprints } from "./issue-fingerprint.js";
 import { runAccessibility } from "./runners/accessibility.js";
 import { runArchitecture } from "./runners/architecture.js";
@@ -123,6 +123,10 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 	// monitor's user "Ignored paths"). Merged so the scan skips the same folders
 	// the watcher and graphs do.
 	setGlobalIgnoreNames(policyIgnoreNames(scanPolicy));
+	// Last: the shared walkers and the external-tool path filter now answer from
+	// the scan's own EffectiveScanPolicy, not a second copy of the rules. Must
+	// follow the two setters above — they reset the installed policy.
+	setGlobalScanPolicy(scanPolicy);
 
 	const srcRoots = workspace.isMonorepo ? workspace.srcRoots : undefined;
 	const skipTests = options.skipTests ?? false;
