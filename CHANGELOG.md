@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.55.0 (2026-08-09)
+
+### One file universe, one ignore engine
+A runner could previously decide for itself which files existed. That is why a
+scan could report `dangerouslySetInnerHTML` in `dist/`, JSDoc gaps in
+`.claude/worktrees/`, or hardcoded colours in a config-ignored folder — each
+walker applied its own approximation of the ignore rules, and they disagreed.
+- **Changed**: `evaluatePath()` is now the only implementation of the ignore
+  rules. `fs-utils` no longer keeps a second copy of the directory names, glob
+  matching and file patterns; the shared walkers and `isIgnoredPath()` — the
+  filter applied to Biome/ESLint/tsc/gitleaks output — both answer from the
+  scan's own `EffectiveScanPolicy`. An external tool and the file walk can no
+  longer disagree about what the scan may see (#71).
+- **Changed**: the five remaining runners that discovered files themselves —
+  `secrets`, `best-practices`, `duplication`, `test-audit`, `flutter` — now
+  consume the scan-wide `FileInventory`. Every runner that scans repo content
+  takes it; what still walks (external tool adapters, targeted reads of known
+  paths, `dependencies` inspecting `node_modules` on purpose) is documented in
+  `docs/exclusion-policy.md` (#70).
+- **Added**: `FileInventory` carries the policy it was built from, plus
+  `inventoryIsIgnored` / `inventoryClassify` / `inventoryExplain` /
+  `inventoryHas`, so a runner can classify or explain a path the walk never
+  produced. `explainPath()` renders any decision as one line of prose.
+- **Added**: the inventory retains the files the walk reached and the policy
+  rejected, with their reason codes. Ignored *directories* are still pruned
+  whole, so the list stays small. This exists for checks that *measure* excluded
+  files — `flutter`'s generated-to-handwritten Dart ratio needs `*.g.dart` — and
+  replaces that runner's private walk.
+- **Added**: `meta.fileInventory.ignoredByReason` — counts of what the scan
+  skipped and why, alongside the existing counts by class.
+- **Added**: a whole-scan conformance test. It runs a scan over a fixture seeded
+  with `dist/`, `coverage/`, `playwright-report/`, `node_modules/`,
+  `.claude/worktrees/`, a config-ignored directory, a lockfile and a minified
+  bundle, then asserts that no finding from any check names an excluded path and
+  that every finding names a file the inventory holds.
+- **Note**: a security-sensitive file that is only ignored by project config
+  (a committed `.env`) is no longer hidden from secrets checks. That is the
+  policy's security override working as designed.
+
+### Also in this release
+- **Fixed**: accessibility counted a button labelled by a JSX expression as
+  having no visible text (#87).
+- **Fixed**: security now grades `dangerouslySetInnerHTML` by the provenance of
+  the HTML rather than flagging every use (#86).
+
 ## 0.53.1 (2026-07-26)
 
 ### Fixed — bugs found auditing the 0.53.0 zero-config Biome lint fallback
