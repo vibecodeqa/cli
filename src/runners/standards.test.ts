@@ -6,7 +6,11 @@ import { detectWorkspace } from "../detect.js";
 import { buildFileInventory } from "../file-inventory.js";
 import { setGlobalSrcRoots } from "../fs-utils.js";
 import { buildEffectiveScanPolicy } from "../scan-policy.js";
+import { runSecurity } from "./security.js";
 import { runStandards } from "./standards.js";
+
+/** Rules this runner used to own and no longer does — `security.ts` grades them with provenance (#62, #86). */
+const DANGEROUS_API_RULES = ["eval()", "new Function()", "innerHTML assignment", "dangerouslySetInnerHTML", "document.write"];
 
 function makeProject(files: Record<string, string>, stack = { language: "typescript" as const }): { dir: string; stack: any } {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-std-"));
@@ -69,9 +73,6 @@ describe("runStandards", () => {
 		expect(result.issues.some((i) => i.rule === "var keyword")).toBe(false);
 		expect(result.issues.some((i) => i.rule === "console.log")).toBe(false);
 		expect(result.issues.some((i) => i.rule === "loose equality")).toBe(false);
-		expect(result.issues.some((i) => i.rule === "innerHTML assignment")).toBe(false);
-		expect(result.issues.some((i) => i.rule === "document.write")).toBe(false);
-		expect(result.issues.some((i) => i.rule === "eval()")).toBe(false);
 		rmSync(dir, { recursive: true });
 	});
 
@@ -91,7 +92,7 @@ describe("runStandards", () => {
 				'{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"verbatimModuleSyntax":true,"skipLibCheck":true}}',
 		});
 		const result = runStandards(dir, stack);
-		const smellRules = new Set(["var keyword", "console.log", "loose equality", "innerHTML assignment", "eval()"]);
+		const smellRules = new Set(["var keyword", "console.log", "loose equality"]);
 		expect(result.issues.filter((i) => smellRules.has(i.rule ?? "")).map((i) => i.rule)).toEqual([]);
 		rmSync(dir, { recursive: true });
 	});
@@ -109,7 +110,7 @@ export const ok = true;
 				'{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"verbatimModuleSyntax":true,"skipLibCheck":true}}',
 		});
 		const result = runStandards(dir, stack);
-		const smellRules = new Set(["var keyword", "console.log", "loose equality", "innerHTML assignment", "eval()"]);
+		const smellRules = new Set(["var keyword", "console.log", "loose equality"]);
 		expect(result.issues.filter((i) => smellRules.has(i.rule ?? "")).map((i) => i.rule)).toEqual([]);
 		rmSync(dir, { recursive: true });
 	});
@@ -131,22 +132,73 @@ export const ok = true;
 		expect(result.issues.some((i) => i.rule === "var keyword")).toBe(true);
 		expect(result.issues.some((i) => i.rule === "console.log")).toBe(true);
 		expect(result.issues.some((i) => i.rule === "loose equality")).toBe(true);
-		expect(result.issues.some((i) => i.rule === "innerHTML assignment")).toBe(true);
-		expect(result.issues.some((i) => i.rule === "eval()")).toBe(true);
+		// The same fixture's innerHTML/eval are no longer this runner's — `security` owns them now.
+		expect(result.issues.filter((i) => DANGEROUS_API_RULES.includes(i.rule ?? ""))).toEqual([]);
+		const security = runSecurity(dir);
+		expect(security.issues.some((i) => i.rule === "CWE-79" && i.message.includes("innerHTML"))).toBe(true);
+		expect(security.issues.some((i) => i.rule === "CWE-94" && i.message.includes("eval"))).toBe(true);
 		rmSync(dir, { recursive: true });
 	});
 
 	it("still detects real code inside template interpolation", () => {
 		const { dir, stack } = makeProject({
-			"src/app.ts": `export function render(value: string): string {
-  return \`value: \${eval(value)}\`;
+			"src/app.ts": `export function render(a: string, b: string): string {
+  return \`equal: \${a == b}\`;
 }
 `,
 			"tsconfig.json":
 				'{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"verbatimModuleSyntax":true,"skipLibCheck":true}}',
 		});
 		const result = runStandards(dir, stack);
-		expect(result.issues.some((i) => i.rule === "eval()")).toBe(true);
+		expect(result.issues.some((i) => i.rule === "loose equality")).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("emits no dangerous-API rules — security.ts is the sole owner", () => {
+		const { dir, stack } = makeProject({
+			"src/danger.ts": `export function run(el: HTMLElement, input: string): unknown {
+  el.innerHTML = input;
+  document.write(input);
+  const f = new Function(input);
+  return eval(input) ?? f;
+}
+`,
+			"tsconfig.json":
+				'{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"verbatimModuleSyntax":true,"skipLibCheck":true}}',
+		});
+		const result = runStandards(dir, stack);
+		expect(result.issues.filter((i) => DANGEROUS_API_RULES.includes(i.rule ?? "")).map((i) => i.rule)).toEqual([]);
+		// Not silently dropped: security reports every one of them, with CWE provenance.
+		const security = runSecurity(dir);
+		const rules = security.issues.filter((i) => i.file === "src/danger.ts").map((i) => `${i.rule}:${i.message}`);
+		expect(rules.some((r) => r.startsWith("CWE-79:") && r.includes("innerHTML"))).toBe(true);
+		expect(rules.some((r) => r.startsWith("CWE-79:") && r.includes("document.write"))).toBe(true);
+		expect(rules.some((r) => r.startsWith("CWE-94:") && r.includes("new Function"))).toBe(true);
+		expect(rules.some((r) => r.startsWith("CWE-94:") && r.includes("eval"))).toBe(true);
+		rmSync(dir, { recursive: true });
+	});
+
+	it("does not flatten sanitizer-traced dangerouslySetInnerHTML back to an error (#62 regression)", () => {
+		const { dir, stack } = makeProject({
+			"src/Code.tsx": [
+				'import DOMPurify from "dompurify";',
+				"export function Code({ raw }: { raw: string }) {",
+				"\treturn <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(raw) }} />;",
+				"}",
+			].join("\n"),
+			"tsconfig.json":
+				'{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"verbatimModuleSyntax":true,"skipLibCheck":true}}',
+		});
+		const standards = runStandards(dir, stack);
+		expect(standards.issues.filter((i) => i.rule === "dangerouslySetInnerHTML")).toEqual([]);
+		// Nothing anywhere in the standards output re-asserts the flat error #86 removed.
+		expect(standards.issues.filter((i) => i.message.includes("dangerouslySetInnerHTML"))).toEqual([]);
+		// security keeps the provenance-aware grade: sanitizer-traced HTML is info, not error.
+		const security = runSecurity(dir);
+		const xss = security.issues.filter((i) => i.rule === "CWE-79" && i.file === "src/Code.tsx");
+		expect(xss).toHaveLength(1);
+		expect(xss[0].severity).toBe("info");
+		expect(security.issues.some((i) => i.severity === "error" && i.message.includes("dangerouslySetInnerHTML"))).toBe(false);
 		rmSync(dir, { recursive: true });
 	});
 

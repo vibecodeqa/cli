@@ -1,4 +1,13 @@
-/** Code standards check — naming conventions, anti-patterns, config hygiene. */
+/**
+ * Code standards check — naming conventions, anti-patterns, config hygiene.
+ *
+ * Dangerous browser/runtime APIs are deliberately NOT here. `security.ts` owns
+ * `eval`, `new Function`, `innerHTML`, `document.write` and
+ * `dangerouslySetInnerHTML` (CWE-79/CWE-94), and grades them with context this
+ * runner does not have — notably HTML provenance for `dangerouslySetInnerHTML`
+ * (#86), which a flat pattern rule here silently overrode with `error`.
+ * Do not re-add them: a second flat rule reintroduces that regression.
+ */
 
 import { existsSync, readFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
@@ -26,21 +35,7 @@ const CODE_SMELLS: PatternCheck[] = [
 	},
 	{ name: "var keyword", pattern: /\bvar\s+\w/, severity: "warning", message: "Use const/let instead of var" },
 	{ name: "loose equality", pattern: /[^!=]==[^=]/, severity: "warning", message: "Use === instead of ==", exclude: /['"]use strict['"]/ },
-	{ name: "eval()", pattern: /\beval\s*\(/, severity: "error", message: "eval() is a security risk — never use it" },
-	{ name: "new Function()", pattern: /new\s+Function\s*\(/, severity: "error", message: "new Function() is equivalent to eval()" },
-	{
-		name: "innerHTML assignment",
-		pattern: /\.innerHTML\s*=/,
-		severity: "warning",
-		message: "innerHTML is an XSS vector — use textContent or DOM APIs",
-	},
-	{
-		name: "dangerouslySetInnerHTML",
-		pattern: /dangerouslySetInnerHTML/,
-		severity: "error",
-		message: "dangerouslySetInnerHTML bypasses React's XSS protection",
-	},
-	{ name: "document.write", pattern: /document\.write\s*\(/, severity: "error", message: "document.write blocks rendering" },
+	// eval / new Function / innerHTML / dangerouslySetInnerHTML / document.write live in security.ts — see the file header.
 	{
 		name: "http:// URL",
 		pattern: /['"]http:\/\/(?!localhost|127\.0\.0\.1|www\.w3\.org|schemas?\.)/,
