@@ -8,7 +8,7 @@ ink/react (the `monitor` TUI) and @jscpd/core (duplication engine, ~100 KB).
 ```bash
 pnpm install        # install dev deps
 pnpm build          # tsc → dist/
-pnpm test           # vitest run (440+ tests across 43 files)
+pnpm test           # vitest run — the full suite must pass
 pnpm lint           # biome check src/
 node dist/cli.js    # self-scan
 node dist/cli.js init               # set up CI workflow + configs
@@ -35,9 +35,13 @@ Dependabot **security alerts** are a different feature and are still on. They ar
 notification surface only — `automated-security-fixes` is disabled, so alerts open
 no PRs and do not conflict with this rule.
 
-`CONTRIBUTING.md` still describes a fork-and-PR flow. That is for outside
-contributors who have no write access to this repo; it is not the workflow for
-committers or agents working here.
+`CONTRIBUTING.md` documents two workflows and says up front which applies to
+whom (#88). **Workflow A** is this rule — write access, commit straight to
+`main`, no branch, no PR — and is the one for committers and agents working
+here. **Workflow B** is fork-branch-PR, and exists only because the repo is
+public: an outside contributor has no push access, so a PR from their fork is
+the only mechanism available to them. Do not take Workflow B as permission to
+open a branch or a PR here.
 
 ## Releasing — CI only, never local
 
@@ -203,8 +207,8 @@ Tries dedicated tools first, falls back to built-in:
 ## Testing
 
 ```bash
-pnpm test                    # 440+ tests across 43 files
-pnpm test -- --reporter=verbose  # see all test names
+pnpm test                    # full suite; every test must pass
+pnpm test -- --reporter=verbose  # see all test names (and the current count)
 ```
 
 Test files: `*.test.ts` in src/ and src/runners/. CLI integration tests in `cli.test.ts`.

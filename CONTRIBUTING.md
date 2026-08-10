@@ -1,6 +1,28 @@
 # Contributing to VibeCode QA
 
-## Quick setup
+There are two ways in, and they are not the same workflow. Pick the one that
+describes you before you write any code.
+
+- **You have write access to `vibecodeqa/cli`** (maintainers, and agents working
+  in this repo) → [Workflow A](#workflow-a--if-you-have-write-access). Commit
+  straight to `main`. Do not open a branch or a pull request.
+- **You do not** (everyone else — the repo is public and contributions are
+  welcome) → [Workflow B](#workflow-b--if-you-do-not-have-write-access). Fork,
+  branch on your fork, open a pull request from the fork.
+
+Not sure? Run `gh repo view vibecodeqa/cli --json viewerPermission`. `ADMIN`,
+`MAINTAIN` or `WRITE` means Workflow A; anything else means Workflow B.
+
+Only the workflow differs. Everything from [Adding a new check](#adding-a-new-check)
+onwards — the architecture map, code style, and the stack-gating rule — applies
+to both audiences equally.
+
+## Workflow A — if you have write access
+
+This project is trunk-based. `main` is the only ref that ships, there is no
+review gate to satisfy, and there is no PR path to npm. Branches and pull
+requests are not used here — not for features, not for fixes, not for
+dependency bumps. See `CLAUDE.md` for the full rule and its rationale.
 
 ```bash
 git clone https://github.com/vibecodeqa/cli.git
@@ -11,13 +33,40 @@ pnpm test
 node dist/cli.js  # self-scan
 ```
 
-## Development workflow
-
-1. Create a branch from `main`
+1. Work from an up-to-date `main` (`git pull --rebase`)
 2. Make changes in `src/`
-3. Run `pnpm build && pnpm test` — all 109 tests must pass
+3. Run `pnpm build && pnpm test` — the full suite must pass
 4. Run `node dist/cli.js --skip-tests` to self-scan and verify the report
-5. Push and open a PR
+5. Commit to `main` and push
+
+## Workflow B — if you do not have write access
+
+You cannot push to `vibecodeqa/cli`, so the fork is not optional — skipping it
+gets you a permission denial at `git push`.
+
+```bash
+gh repo fork vibecodeqa/cli --clone   # or fork in the UI, then clone your fork
+cd cli
+pnpm install
+pnpm build
+pnpm test
+node dist/cli.js  # self-scan
+```
+
+1. Create a branch on **your fork** (`git switch -c my-change`)
+2. Make changes in `src/`
+3. Run `pnpm build && pnpm test` — the full suite must pass
+4. Run `node dist/cli.js --skip-tests` to self-scan and verify the report
+5. Push to your fork and open a pull request against `vibecodeqa/cli`'s `main`
+
+A maintainer reviews it and lands it. Opening an issue first is appreciated for
+anything larger than a bug fix, so the design can be agreed before you build it.
+
+> **Why two workflows?** The repo is public and takes outside contributions, but
+> maintainers work trunk-based (`CLAUDE.md`). One document cannot give both
+> audiences the same instruction without being wrong for one of them. Splitting
+> it was chosen over making this file external-only, and over declaring the repo
+> closed to outside contributions — see issue #88 for the alternatives weighed.
 
 ## Adding a new check
 
