@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { detectWorkspace } from "../detect.js";
 import { buildFileInventory } from "../file-inventory.js";
 import { buildEffectiveScanPolicy } from "../scan-policy.js";
-import { parseReactEslintIssues, runReact } from "./react.js";
+import { buildReactCategories, categoryForRule, parseReactEslintIssues, runReact } from "./react.js";
 
 function makeProject(files: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-react-"));
@@ -469,5 +469,114 @@ describe("parseReactEslintIssues", () => {
 				toolRelativePath: "../../packages/web/src/CopilotView.tsx",
 			},
 		});
+	});
+});
+
+/** ESLint JSON for a single file, one message per rule id. */
+function eslintStdout(rules: string[], severity = 2): string {
+	return JSON.stringify([
+		{
+			filePath: "/repo/src/App.tsx",
+			messages: rules.map((ruleId, i) => ({ severity, message: `${ruleId} fired`, line: i + 1, ruleId })),
+		},
+	]);
+}
+
+function bucketCounts(rules: string[], severity = 2): Record<string, number> {
+	const issues = parseReactEslintIssues(eslintStdout(rules, severity), "/repo")!;
+	return Object.fromEntries(buildReactCategories(issues).map((c) => [c.id, c.issues]));
+}
+
+describe("categoryForRule — React Compiler diagnostics (#89)", () => {
+	it("routes compiler diagnostics to compiler-readiness instead of hooks", () => {
+		// These ship under the `react-hooks/` prefix since eslint-plugin-react-hooks
+		// v6 absorbed the standalone compiler plugin, and no id contains "compiler".
+		const counts = bucketCounts(["react-hooks/purity", "react-hooks/immutability", "react-hooks/set-state-in-render"]);
+		expect(counts["compiler-readiness"]).toBe(3);
+		expect(counts.hooks).toBe(0);
+	});
+
+	it("routes the rest of the compiler rule set to compiler-readiness", () => {
+		const counts = bucketCounts([
+			"react-hooks/globals",
+			"react-hooks/refs",
+			"react-hooks/preserve-manual-memoization",
+			"react-hooks/incompatible-library",
+			"react-hooks/unsupported-syntax",
+			"react-hooks/config",
+			"react-hooks/gating",
+		]);
+		expect(counts["compiler-readiness"]).toBe(7);
+		expect(counts.hooks).toBe(0);
+	});
+
+	it("routes effect rules to effects and error boundaries to error-boundary", () => {
+		const counts = bucketCounts([
+			"react-hooks/exhaustive-deps",
+			"react-hooks/set-state-in-effect",
+			"react-hooks/no-deriving-state-in-effects",
+			"react-hooks/exhaustive-effect-dependencies",
+			"react-hooks/memoized-effect-dependencies",
+			"react-hooks/error-boundaries",
+		]);
+		expect(counts.effects).toBe(5);
+		expect(counts["error-boundary"]).toBe(1);
+		expect(counts.hooks).toBe(0);
+	});
+
+	it("keeps genuine hooks rules in hooks and static-components in component-structure", () => {
+		expect(categoryForRule("react-hooks/rules-of-hooks")).toBe("hooks");
+		expect(categoryForRule("react-hooks/hooks")).toBe("hooks");
+		expect(categoryForRule("react-hooks/capitalized-calls")).toBe("hooks");
+		expect(categoryForRule("react-hooks/component-hook-factories")).toBe("hooks");
+		expect(categoryForRule("react-hooks/static-components")).toBe("component-structure");
+	});
+
+	it("leaves an unknown future react-hooks rule on the hooks fallback", () => {
+		expect(categoryForRule("react-hooks/whatever")).toBe("hooks");
+		expect(categoryForRule(undefined)).toBe("component-structure");
+	});
+
+	it("keeps the memoization trio on hooks while their owner is undecided (#89 open question)", () => {
+		// Deliberate status quo, not an oversight — see the note on
+		// REACT_HOOKS_RULE_CATEGORY. Flip these once the maintainer picks a bucket.
+		expect(categoryForRule("react-hooks/use-memo")).toBe("hooks");
+		expect(categoryForRule("react-hooks/void-use-memo")).toBe("hooks");
+		expect(categoryForRule("react-hooks/memo-dependencies")).toBe("hooks");
+	});
+
+	it("still routes the deprecated standalone react-compiler plugin, which must survive the parse filter", () => {
+		const issues = parseReactEslintIssues(eslintStdout(["react-compiler/react-compiler"]), "/repo")!;
+		expect(issues).toHaveLength(1);
+		expect(categoryForRule("react-compiler/react-compiler")).toBe("compiler-readiness");
+		expect(bucketCounts(["react-compiler/react-compiler"])["compiler-readiness"]).toBe(1);
+	});
+
+	it("keeps a v5-era project unchanged: only rules-of-hooks and exhaustive-deps, empty compiler-readiness", () => {
+		const counts = bucketCounts(["react-hooks/rules-of-hooks", "react-hooks/exhaustive-deps"]);
+		expect(counts.hooks).toBe(1);
+		expect(counts.effects).toBe(1);
+		expect(counts["compiler-readiness"]).toBe(0);
+	});
+});
+
+describe("categoryForRule — Fast Refresh (#89)", () => {
+	it("buckets react-refresh export errors under fast-refresh with their severity", () => {
+		const issues = parseReactEslintIssues(
+			eslintStdout(["react-refresh/only-export-components", "react-refresh/only-export-components"]),
+			"/repo",
+		)!;
+		const fastRefresh = buildReactCategories(issues).find((c) => c.id === "fast-refresh")!;
+		expect(fastRefresh.issues).toBe(2);
+		expect(fastRefresh.severityCounts).toMatchObject({ error: 2, warning: 0 });
+		expect(fastRefresh.topRules).toEqual([{ rule: "react-refresh/only-export-components", count: 2 }]);
+		expect(fastRefresh.files).toEqual([{ file: "src/App.tsx", count: 2 }]);
+	});
+
+	it("keeps fast-refresh warnings separate from hooks and compiler-readiness", () => {
+		const counts = bucketCounts(["react-refresh/only-export-components"], 1);
+		expect(counts["fast-refresh"]).toBe(1);
+		expect(counts.hooks).toBe(0);
+		expect(counts["compiler-readiness"]).toBe(0);
 	});
 });

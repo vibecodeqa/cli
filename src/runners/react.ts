@@ -52,14 +52,64 @@ const RULE_CATEGORY: Record<string, ReactCategoryId> = {
 	"no-error-boundary": "error-boundary",
 };
 
-function categoryForRule(rule: string | undefined): ReactCategoryId {
+/** Bucket for each `react-hooks/<rule>` we know about, consulted before the
+ *  `react-hooks/` prefix fallback. Since eslint-plugin-react-hooks v6 folded in
+ *  the standalone React Compiler plugin, the compiler diagnostics ship under this
+ *  same prefix and none of their ids contain the string "compiler" — so a prefix
+ *  fallback alone files every one of them under `hooks` and leaves
+ *  `compiler-readiness` structurally empty. Verified against
+ *  eslint-plugin-react-hooks@7.1.1 (29 rules, 17 in `recommended-latest`).
+ *
+ *  Rules deliberately absent fall through to `hooks`: `use-memo`, `void-use-memo`
+ *  and `memo-dependencies` are compiler diagnostics by origin but read as
+ *  memoization advice, and the owning bucket is an open question on #89;
+ *  `fbt`, `invariant`, `rule-suppression`, `syntax` and `todo` are unrouted for
+ *  the same reason. Keeping them on the fallback preserves today's behaviour
+ *  rather than guessing. */
+const REACT_HOOKS_RULE_CATEGORY: Record<string, ReactCategoryId> = {
+	// Compiler readiness — what blocks the React Compiler from compiling a component.
+	immutability: "compiler-readiness",
+	purity: "compiler-readiness",
+	globals: "compiler-readiness",
+	refs: "compiler-readiness",
+	"set-state-in-render": "compiler-readiness",
+	"preserve-manual-memoization": "compiler-readiness",
+	"incompatible-library": "compiler-readiness",
+	"unsupported-syntax": "compiler-readiness",
+	config: "compiler-readiness",
+	gating: "compiler-readiness",
+	// Effects.
+	"exhaustive-deps": "effects",
+	"set-state-in-effect": "effects",
+	"no-deriving-state-in-effects": "effects",
+	"exhaustive-effect-dependencies": "effects",
+	"memoized-effect-dependencies": "effects",
+	// Error boundaries.
+	"error-boundaries": "error-boundary",
+	// Hooks proper.
+	"rules-of-hooks": "hooks",
+	hooks: "hooks",
+	"capitalized-calls": "hooks",
+	"component-hook-factories": "hooks",
+	// Component structure.
+	"static-components": "component-structure",
+};
+
+export function categoryForRule(rule: string | undefined): ReactCategoryId {
 	if (!rule) return "component-structure";
-	if (rule === "react-hooks/exhaustive-deps") return "effects";
+	if (rule.startsWith("react-hooks/")) {
+		const known = REACT_HOOKS_RULE_CATEGORY[rule.slice("react-hooks/".length)];
+		if (known) return known;
+	}
+	// Before the `react-hooks/` fallback: catches the legacy standalone
+	// `react-compiler/react-compiler` and any future `*compiler*` rule id.
+	if (/compiler/i.test(rule)) return "compiler-readiness";
+	// Unknown rules from a newer plugin release stay on `hooks` rather than
+	// silently defaulting to `component-structure`.
 	if (rule.startsWith("react-hooks/")) return "hooks";
 	if (rule.startsWith("react-refresh/")) return "fast-refresh";
 	if (rule.startsWith("jsx-a11y/")) return "accessibility";
 	if (rule === "react/jsx-key" || /(^|\/)(jsx-key|no-array-index-key|key)/.test(rule)) return "rendering";
-	if (/compiler/i.test(rule)) return "compiler-readiness";
 	if (rule.startsWith("react/") || rule.startsWith("@eslint-react/") || rule.startsWith("react-dom/") || rule.startsWith("react-x/")) {
 		return "component-structure";
 	}
@@ -77,7 +127,7 @@ function categoryScore(issues: Issue[]): number {
 	return Math.max(0, Math.round(100 - errors * 25 - warnings * 10 - info * 3));
 }
 
-function buildReactCategories(issues: Issue[]) {
+export function buildReactCategories(issues: Issue[]) {
 	return REACT_CATEGORIES.map((def) => {
 		const grouped = issues.filter((issue) => categoryForIssue(issue) === def.id);
 		const rules = new Map<string, number>();
@@ -159,6 +209,10 @@ function isReactLintRule(rule: unknown): rule is string {
 	return (
 		rule.startsWith("react-hooks/") ||
 		rule.startsWith("react-refresh/") ||
+		// Deprecated standalone React Compiler plugin (folded into
+		// eslint-plugin-react-hooks at v6). Without this prefix its diagnostics
+		// never reach the categorizer at all.
+		rule.startsWith("react-compiler/") ||
 		rule.startsWith("react/") ||
 		rule.startsWith("jsx-a11y/") ||
 		rule.startsWith("@eslint-react/") ||
