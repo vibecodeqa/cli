@@ -94,10 +94,14 @@ export function runHtmlQuality(cwd: string, inventory?: FileInventory): CheckRes
 				issues.push({ severity: "warning", message: "Missing meta description", file: relPath, rule: "missing-description" });
 			}
 
+			// Canonical owner of the viewport meta (#68). The `accessibility` check used
+			// to emit the same `missing-viewport` rule id under its own category, so a
+			// project with both an index.html and JSX was billed for it twice.
 			if (!/<meta\s[^>]*name=["']viewport["']/i.test(content)) {
 				issues.push({
 					severity: "error",
-					message: "Missing viewport meta — page won't be mobile-responsive",
+					message:
+						'Missing viewport meta — page won\'t be mobile-responsive; add <meta name="viewport" content="width=device-width, initial-scale=1.0">',
 					file: relPath,
 					rule: "missing-viewport",
 				});
@@ -131,10 +135,12 @@ export function runHtmlQuality(cwd: string, inventory?: FileInventory): CheckRes
 		}
 
 		// ── HTML lang ──
+		// Canonical owner of `<html lang>` (#68). The `accessibility` check used to
+		// emit its own `html-lang` for the same file; it no longer does.
 		if (/<html[\s>]/.test(domContent) && !/<html\s[^>]*lang=/i.test(domContent)) {
 			issues.push({
 				severity: "warning",
-				message: "Missing lang attribute on <html> — screen readers need this",
+				message: 'Missing lang attribute on <html> — screen readers need this (WCAG 3.1.1); add e.g. <html lang="en">',
 				file: relPath,
 				rule: "missing-lang",
 			});

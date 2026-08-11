@@ -436,7 +436,6 @@ export function runAccessibility(cwd: string, workspace?: WorkspaceInfo, invento
 	let buttonName = 0;
 	let clickDiv = 0;
 	let missingLabel = 0;
-	let missingLang = 0;
 	let autofocus = 0;
 	let positiveTabindex = 0;
 	let invalidAria = 0;
@@ -743,42 +742,22 @@ export function runAccessibility(cwd: string, workspace?: WorkspaceInfo, invento
 		);
 	}
 
-	// 10. Check for html lang attribute + viewport + mobile meta in index.html
+	// 10. Static-HTML document metadata.
+	//
+	// `<html lang>` and `<meta name="viewport">` are NOT checked here: `html-quality`
+	// owns them (#68). They used to be emitted from this block as well, which
+	// double-reported every project that has both an index.html and JSX — the same
+	// file produced `html-lang` here and `missing-lang` there, and `missing-viewport`
+	// under two different categories with the same rule id.
+	//
+	// html-quality is the canonical owner because it is the only runner that can be
+	// relied on: this check returns early with "no JSX/TSX/Vue/Svelte files", so on a
+	// pure static site it never runs at all — while html-quality walks every HTML file
+	// in the inventory rather than the four hardcoded paths below.
 	for (const h of htmlPathsForProjects(projects)) {
 		const full = join(cwd, h);
 		if (!existsSync(full)) continue;
 		const content = readFileSync(full, "utf-8");
-		if (/<html\b/.test(content) && !/<html[^>]*lang=/.test(content)) {
-			missingLang++;
-			issues.push(
-				issue({
-					severity: "warning",
-					message: "<html> missing lang attribute",
-					file: h,
-					rule: "html-lang",
-					category: "Accessibility",
-					fix: 'Add a language tag such as <html lang="en">.',
-					selector: "html",
-					source: "vcqa-heuristic",
-					wcag: "WCAG 3.1.1",
-				}),
-			);
-		}
-		// Mobile viewport
-		if (!/<meta[^>]*name=["']viewport["']/.test(content)) {
-			issues.push(
-				issue({
-					severity: "error",
-					message: 'Missing <meta name="viewport"> — page won\'t scale on mobile',
-					file: h,
-					rule: "missing-viewport",
-					category: "Accessibility",
-					fix: 'Add <meta name="viewport" content="width=device-width, initial-scale=1.0">.',
-					selector: 'meta[name="viewport"]',
-					source: "vcqa-heuristic",
-				}),
-			);
-		}
 		// charset
 		if (!/<meta[^>]*charset=/i.test(content)) {
 			issues.push(
@@ -909,7 +888,6 @@ export function runAccessibility(cwd: string, workspace?: WorkspaceInfo, invento
 			buttonName,
 			clickDiv,
 			missingLabel,
-			missingLang,
 			autofocus,
 			positiveTabindex,
 			invalidAria,

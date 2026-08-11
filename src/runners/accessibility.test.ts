@@ -67,11 +67,18 @@ describe("runAccessibility", () => {
 		rmSync(dir, { recursive: true });
 	});
 
-	it("detects missing html lang", () => {
+	// #68 — html-quality is the canonical owner of `<html lang>` and the viewport
+	// meta. This check used to emit `html-lang` and its own `missing-viewport` for
+	// the very same index.html, so a project with both HTML and JSX was billed
+	// twice for one defect. See the cross-runner test below for the other half.
+	it("leaves <html lang> and viewport meta to html-quality (#68)", () => {
 		const dir = makeProject({ "App.tsx": `export function App() { return <div>hi</div>; }` });
 		writeFileSync(join(dir, "index.html"), "<!DOCTYPE html><html><head></head><body></body></html>");
 		const result = runAccessibility(dir);
-		expect(result.issues.some((i) => i.rule === "html-lang")).toBe(true);
+		expect(result.issues.some((i) => i.rule === "html-lang")).toBe(false);
+		expect(result.issues.some((i) => i.rule === "missing-viewport")).toBe(false);
+		// The detail counter that only fed the removed rule is gone too.
+		expect(result.details).not.toHaveProperty("missingLang");
 		rmSync(dir, { recursive: true });
 	});
 
