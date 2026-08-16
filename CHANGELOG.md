@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.55.1 (2026-08-17)
+
+### A tool that never ran is no longer an A
+A missing Dart SDK scored `lint` and `types` at A/100. `2>/dev/null || true`
+turned "the toolchain is absent" into "the toolchain found nothing", so the
+scanner reported health it had not measured — the worst failure mode a
+code-quality tool has.
+- **Fixed**: `hasDartSdk()` (new `runners/toolchain.ts`) probes once per scan
+  with a bare `dart --version` and no `|| true`. `lint`, `types` and
+  `dependencies` now return `unavailable` instead of a score, excluded from the
+  composite rather than inflating it (#92). Scores on machines that *do* have
+  Dart are unchanged.
+- **Note for consumers**: an excluded check still serialises as
+  `score: 100, grade: "A"`. Read `status`/`scoreMode`/`scoreImpact`, never
+  `grade`. Seven further `|| true` sites that can still fabricate a clean pass
+  are catalogued on #92 and tracked by #26.
+
+### Also in this release
+- **Fixed**: React Compiler diagnostics route to `compiler-readiness` instead of
+  being bucketed as `hooks`, which had left that check permanently empty (#89).
+- **Fixed**: the standards runner no longer re-flattens dangerous-API findings
+  that `security.ts` already owns (#62).
+- **Fixed**: `<html lang>` and viewport meta have a single owner (#68).
+- **Security**: 6 advisories (4 high) cleared in the vitest -> vite dev chain;
+  `pnpm audit` reports no known vulnerabilities (#93).
+
 ## 0.55.0 (2026-08-09)
 
 ### One file universe, one ignore engine
