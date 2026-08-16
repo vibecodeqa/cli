@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { CheckResult, Issue, StackInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
+import { DART_SDK_MISSING_REASON, hasDartSdk, unavailableResult } from "./toolchain.js";
 
 export function runDependencies(cwd: string, stack: StackInfo): CheckResult {
 	const start = Date.now();
@@ -13,6 +14,12 @@ export function runDependencies(cwd: string, stack: StackInfo): CheckResult {
 
 	// Dart/Flutter: skip npm audit, just check pubspec for outdated
 	if (pm === "pub") {
+		// Without the SDK `dart pub outdated` returns nothing, which parses as
+		// "0 outdated, 0 major" — a clean bill of health for packages we never
+		// queried (#92).
+		if (!hasDartSdk(cwd)) {
+			return unavailableResult("dependencies", DART_SDK_MISSING_REASON, { packageManager: "pub" }, start);
+		}
 		const outdatedResult = run("dart pub outdated --json 2>/dev/null || true", cwd);
 		let outdatedCount = 0;
 		let majorOutdated = 0;

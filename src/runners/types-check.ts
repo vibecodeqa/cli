@@ -10,6 +10,7 @@ import { isIgnoredPath, normalizeToolPath } from "../fs-utils.js";
 import type { CheckResult, Issue, ProjectContext, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
+import { DART_SDK_MISSING_REASON, hasDartSdk, unavailableResult } from "./toolchain.js";
 
 interface TypeCheckTarget {
 	cwd: string;
@@ -58,6 +59,22 @@ export function runTypeCheck(cwd: string, isDart = false, workspace?: WorkspaceI
 			issues: [],
 			duration: Date.now() - start,
 		};
+	}
+
+	// Every Dart target below runs `dart analyze`. Without the SDK they all return
+	// empty output, which parses as zero errors and scores 100 — a type check that
+	// never happened, reported as a clean one (#92).
+	if (isDart && !hasDartSdk(cwd)) {
+		return unavailableResult(
+			"types",
+			DART_SDK_MISSING_REASON,
+			{
+				tool: "dart",
+				projects: targets.map((t) => ({ id: t.projectId ?? "root", path: t.projectPath ?? ".", tool: t.tool, command: t.command })),
+				strategy: plan.strategy,
+			},
+			start,
+		);
 	}
 
 	if (isDart) {

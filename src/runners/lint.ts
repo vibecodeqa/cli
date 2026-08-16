@@ -10,6 +10,7 @@ import { isIgnoredPath, normalizeToolPath } from "../fs-utils.js";
 import type { CheckResult, Issue, ProjectContext, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
+import { DART_SDK_MISSING_REASON, hasDartSdk, unavailableResult } from "./toolchain.js";
 
 export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo): CheckResult {
 	const start = Date.now();
@@ -18,8 +19,25 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 	const projectRuns = lintableProjects(workspace);
 	if (stack.linter === "none" && projectRuns.length > 0) {
 		const projects: Array<Record<string, unknown>> = [];
+		let linted = 0;
+		let dartUnavailable = 0;
 		for (const project of projectRuns) {
 			const projectCwd = project.path === "." ? cwd : join(cwd, project.path);
+			// A Dart project we cannot analyze contributes no issues — which would
+			// otherwise read as "this package lints clean" (#92). Record it as
+			// unavailable and keep it out of the count of projects we really linted.
+			if (project.stack.linter === "dart_analyze" && !hasDartSdk(cwd)) {
+				dartUnavailable++;
+				projects.push({
+					id: project.id,
+					path: project.path,
+					linter: project.stack.linter,
+					unavailable: true,
+					reason: DART_SDK_MISSING_REASON,
+				});
+				continue;
+			}
+			linted++;
 			const projectIssues = runConfiguredProjectLint(cwd, projectCwd, project);
 			issues.push(...projectIssues);
 			projects.push({
@@ -28,6 +46,10 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 				linter: project.stack.linter,
 				issues: projectIssues.length,
 			});
+		}
+		// Nothing was actually linted — do not report a score for it.
+		if (linted === 0 && dartUnavailable > 0) {
+			return unavailableResult("lint", DART_SDK_MISSING_REASON, { linter: "dart_analyze", projects }, start);
 		}
 		const { score, errors, warnings } = scoreLint(issues);
 		return {
@@ -67,6 +89,12 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 		const { stdout } = run(`npx eslint ${lintTarget} --format json 2>/dev/null || true`, cwd);
 		issues.push(...parseEslintJson(stdout, { repoCwd: cwd, toolCwd: cwd }));
 	} else if (stack.linter === "dart_analyze") {
+		// Probe once before planning targets: without the SDK every `dart analyze`
+		// below returns empty output, which parses as zero issues and scores A/100
+		// for code that was never analyzed (#92).
+		if (!hasDartSdk(cwd)) {
+			return unavailableResult("lint", DART_SDK_MISSING_REASON, { linter: "dart_analyze" }, start);
+		}
 		const dartRoots =
 			workspace?.isMonorepo && workspace.packages.some((p) => existsSync(join(cwd, p.path, "pubspec.yaml")))
 				? workspace.packages

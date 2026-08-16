@@ -359,7 +359,12 @@ function shouldRenderAsSkipped(details: Record<string, unknown>, issues: Issue[]
 function checkAvailabilityStatus(details: Record<string, unknown>): CheckStatus | null {
 	const reason = typeof details.reason === "string" ? details.reason : "";
 	if (reason.startsWith("runner error:")) return "failed";
-	if (details.comingSoon) return "unavailable";
+	// `unavailable` — the check applies here but the tool it delegates to is not
+	// installed (e.g. a Flutter repo with no Dart SDK, #92). Distinct from
+	// `skipped`, which means the check does not apply to this stack at all.
+	// Ordered before `skipped` because an unavailable result carries both flags:
+	// `skipped` is what score.ts reads to exclude it from the composite.
+	if (details.unavailable || details.comingSoon) return "unavailable";
 	if (details.skipped) return "skipped";
 	return null;
 }
@@ -371,7 +376,7 @@ function checkStatus(issues: Issue[], score: number, scoreMode: ScoreMode): Chec
 }
 
 function runtimeScoreMode(checkName: string, details: Record<string, unknown>, status: CheckStatus): ScoreMode {
-	if (status === "unavailable" || details.comingSoon) return "unavailable";
+	if (status === "unavailable" || details.unavailable || details.comingSoon) return "unavailable";
 	if (status === "skipped" || details.skipped) return "not-applicable";
 	const meta = getCheckMeta(checkName);
 	const declaredScoreMode = (meta as CheckMeta & { scoreMode?: ScoreMode }).scoreMode;
