@@ -152,6 +152,50 @@ export function collectAllFiles(cwd: string, opts?: { extraExts?: boolean }): So
 	return files;
 }
 
+/** True when the tree under `cwd`/`root` holds at least one file with one of
+ *  `exts` (dot-prefixed, case-insensitive).
+ *
+ *  A cheap existence probe, not a collector: it stops at the first hit and never
+ *  reads a file's contents. Runners use it to ask "is there anything here this
+ *  tool can even read?" before delegating — a tool that inspected zero
+ *  applicable files has measured nothing, whatever its exit code says (#92).
+ *
+ *  Honours the same scan policy as the walkers, so an ignored directory is not
+ *  descended into and a file only present in `node_modules` does not count. */
+export function hasFileWithExt(cwd: string, exts: Iterable<string>, root = "."): boolean {
+	const wanted = new Set([...exts].map((e) => e.toLowerCase()));
+	if (wanted.size === 0) return false;
+	const startDir = root === "." || root === "" ? cwd : join(cwd, root.replace(/\/+$/, ""));
+	return probe(startDir, cwd, wanted);
+}
+
+function probe(dir: string, cwd: string, exts: Set<string>): boolean {
+	let entries: string[];
+	try {
+		entries = readdirSync(dir);
+	} catch {
+		return false; // directory doesn't exist, permission denied, or broken symlink
+	}
+	const subdirs: string[] = [];
+	for (const entry of entries) {
+		const full = join(dir, entry);
+		const relPath = full.replace(`${cwd}/`, "");
+		if (evaluatePath(activeScanPolicy(), relPath).excluded) continue;
+		try {
+			if (lstatSync(full).isSymbolicLink()) continue;
+			if (statSync(full).isDirectory()) {
+				subdirs.push(full);
+				continue;
+			}
+		} catch {
+			continue; // broken symlink, deleted file, or permission denied
+		}
+		if (exts.has(extname(entry).toLowerCase())) return true;
+	}
+	// Files before directories: a hit in the current directory costs no descent.
+	return subdirs.some((sub) => probe(sub, cwd, exts));
+}
+
 /** Extract <script> content from Vue/Svelte SFC files. Returns all script blocks concatenated. */
 function extractScript(content: string): string {
 	const scripts: string[] = [];

@@ -1,5 +1,9 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseBiomeLint, parseEslintJson, scoreLint } from "./lint.js";
+import type { StackInfo } from "../types.js";
+import { parseBiomeLint, parseEslintJson, scoreLint, zeroConfigLintPlan } from "./lint.js";
 
 describe("parseBiomeLint", () => {
 	it("returns null on non-JSON (biome absent / crashed)", () => {
@@ -137,6 +141,69 @@ describe("parseEslintJson", () => {
 			toolCwd: "/repo/apps/console",
 			pathStatus: "outside-repo",
 		});
+	});
+});
+
+/** Issue #92: the zero-config Biome fallback ran on any project that configured
+ *  no linter — including Dart, Go and Python trees Biome cannot parse. It walked
+ *  past every file, reported zero diagnostics, exited 0, and that scored A/100
+ *  with `status: "passed"` — a positive assertion about code no linter read. */
+describe("zeroConfigLintPlan", () => {
+	function project(files: Record<string, string>): string {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-lint-"));
+		for (const [name, content] of Object.entries(files)) {
+			const full = join(dir, name);
+			mkdirSync(dirname(full), { recursive: true });
+			writeFileSync(full, content);
+		}
+		return dir;
+	}
+
+	const stack = (language: string): StackInfo =>
+		({
+			language,
+			framework: "none",
+			bundler: "none",
+			testRunner: "none",
+			linter: "none",
+			packageManager: "npm",
+		}) as StackInfo;
+
+	it("runs Biome where there is JavaScript/TypeScript to lint", () => {
+		const dir = project({ "src/index.js": "export const x = 1;\n" });
+		expect(zeroConfigLintPlan(dir, stack("javascript"), "src/")).toEqual({ kind: "biome" });
+	});
+
+	it("lints SFC projects — Biome reads the embedded <script>", () => {
+		const dir = project({ "src/App.vue": "<script setup>const a = 1;</script>\n" });
+		expect(zeroConfigLintPlan(dir, stack("javascript"), "src/")).toEqual({ kind: "biome" });
+	});
+
+	it("refuses to score a Dart tree and names the language", () => {
+		const dir = project({ "pubspec.yaml": "name: app\n", "lib/main.dart": "void main() {}\n" });
+		const plan = zeroConfigLintPlan(dir, stack("dart"), ".");
+		expect(plan.kind).toBe("unavailable");
+		expect(plan.kind === "unavailable" && plan.reason).toContain("Dart");
+	});
+
+	it("refuses to score a Go tree", () => {
+		const dir = project({ "go.mod": "module example.com/a\n", "cmd/app/main.go": "package main\n" });
+		const plan = zeroConfigLintPlan(dir, stack("go"), ".");
+		expect(plan.kind).toBe("unavailable");
+		expect(plan.kind === "unavailable" && plan.reason).toContain("Go");
+	});
+
+	it("does not count a stray package.json or stylesheet as lintable code", () => {
+		// The trap from the issue: Biome happily lints a JSON file in a Flutter
+		// repo while having nothing to say about the Dart.
+		const dir = project({ "package.json": "{}\n", "web/styles.css": "body{color:red}\n", "lib/main.dart": "void main() {}\n" });
+		expect(zeroConfigLintPlan(dir, stack("dart"), ".").kind).toBe("unavailable");
+	});
+
+	it("falls back to the repo root when the lint target itself has no scripts", () => {
+		// `src/` exists and holds only assets, but the project is still JavaScript.
+		const dir = project({ "src/logo.svg": "<svg/>", "scripts/build.js": "console.log(1);\n" });
+		expect(zeroConfigLintPlan(dir, stack("javascript"), "src/")).toEqual({ kind: "biome" });
 	});
 });
 

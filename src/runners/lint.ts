@@ -6,7 +6,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { isIgnoredPath, normalizeToolPath } from "../fs-utils.js";
+import { hasFileWithExt, isIgnoredPath, normalizeToolPath } from "../fs-utils.js";
 import type { CheckResult, Issue, ProjectContext, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
@@ -95,17 +95,35 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 		if (!hasDartSdk(cwd)) {
 			return unavailableResult("lint", DART_SDK_MISSING_REASON, { linter: "dart_analyze" }, start);
 		}
-		const dartRoots =
-			workspace?.isMonorepo && workspace.packages.some((p) => existsSync(join(cwd, p.path, "pubspec.yaml")))
-				? workspace.packages
-						.filter((p) => existsSync(join(cwd, p.path, "pubspec.yaml")))
-						.map((p) => ({ cwd: join(cwd, p.path), prefix: p.path }))
-				: [{ cwd, prefix: "" }];
-		for (const root of dartRoots) {
-			const { stdout } = run("dart analyze --format=machine 2>/dev/null || true", root.cwd);
-			parseDartAnalyze(stdout, cwd, root.cwd, issues, false);
-		}
+		issues.push(...dartAnalyzeIssues(cwd, workspace));
 	} else {
+		// ── Nothing declares a linter at the root ──
+		// A Dart project with no analysis_options.yaml detects as `linter: "none"`
+		// (detect.ts), but the tool that can read it is still `dart analyze` — not
+		// a JavaScript linter. Claim it here, before the JS fallbacks below get a
+		// chance to score Dart they cannot parse (#92).
+		if (stack.language === "dart") {
+			if (!hasDartSdk(cwd)) {
+				return unavailableResult("lint", DART_SDK_MISSING_REASON, { linter: "dart_analyze" }, start);
+			}
+			const dartIssues = dartAnalyzeIssues(cwd, workspace);
+			const { score, errors, warnings } = scoreLint(dartIssues);
+			return {
+				name: "lint",
+				score,
+				grade: gradeFromScore(score),
+				details: {
+					errors,
+					warnings,
+					linter: "dart_analyze",
+					zeroConfig: true,
+					reason: "No analysis_options.yaml — analyzed with the Dart SDK's default rules",
+				},
+				issues: dartIssues,
+				duration: Date.now() - start,
+			};
+		}
+
 		// No root linter detected — check if linting is happening elsewhere
 		const lintInCI = detectLintInCI(cwd);
 		const pkgLinters = workspace?.isMonorepo ? workspace.packages.filter((p) => p.hasLinter).length : 0;
@@ -127,6 +145,19 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 		// ephemeral zero-config linter — the same "works without install/config"
 		// approach we use for knip (dead code). Biome lints with its recommended
 		// rules absent a biome.json; ESLint can't (it errors without one).
+		//
+		// Only where Biome can read the code, though: it exits 0 with zero
+		// diagnostics on a tree it cannot parse, and zero diagnostics scores A/100
+		// for code no linter ever looked at (#92).
+		const plan = zeroConfigLintPlan(cwd, stack, lintTarget);
+		if (plan.kind === "unavailable") {
+			return unavailableResult(
+				"lint",
+				plan.reason,
+				{ linter: "none", language: stack.language, lintTarget, lintableExtensions: BIOME_LINTABLE_EXTS },
+				start,
+			);
+		}
 		const zcIssues = runBiomeZeroConfig(cwd, lintTarget);
 		if (zcIssues !== null) {
 			const { score, errors, warnings } = scoreLint(zcIssues);
@@ -165,6 +196,63 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 		issues,
 		duration: Date.now() - start,
 	};
+}
+
+/** File extensions Biome's linter can actually parse.
+ *
+ * Everything else it walks straight past: a `.dart`, `.go`, `.py` or `.java`
+ * tree produces zero diagnostics and exit 0 not because it is clean but because
+ * Biome never read a line of it. Vue/Svelte/Astro are included — Biome lints the
+ * embedded `<script>` blocks. `.json`/`.css` are deliberately excluded: Biome
+ * parses them but has almost no lint rules for them, so a stray `package.json`
+ * or stylesheet in a Dart repo must not count as "this project is lintable". */
+const BIOME_LINTABLE_EXTS = [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".vue", ".svelte", ".astro"];
+
+const LANGUAGE_LABELS: Record<string, string> = {
+	typescript: "TypeScript",
+	javascript: "JavaScript",
+	dart: "Dart",
+	go: "Go",
+	rust: "Rust",
+	java: "Java",
+	python: "Python",
+};
+
+export type ZeroConfigLintPlan = { kind: "biome" } | { kind: "unavailable"; reason: string };
+
+/** Decide whether the zero-config Biome fallback can measure anything here.
+ *
+ * The fallback exists so a project that configures no linter still gets a real
+ * signal. It only *is* a signal where Biome can parse the sources; on a tree it
+ * cannot read it reports zero findings, which the scorer reads as a flawless
+ * pass (#92). No lintable file ⇒ no score, and an `unavailable` result that says
+ * which linter the project is missing. */
+export function zeroConfigLintPlan(cwd: string, stack: StackInfo, target: string): ZeroConfigLintPlan {
+	// The fallback lints `target`, so ask about `target` — but a `src/` with no
+	// scripts in an otherwise JS repo is still a JS repo, so fall back to the root.
+	if (hasFileWithExt(cwd, BIOME_LINTABLE_EXTS, target) || hasFileWithExt(cwd, BIOME_LINTABLE_EXTS)) {
+		return { kind: "biome" };
+	}
+	const label = LANGUAGE_LABELS[stack.language];
+	return {
+		kind: "unavailable",
+		reason: `No linter available${label ? ` for this ${label} project` : ""} — none is configured, and the zero-config Biome fallback found no JavaScript/TypeScript sources to lint`,
+	};
+}
+
+/** Run `dart analyze` over every Dart root and return what it found. Assumes the
+ *  SDK has already been probed — see hasDartSdk(). */
+function dartAnalyzeIssues(cwd: string, workspace?: WorkspaceInfo): Issue[] {
+	const issues: Issue[] = [];
+	const dartRoots =
+		workspace?.isMonorepo && workspace.packages.some((p) => existsSync(join(cwd, p.path, "pubspec.yaml")))
+			? workspace.packages.filter((p) => existsSync(join(cwd, p.path, "pubspec.yaml"))).map((p) => ({ cwd: join(cwd, p.path) }))
+			: [{ cwd }];
+	for (const root of dartRoots) {
+		const { stdout } = run("dart analyze --format=machine 2>/dev/null || true", root.cwd);
+		parseDartAnalyze(stdout, cwd, root.cwd, issues, false);
+	}
+	return issues;
 }
 
 function lintableProjects(workspace?: WorkspaceInfo): ProjectContext[] {

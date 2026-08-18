@@ -7,6 +7,7 @@ import {
 	collectSourceFiles,
 	getProductionFiles,
 	getTestFiles,
+	hasFileWithExt,
 	isIgnoredPath,
 	normalizeToolPath,
 	readDeps,
@@ -302,6 +303,44 @@ describe("isIgnoredPath — external-tool paths honor the scan's ignore", () => 
 		expect(isIgnoredPath("src/app.min.js")).toBe(true);
 		expect(isIgnoredPath("pnpm-lock.yaml")).toBe(true);
 		expect(isIgnoredPath("src/app.ts")).toBe(false);
+	});
+});
+
+describe("hasFileWithExt", () => {
+	it("finds a matching file nested anywhere under the root", () => {
+		const dir = makeProject({ "lib/widgets/home.dart": "class Home {}" });
+		expect(hasFileWithExt(dir, [".dart"])).toBe(true);
+		expect(hasFileWithExt(dir, [".ts", ".tsx"])).toBe(false);
+	});
+
+	it("is case-insensitive about the extension", () => {
+		const dir = makeProject({ "src/Legacy.JS": "var x = 1;" });
+		expect(hasFileWithExt(dir, [".js"])).toBe(true);
+	});
+
+	it("does not count files the scan policy excludes", () => {
+		setGlobalIgnore(undefined);
+		setGlobalIgnoreNames([]);
+		const dir = makeProject({
+			"node_modules/dep/index.js": "module.exports = 1;",
+			"lib/main.dart": "void main() {}",
+		});
+		// A dependency's JavaScript is not this project's JavaScript.
+		expect(hasFileWithExt(dir, [".js"])).toBe(false);
+		expect(hasFileWithExt(dir, [".dart"])).toBe(true);
+	});
+
+	it("honours the root argument", () => {
+		const dir = makeProject({ "src/app.ts": "export const x = 1;", "tools/build.js": "1;" });
+		expect(hasFileWithExt(dir, [".js"], "src/")).toBe(false);
+		expect(hasFileWithExt(dir, [".js"], "tools")).toBe(true);
+		expect(hasFileWithExt(dir, [".js"])).toBe(true);
+	});
+
+	it("is false for a missing directory or an empty extension list", () => {
+		const dir = makeProject({ "src/app.ts": "export const x = 1;" });
+		expect(hasFileWithExt(dir, [".ts"], "does-not-exist")).toBe(false);
+		expect(hasFileWithExt(dir, [])).toBe(false);
 	});
 });
 
