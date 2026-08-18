@@ -6,7 +6,34 @@ import { CHECK_META } from "./check-meta.js";
 
 const CLI = join(import.meta.dirname!, "..", "dist", "cli.js");
 const TMP = join(import.meta.dirname!, "__test_cli__");
-const SYNTHETIC_CHECK_COUNT = 1; // dead-code is derived from performance and not in CHECK_META.
+/** Checks `@vibecodeqa/schema` documents that this CLI does not (yet) emit.
+ *
+ *  Schema is shared with the app and the MCP server, so it can legitimately
+ *  document a check ahead of the CLI registering a runner for it. Each entry
+ *  here is a live TODO: the commit that registers the runner deletes its line.
+ *
+ *  Empty is the goal state. */
+const DOCUMENTED_BUT_NOT_EMITTED = new Set<string>([
+	// cli#95 registers runners/cloudflare-worker-mcp.ts.
+	"cloudflare-worker-mcp",
+]);
+
+/** Assert the emitted check roster against the schema's, by name.
+ *
+ *  This used to be `checks.length === Object.keys(CHECK_META).length + 1`,
+ *  where the 1 stood for dead-code "not being in CHECK_META". That premise
+ *  expired when schema documented dead-code, and the assertion would have
+ *  failed on the next lockfile refresh — in whatever unrelated PR happened to
+ *  touch dependencies — reporting `expected 38, got 39` with no hint as to
+ *  which check moved. Comparing sets makes the diff name the check. */
+function expectCanonicalCheckRoster(report: { checks: Array<{ name: string }> }): void {
+	const emitted = report.checks.map((check) => check.name).sort();
+	const expected = Object.keys(CHECK_META)
+		.filter((name) => !DOCUMENTED_BUT_NOT_EMITTED.has(name))
+		.sort();
+
+	expect(emitted).toEqual(expected);
+}
 
 function run(args: string): string {
 	try {
@@ -53,7 +80,7 @@ describe("CLI flags", () => {
 		expect(report.score).toBeGreaterThanOrEqual(0);
 		expect(report.score).toBeLessThanOrEqual(100);
 		expect(report.checks).toBeInstanceOf(Array);
-		expect(report.checks.length).toBe(Object.keys(CHECK_META).length + SYNTHETIC_CHECK_COUNT);
+		expectCanonicalCheckRoster(report);
 	}, 30_000);
 
 	it("nonexistent path exits with error", () => {
@@ -287,7 +314,7 @@ describe("init command", () => {
 		const out = run("--skip-tests --json .");
 		const report = JSON.parse(out);
 		// Config should load without error and not disable any checks
-		expect(report.checks.length).toBe(Object.keys(CHECK_META).length + SYNTHETIC_CHECK_COUNT);
+		expectCanonicalCheckRoster(report);
 		const disabled = report.checks.filter((c: any) => c.details.reason === "disabled in config");
 		expect(disabled).toHaveLength(0);
 	}, 30_000);
@@ -359,7 +386,7 @@ describe("report output", () => {
 	it("--json produces report with all checks and workspace info", () => {
 		const out = run("--skip-tests --json .");
 		const report = JSON.parse(out);
-		expect(report.checks.length).toBe(Object.keys(CHECK_META).length + SYNTHETIC_CHECK_COUNT);
+		expectCanonicalCheckRoster(report);
 		expect(report.meta.workspace).toBeDefined();
 		expect(typeof report.meta.workspace.isMonorepo).toBe("boolean");
 		// Also verify report file was written

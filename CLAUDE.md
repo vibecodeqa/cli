@@ -152,10 +152,16 @@ new framework/language support outside these boundaries.
 ## Checks across 7 categories
 
 `@vibecodeqa/schema`'s `CHECK_META` is the source of truth. It currently defines
-37 canonical checks across 7 categories. The CLI may also emit derived/synthetic
-rows such as `dead-code` when a first-class page needs a clearer surface over data
-collected by another check; those rows must not change the weighted score unless
-they are promoted into `CHECK_META`.
+39 canonical checks across 7 categories. `dead-code` is one of them as of schema
+0.4.3 — it is derived from `performance` rather than run as an independent
+analyzer, but it is documented metadata now, not a synthetic row, and carries
+weight 0 so it still cannot move the composite.
+
+Schema is shared with the app and the MCP server, so it may document a check
+before this CLI registers a runner for it. `cli.test.ts` tracks that gap
+explicitly in `DOCUMENTED_BUT_NOT_EMITTED`; the commit that adds the runner
+deletes the entry. Do not assert check counts as integers here — compare
+rosters by name, or the next lockfile refresh breaks an unrelated change.
 
 Weights sum to 100 (Pro checks and zero-weight platform checks have weight 0).
 
@@ -164,8 +170,8 @@ Weights sum to 100 (Pro checks and zero-weight platform checks have weight 0).
 | **Foundations** | structure, lint, types, type-safety, standards | 6+5+6+3+3 = 23 |
 | **Quality** | complexity, duplication, error-handling, react, flutter, accessibility, docs, best-practices, frontend-health, env-validation, git-hygiene, memory-safety, styling, html-quality, container-health, cloudflare-workers | 5+3+3+3+0+4+3+3+2+1+1+1+1+0+0+0 = 30 |
 | **Testing** | testing | 13 |
-| **Architecture** | architecture, performance | 5+4 = 9 |
-| **Security** | secrets, security, dependencies, sqlite-d1 | 6+5+5+0 = 16 |
+| **Architecture** | architecture, performance, dead-code | 5+4+0 = 9 |
+| **Security** | secrets, security, dependencies, sqlite-d1, cloudflare-worker-mcp | 6+5+5+0+0 = 16 |
 | **AI Readiness** | confusion, context | 4+5 = 9 |
 | **AI Analysis** | doc-coherence, code-coherence, comment-staleness, dead-patterns, test-audit, file-cohesion, design-consistency | all 0 (PRO) |
 
