@@ -13,11 +13,12 @@ import { loadConfig } from "./config.js";
 import { scan } from "./core.js";
 import { computeDelta } from "./delta.js";
 import { detectStack, detectWorkspace } from "./detect.js";
-import { issueSnapshot } from "./issue-fingerprint.js";
 import { postPRComment } from "./pr-comment.js";
 import { generatePages } from "./report/html.js";
+import { buildReportHistorySnapshot, withFreshAnalyzerSnapshots } from "./report-contract.js";
 import { computeTrend, formatTrend, type TrendDelta } from "./trend.js";
 import type { VibeReport, WorkspaceInfo } from "./types.js";
+import { buildReportUploadPayload, currentGitSha } from "./upload.js";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
 const VERSION: string = pkg.version;
@@ -396,27 +397,15 @@ function getChangedFiles(cwd: string, base: string): Set<string> | null {
 
 async function writeOutputs(report: VibeReport, outputDir: string, flags: ParsedFlags, prevReport?: VibeReport): Promise<void> {
 	mkdirSync(outputDir, { recursive: true });
+	const normalizedReport = withFreshAnalyzerSnapshots(report);
 
 	// Always write JSON
-	writeFileSync(join(outputDir, "report.json"), JSON.stringify(report, null, 2));
+	writeFileSync(join(outputDir, "report.json"), JSON.stringify(normalizedReport, null, 2));
 
 	// Save history
 	const historyDir = join(outputDir, "history");
 	mkdirSync(historyDir, { recursive: true });
-	writeFileSync(
-		join(historyDir, `${report.timestamp}.json`),
-		JSON.stringify({
-			score: report.score,
-			grade: report.grade,
-			timestamp: report.timestamp,
-			checks: report.checks.map((c) => ({
-				name: c.name,
-				score: c.score,
-				issueCount: c.issues.length,
-				issues: c.issues.map((issue) => issueSnapshot(c.name, issue)),
-			})),
-		}),
-	);
+	writeFileSync(join(historyDir, `${normalizedReport.timestamp}.json`), JSON.stringify(buildReportHistorySnapshot(normalizedReport)));
 	const historyFiles = readdirSync(historyDir).sort();
 	for (const old of historyFiles.slice(0, historyFiles.length - 30)) {
 		try {
@@ -431,7 +420,7 @@ async function writeOutputs(report: VibeReport, outputDir: string, flags: Parsed
 		const reportDir = join(outputDir, "report");
 		mkdirSync(reportDir, { recursive: true });
 		const historyDir = join(outputDir, "history");
-		const pages = generatePages(report, historyDir, prevReport);
+		const pages = generatePages(normalizedReport, historyDir, prevReport);
 		for (const [filename, html] of pages) {
 			writeFileSync(join(reportDir, filename), html);
 		}
@@ -440,13 +429,13 @@ async function writeOutputs(report: VibeReport, outputDir: string, flags: Parsed
 	// Badge
 	if (flags.badgeMode) {
 		const { buildBadge } = await import("./report/svg.js");
-		writeFileSync(join(outputDir, "badge.svg"), buildBadge(report.score, report.grade));
+		writeFileSync(join(outputDir, "badge.svg"), buildBadge(normalizedReport.score, normalizedReport.grade));
 	}
 
 	// SARIF
 	if (flags.sarifMode) {
 		const { generateSARIF } = await import("./report/sarif.js");
-		writeFileSync(join(outputDir, "report.sarif"), generateSARIF(report));
+		writeFileSync(join(outputDir, "report.sarif"), generateSARIF(normalizedReport));
 	}
 }
 
@@ -458,24 +447,19 @@ async function handleUpload(report: VibeReport, cwd: string, quietMode: boolean)
 		if (!quietMode) console.log("  \x1b[33m\u26a0 Set VCQA_TOKEN to enable upload\x1b[0m");
 		return;
 	}
-	const repo = report.meta.repoUrl?.replace(/^https?:\/\/github\.com\//, "")?.replace(/\.git$/, "") || "";
-	if (!repo) {
+	// buildReportUploadPayload owns the repo-slug rule and returns null when
+	// there is no remote to attribute the report to. Deriving the slug a second
+	// time here, just to explain the refusal, would be a second copy of it.
+	const payload = buildReportUploadPayload(report, currentGitSha(cwd));
+	if (!payload) {
 		if (!quietMode) console.log("  \x1b[33m\u26a0 No git remote — can't upload\x1b[0m");
 		return;
-	}
-
-	let sha: string | undefined;
-	try {
-		const { execSync } = await import("node:child_process");
-		sha = execSync("git rev-parse HEAD", { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-	} catch {
-		/* not a git repo */
 	}
 	try {
 		const res = await fetch("https://api.vibecodeqa.online/api/reports", {
 			method: "POST",
 			headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-			body: JSON.stringify({ repo, report, sha }),
+			body: JSON.stringify(payload),
 		});
 		if (res.ok) {
 			const data = (await res.json()) as { totalReports?: number };
@@ -676,6 +660,7 @@ async function main() {
 			}
 		}
 	}
+	report.meta.analyzerSnapshots = withFreshAnalyzerSnapshots(report).meta.analyzerSnapshots;
 
 	const trend = computeTrend(report, outputDir);
 

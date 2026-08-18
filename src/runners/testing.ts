@@ -14,7 +14,7 @@ import { basename, extname, join, relative } from "node:path";
 import type { FileInventory } from "../file-inventory.js";
 import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles, normalizeToolPath, readDeps } from "../fs-utils.js";
-import type { CheckResult, Issue, StackInfo, WorkspaceInfo } from "../types.js";
+import type { AnalyzerMetric, CheckResult, Issue, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
 
@@ -737,6 +737,15 @@ export function runTesting(
 				testFiles: 0,
 				source: inventory ? "file-inventory" : "legacy-walk",
 				pyramid: { unit: 0, integration: 0, component: 0, e2e: 0 },
+				metrics: testingMetrics({
+					srcFiles: srcFiles.length,
+					testFiles: 0,
+					layerFiles: { unit: 0, integration: 0, component: 0, e2e: 0 },
+					pairingPct: 0,
+					quality: null,
+					coverage: null,
+					execution: null,
+				}),
 			},
 			issues: [{ severity: "error", message: `${srcFiles.length} source files with zero tests`, rule: "no-tests" }],
 			duration: Date.now() - start,
@@ -1024,10 +1033,97 @@ export function runTesting(
 			...(coverage
 				? { coverage: { stmts: coverage.statements, branches: coverage.branches, lines: coverage.lines, fns: coverage.functions } }
 				: {}),
+			metrics: testingMetrics({
+				srcFiles: srcFiles.length,
+				testFiles: testFiles.length,
+				layerFiles: {
+					unit: pyramid.unit.files,
+					integration: pyramid.integration.files,
+					component: pyramid.component.files,
+					e2e: pyramid.e2e.files,
+				},
+				pairingPct,
+				quality,
+				coverage,
+				execution,
+			}),
 		},
 		issues,
 		duration: Date.now() - start,
 	};
+}
+
+function testingMetrics(input: {
+	srcFiles: number;
+	testFiles: number;
+	layerFiles: Record<TestLayer, number>;
+	pairingPct: number;
+	quality: QualityMetrics | null;
+	coverage: CoverageData | null;
+	execution: { passed: number; failed: number; total: number } | null;
+}): AnalyzerMetric[] {
+	const metrics: AnalyzerMetric[] = [
+		{ id: "srcFiles", label: "Source files", value: input.srcFiles, unit: "count", trend: "neutral" },
+		{ id: "testFiles", label: "Test files", value: input.testFiles, unit: "count", trend: "higher-is-better" },
+		{ id: "unitTestFiles", label: "Unit test files", value: input.layerFiles.unit, unit: "count", trend: "higher-is-better" },
+		{
+			id: "integrationTestFiles",
+			label: "Integration test files",
+			value: input.layerFiles.integration,
+			unit: "count",
+			trend: "higher-is-better",
+		},
+		{
+			id: "componentTestFiles",
+			label: "Component test files",
+			value: input.layerFiles.component,
+			unit: "count",
+			trend: "higher-is-better",
+		},
+		{ id: "e2eTestFiles", label: "E2E test files", value: input.layerFiles.e2e, unit: "count", trend: "higher-is-better" },
+		{ id: "pairingPct", label: "Source files paired with tests", value: input.pairingPct, unit: "percent", trend: "higher-is-better" },
+	];
+
+	if (input.quality) {
+		metrics.push(
+			{
+				id: "assertionsPerTest",
+				label: "Assertions per test",
+				value: input.quality.avgAssertionsPerTest,
+				unit: "count",
+				trend: "higher-is-better",
+			},
+			{ id: "mockRatio", label: "Mock ratio", value: input.quality.mockRatio, trend: "lower-is-better" },
+			{ id: "snapshotRatio", label: "Snapshot ratio", value: input.quality.snapshotRatio, trend: "lower-is-better" },
+		);
+	}
+
+	if (input.execution) {
+		const passRate = input.execution.total > 0 ? Math.round((input.execution.passed / input.execution.total) * 10000) / 100 : 0;
+		metrics.push(
+			{ id: "testsPassed", label: "Tests passed", value: input.execution.passed, unit: "count", trend: "higher-is-better" },
+			{ id: "testsFailed", label: "Tests failed", value: input.execution.failed, unit: "count", trend: "lower-is-better" },
+			{ id: "testsTotal", label: "Tests total", value: input.execution.total, unit: "count", trend: "higher-is-better" },
+			{ id: "testPassRate", label: "Test pass rate", value: passRate, unit: "percent", trend: "higher-is-better" },
+		);
+	}
+
+	if (input.coverage) {
+		metrics.push(
+			{
+				id: "statementCoverage",
+				label: "Statement coverage",
+				value: input.coverage.statements,
+				unit: "percent",
+				trend: "higher-is-better",
+			},
+			{ id: "branchCoverage", label: "Branch coverage", value: input.coverage.branches, unit: "percent", trend: "higher-is-better" },
+			{ id: "lineCoverage", label: "Line coverage", value: input.coverage.lines, unit: "percent", trend: "higher-is-better" },
+			{ id: "functionCoverage", label: "Function coverage", value: input.coverage.functions, unit: "percent", trend: "higher-is-better" },
+		);
+	}
+
+	return metrics;
 }
 
 function countUntestable(srcFiles: string[]): number {

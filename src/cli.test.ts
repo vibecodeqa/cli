@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CHECK_META } from "./check-meta.js";
@@ -132,6 +132,10 @@ describe("CLI flags", () => {
 			for (const i of c.issues) {
 				if (i.file) expect(i.file).toContain("new.ts");
 			}
+		}
+		for (const snapshot of report.meta.analyzerSnapshots) {
+			const check = report.checks.find((c: { name: string }) => c.name === snapshot.analyzerId);
+			expect(snapshot.findingCount).toBe(check.issues.length);
 		}
 	}, 30_000);
 });
@@ -389,8 +393,36 @@ describe("report output", () => {
 		expectCanonicalCheckRoster(report);
 		expect(report.meta.workspace).toBeDefined();
 		expect(typeof report.meta.workspace.isMonorepo).toBe("boolean");
+		expect(report.meta.analyzerSnapshots).toHaveLength(report.checks.length);
+		expect(report.meta.analyzerSnapshots.map((snapshot: { analyzerId: string }) => snapshot.analyzerId).sort()).toEqual(
+			report.checks.map((check: { name: string }) => check.name).sort(),
+		);
 		// Also verify report file was written
 		expect(existsSync(join(TMP, ".vibe-check", "report.json"))).toBe(true);
+	}, 30_000);
+
+	it("writes local history with analyzer snapshots, check details, and durations", () => {
+		run("--skip-tests --json .");
+		const historyDir = join(TMP, ".vibe-check", "history");
+		const historyFiles = readdirSync(historyDir).filter((file) => file.endsWith(".json"));
+		expect(historyFiles).toHaveLength(1);
+
+		const report = JSON.parse(readFileSync(join(TMP, ".vibe-check", "report.json"), "utf-8"));
+		const history = JSON.parse(readFileSync(join(historyDir, historyFiles[0]!), "utf-8"));
+
+		expect(history.meta.duration).toBe(report.meta.duration);
+		expect(history.meta.analyzerSnapshots).toHaveLength(report.checks.length);
+		expect(history.meta.analyzerSnapshots.map((snapshot: { analyzerId: string }) => snapshot.analyzerId).sort()).toEqual(
+			report.checks.map((check: { name: string }) => check.name).sort(),
+		);
+		expect(history.checks[0]).toMatchObject({
+			name: expect.any(String),
+			score: expect.any(Number),
+			issueCount: expect.any(Number),
+			duration: expect.any(Number),
+			details: expect.any(Object),
+			issues: expect.any(Array),
+		});
 	}, 30_000);
 
 	it("--badge and --sarif generate output files", () => {

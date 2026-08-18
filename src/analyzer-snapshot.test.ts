@@ -30,7 +30,7 @@ describe("buildAnalyzerSnapshots", () => {
 			}),
 			check({
 				name: "dependencies",
-				details: { outdated: 2, packageManager: "pnpm", status: "passed" },
+				details: { outdated: 2, durationMs: 40, packageManager: "pnpm", status: "passed" },
 				issues: [{ severity: "warning", message: "outdated" }],
 			}),
 		]);
@@ -52,6 +52,7 @@ describe("buildAnalyzerSnapshots", () => {
 		expect(snapshots[2].metrics).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ id: "outdated", value: 2 }),
+				expect.objectContaining({ id: "durationMs", value: 40, unit: "ms" }),
 				expect.objectContaining({ id: "packageManager", value: "pnpm" }),
 			]),
 		);

@@ -93,6 +93,25 @@ describe("loadHistory", () => {
 		]);
 	});
 
+	it("loads old compact history files that do not have meta or check details", () => {
+		writeFileSync(
+			join(tmp, "2026-05-15T10-00-00.json"),
+			JSON.stringify({
+				score: 72,
+				grade: "B",
+				timestamp: "2026-05-15T10:00:00.000Z",
+				checks: [{ name: "lint", score: 80, issueCount: 0, issues: [] }],
+			}),
+		);
+
+		const entries = loadHistory(tmp);
+
+		expect(entries).toHaveLength(1);
+		expect(entries[0]).toMatchObject({ timestamp: "2026-05-15T10:00:00.000Z", score: 72 });
+		expect(entries[0].checkScores.get("lint")).toBe(80);
+		expect(entries[0].analyzerSnapshots).toEqual([]);
+	});
+
 	it("loads normalized analyzer snapshots for dashboard trends", () => {
 		writeReport(tmp, "2026-05-15T10-00-00.json", 72, [{ name: "testing", score: 64 }], "2026-05-15T10:00:00.000Z", {
 			analyzerSnapshots: [

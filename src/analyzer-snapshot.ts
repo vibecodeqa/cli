@@ -85,8 +85,8 @@ function humanizeMetricId(id: string): string {
 function metricUnitForId(id: string): AnalyzerMetric["unit"] {
 	const lower = id.toLowerCase();
 	if (lower.includes("score")) return "score";
-	if (lower.includes("percent") || lower.endsWith("pct") || lower.includes("ratio")) return "percent";
 	if (lower.includes("duration") || lower.endsWith("ms")) return "ms";
+	if (lower.includes("percent") || lower.endsWith("pct") || lower.includes("ratio")) return "percent";
 	if (lower.includes("bytes") || lower.includes("size")) return "bytes";
 	return "count";
 }
