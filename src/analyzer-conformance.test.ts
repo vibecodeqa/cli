@@ -6,6 +6,7 @@ import { scan } from "./core.js";
 import { detectWorkspace } from "./detect.js";
 import { buildFileInventory, type FileInventory, inventoryHas } from "./file-inventory.js";
 import { setGlobalIgnore, setGlobalIgnoreNames, setGlobalSrcRoots } from "./fs-utils.js";
+import { runCloudflareWorkerMcp } from "./runners/cloudflare-worker-mcp.js";
 import { runCloudflareWorkers } from "./runners/cloudflare-workers.js";
 import { runFrontendHealth } from "./runners/frontend-health.js";
 import { runHtmlQuality } from "./runners/html-quality.js";
@@ -52,6 +53,9 @@ function conformanceFixture(): { inventory: FileInventory; workspace: WorkspaceI
 			'import { randomUUID } from "node:crypto";\nexport default { fetch(_req: Request, env: { PUBLIC_FLAG: string }) { return new Response(`$' +
 			"{env.PUBLIC_FLAG}:$" +
 			"{randomUUID()}`); } };\n",
+		"src/mcp.ts":
+			'interface JsonRpcRequest { jsonrpc: "2.0"; method: string; params?: Record<string, unknown>; }\n' +
+			'export async function handleMcp(request: Request) { const body = await request.json() as JsonRpcRequest; if (body.method === "tools/list") return Response.json({ jsonrpc: "2.0", result: { tools: [] } }); if (body.method === "tools/call") return Response.json({ jsonrpc: "2.0", result: body.params?.arguments || {} }); return Response.json({ jsonrpc: "2.0", result: { protocolVersion: "2025-03-26" } }); }\n',
 		"src/App.tsx": 'export function App() { return <img src="/hero.jpg" alt="hero" />; }\n',
 		"src/Card.tsx": 'export function Card() { return <div style={{ backgroundColor: "#123456" }}>card</div>; }\n',
 		"src/generated/Bad.tsx": 'export function Bad() { return <img src="/generated.jpg" style={{ color: "#abcdef" }} />; }\n',
@@ -102,6 +106,11 @@ const FILE_DISCOVERY_CONFORMANCE_ANALYZERS: Array<{
 		name: "cloudflare-workers",
 		run: (workspace, inventory) => runCloudflareWorkers(dir, workspace, inventory),
 		expectedRule: "node-import-no-compat",
+	},
+	{
+		name: "cloudflare-worker-mcp",
+		run: (workspace, inventory) => runCloudflareWorkerMcp(dir, workspace, inventory),
+		expectedRule: "R-PROTO-1",
 	},
 	{
 		name: "frontend-health",

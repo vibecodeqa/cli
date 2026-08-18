@@ -18,6 +18,7 @@ import { withIssueFingerprints } from "./issue-fingerprint.js";
 import { runAccessibility } from "./runners/accessibility.js";
 import { runArchitecture } from "./runners/architecture.js";
 import { runBestPractices } from "./runners/best-practices.js";
+import { runCloudflareWorkerMcp } from "./runners/cloudflare-worker-mcp.js";
 import { runCloudflareWorkers } from "./runners/cloudflare-workers.js";
 import { runCodeCoherence } from "./runners/code-coherence.js";
 import { runCommentStaleness } from "./runners/comment-staleness.js";
@@ -172,6 +173,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		},
 		{ name: "container-health", fn: () => runContainerHealth(resolvedCwd) },
 		{ name: "cloudflare-workers", fn: () => runCloudflareWorkers(resolvedCwd, workspace, fileInventory) },
+		{ name: "cloudflare-worker-mcp", fn: () => runCloudflareWorkerMcp(resolvedCwd, workspace, fileInventory) },
 		{ name: "sqlite-d1", fn: () => runSqliteD1(resolvedCwd, workspace, fileInventory) },
 		{ name: "confusion", fn: () => runConfusion(resolvedCwd, fileInventory) },
 		{ name: "context", fn: () => runContext(resolvedCwd, fileInventory) },

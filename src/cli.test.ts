@@ -13,10 +13,7 @@ const TMP = join(import.meta.dirname!, "__test_cli__");
  *  here is a live TODO: the commit that registers the runner deletes its line.
  *
  *  Empty is the goal state. */
-const DOCUMENTED_BUT_NOT_EMITTED = new Set<string>([
-	// cli#95 registers runners/cloudflare-worker-mcp.ts.
-	"cloudflare-worker-mcp",
-]);
+const DOCUMENTED_BUT_NOT_EMITTED = new Set<string>([]);
 
 /** Assert the emitted check roster against the schema's, by name.
  *

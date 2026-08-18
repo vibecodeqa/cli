@@ -20,36 +20,103 @@ export function detectComponents(cwd: string, workspace?: WorkspaceInfo): string
 	const found = new Set<string>();
 	const dirs = [cwd, ...(workspace?.packages.map((p) => join(cwd, p.path)) ?? [])];
 	for (const dir of dirs) {
-		let wrangler = "";
-		for (const name of discoveryConventions.componentConfigFiles) {
-			const f = join(dir, name);
-			if (existsSync(f)) {
-				try {
-					wrangler = readFileSync(f, "utf-8");
-				} catch {
-					/* unreadable — skip */
-				}
-				break;
-			}
-		}
-		if (wrangler) {
-			found.add(wrangler.includes("pages_build_output_dir") ? "cloudflare-pages" : "cloudflare-workers");
-			if (/d1_databases/.test(wrangler)) found.add("sqlite-d1");
-			if (/kv_namespaces/.test(wrangler)) found.add("cloudflare-kv");
-			if (/r2_buckets/.test(wrangler)) found.add("cloudflare-r2");
-			if (/durable_objects/.test(wrangler)) found.add("durable-objects");
-		}
+		addWranglerComponents(found, readWranglerConfig(dir));
 		// SQL migrations without a wrangler binding still mean a SQLite-family DB in play
-		const mig = join(dir, "migrations");
-		if (!found.has("sqlite-d1") && existsSync(mig)) {
-			try {
-				if (readdirSync(mig).some((f) => f.endsWith(".sql"))) found.add("sqlite-d1");
-			} catch {
-				/* unreadable */
-			}
-		}
+		if (!found.has("sqlite-d1") && hasSqlMigrations(dir)) found.add("sqlite-d1");
+		if (hasMcpServerSignal(dir)) found.add("mcp-server");
 	}
 	return [...found].sort();
+}
+
+function readWranglerConfig(dir: string): string {
+	for (const name of discoveryConventions.componentConfigFiles) {
+		const f = join(dir, name);
+		if (!existsSync(f)) continue;
+		return readOptional(f);
+	}
+	return "";
+}
+
+function addWranglerComponents(found: Set<string>, wrangler: string): void {
+	if (!wrangler) return;
+	found.add(wrangler.includes("pages_build_output_dir") ? "cloudflare-pages" : "cloudflare-workers");
+	if (/d1_databases/.test(wrangler)) found.add("sqlite-d1");
+	if (/kv_namespaces/.test(wrangler)) found.add("cloudflare-kv");
+	if (/r2_buckets/.test(wrangler)) found.add("cloudflare-r2");
+	if (/durable_objects/.test(wrangler)) found.add("durable-objects");
+}
+
+function hasSqlMigrations(dir: string): boolean {
+	const mig = join(dir, "migrations");
+	if (!existsSync(mig)) return false;
+	try {
+		return readdirSync(mig).some((f) => f.endsWith(".sql"));
+	} catch {
+		return false;
+	}
+}
+
+function hasMcpServerSignal(dir: string): boolean {
+	const pkg = readOptional(join(dir, "package.json"));
+	if (pkg) {
+		try {
+			const parsed = JSON.parse(pkg);
+			const deps = { ...parsed.dependencies, ...parsed.devDependencies, ...parsed.peerDependencies, ...parsed.optionalDependencies };
+			if (deps["@modelcontextprotocol/sdk"] || deps["@modelcontextprotocol/server"] || deps.agents) return true;
+		} catch {
+			/* invalid package.json */
+		}
+	}
+
+	for (const file of collectMcpSignalFiles(dir)) {
+		const content = readOptional(file);
+		if (!content) continue;
+		if (/\b@modelcontextprotocol\/(?:sdk|server)\b/.test(content)) return true;
+		if (/\bagents\/mcp(?:\/server)?\b/.test(content)) return true;
+		if (/\bcreate(?:Legacy)?McpHandler\b|\bMcpAgent\b/.test(content)) return true;
+		if (/["'`]\/(?:mcp|sse)["'`]/.test(content)) return true;
+		if (/["'`]tools\/(?:list|call)["'`]/.test(content)) return true;
+	}
+	return false;
+}
+
+function collectMcpSignalFiles(dir: string): string[] {
+	const out: string[] = [];
+	const walk = (current: string, depth: number) => {
+		if (depth > 4 || out.length > 80 || !existsSync(current)) return;
+		let entries: string[];
+		try {
+			entries = readdirSync(current);
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			if (entry === "node_modules" || entry === "dist" || entry === "coverage" || entry.startsWith(".")) continue;
+			const full = join(current, entry);
+			try {
+				const stat = statSync(full);
+				if (stat.isDirectory()) {
+					walk(full, depth + 1);
+				} else if (/\.(ts|tsx|js|jsx|mjs|cjs|json|toml|md|yml|yaml)$/.test(entry) && stat.size <= 500_000) {
+					out.push(full);
+				}
+			} catch {
+				/* race */
+			}
+		}
+	};
+	for (const sub of ["src", "worker", "workers", "functions", "app", "routes", "test", "tests", ".github"]) {
+		walk(join(dir, sub), 0);
+	}
+	return out;
+}
+
+function readOptional(path: string): string {
+	try {
+		return readFileSync(path, "utf-8");
+	} catch {
+		return "";
+	}
 }
 
 export function detectStack(cwd: string, workspace?: WorkspaceInfo): StackInfo {
