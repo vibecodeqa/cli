@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.56.0 (2026-08-18)
+
+### A linter that cannot read your language no longer grades it
+0.55.1 stopped a missing Dart SDK from scoring `types` and `dependencies` at
+A/100, but `lint` still passed — it never asked for Dart at all, falling through
+to the zero-config Biome fallback, which exits 0 with no diagnostics on a tree
+it cannot parse. Zero findings from a linter that never read a line scored as a
+flawless pass.
+- **Fixed**: a Dart stack is claimed by `dart analyze` before the JavaScript
+  fallbacks can reach it, and reports `unavailable` when the SDK is absent. The
+  zero-config fallback is now gated on the project actually containing files
+  Biome can parse; `.json`/`.css` deliberately do not count, so a stray
+  `package.json` cannot make a Dart repo look lintable (#92). A JavaScript
+  project with no linter configured is unaffected and still gets Biome.
+
+### Reports that dashboards can graph
+- **Added**: the uploaded report contract is pinned, and local history now
+  retains analyzer snapshots, durations and details rather than dropping them
+  (#94). Consumers reading `meta.analyzerSnapshots` get a typed, validated
+  shape via `@vibecodeqa/schema` 0.5.0.
+- **Fixed**: every `durationMs` metric was labelled `percent` — the unit rule
+  tested "ratio" first, and `ratio` is a substring of `duration` (#94).
+- **Added**: a Cloudflare Worker MCP scanner, centrally gated on stack
+  components (#95).
+- **Changed**: the check roster is asserted by name rather than by integer, so a
+  mismatch names the offending check instead of printing two numbers (#96).
+
+**Note for consumers**: an excluded check still serialises as `score: 100,
+grade: "A"`. Read `status`/`scoreMode`/`scoreImpact`, never `grade`.
+
 ## 0.55.1 (2026-08-17)
 
 ### A tool that never ran is no longer an A
