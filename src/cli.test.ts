@@ -272,11 +272,17 @@ describe("--ci honours config failUnder (#108)", () => {
 		expect(score).toBeGreaterThan(60); // the old CI default of 60 would have passed it
 	}, 30_000);
 
-	it("passes under --ci when the score clears a config failUnder below 60", () => {
+	it("passes under --ci when a config failUnder below 60 clears a score below 60", () => {
+		// A project that scores under 60: the old CI default would fail it (exit 1).
+		const fn = (i: number) =>
+			`export function f${i}(a: any, b: any): any {\n  try { eval("x" + a); } catch (e) {}\n  // @ts-ignore\n  if (a) { if (b) { for (const x of a) { if (x) { while (b) { if ((a && b) || x) { return a as any; } } } } } }\n  return JSON.parse(b);\n}\n`;
+		const body = Array.from({ length: 40 }, (_, i) => fn(i)).join("");
+		for (let j = 0; j < 6; j++) writeFileSync(join(TMP, "src", `m${j}.ts`), body);
 		writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ failUnder: 1 }));
 		const { status, out } = scan("--ci --skip-tests .");
+		const score = Number(/Passing: score (\d+) \u2265 1 \(config\)/.exec(out)?.[1]);
 		expect(status).toBe(0);
-		expect(out).toMatch(/Passing: score \d+ \u2265 1 \(config\)/);
+		expect(score).toBeLessThan(60); // the old CI default of 60 would have failed it
 	}, 30_000);
 
 	it("--fail-under overrides config under --ci", () => {
@@ -299,7 +305,8 @@ describe("init command", () => {
 		expect(existsSync(join(TMP, ".github", "workflows", "vibecodeqa.yml"))).toBe(true);
 		const workflow = readFileSync(join(TMP, ".github", "workflows", "vibecodeqa.yml"), "utf-8");
 		expect(workflow).toContain("pull_request");
-		expect(workflow).toContain("--fail-under");
+		expect(workflow).toContain("--ci");
+		expect(workflow).not.toContain("--fail-under"); // the gate lives in .vcqa.json (#108)
 	});
 
 	it("does not overwrite existing workflow", () => {
@@ -339,11 +346,12 @@ describe("init command", () => {
 		expect(Object.keys(config.checks)).toContain("confusion");
 		expect(Object.keys(config.checks)).toContain("context");
 		expect(Object.keys(config.checks).length).toBe(Object.keys(CHECK_META).length);
+		// The CI gate the scaffolded workflow enforces lives here, not in a flag (#108)
+		expect(config.failUnder).toBe(70);
 		// Should have help fields
 		expect(config._comment).toContain("vibecodeqa.online");
 		expect(config._checks_help).toContain("enabled");
 		expect(config._ignore_help).toContain("vendor");
-		expect(config.failUnder).toBe(60);
 	});
 
 	it("does not overwrite existing .vcqa.json", () => {
