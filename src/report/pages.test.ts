@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fakeGithubPat, leakedWindows } from "../runners/fake-credentials.test-helper.js";
+import { fakeBody, fakeGithubPat, leakedWindows } from "../runners/fake-credentials.test-helper.js";
 import type { CheckResult, VibeReport } from "../types.js";
 
 // We test categoryPage indirectly through generatePages
@@ -176,6 +176,29 @@ describe("report generation", () => {
 		expect(foundations).toContain("[REDACTED]");
 		expect(pages.get("security.html") || "").not.toContain('<div class="src-block">');
 		for (const html of pages.values()) expect(leakedWindows(t.body, html)).toEqual([]);
+	});
+
+	it("redacts a PEM body even when the snippet window does not include its BEGIN line", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-report-"));
+		mkdirSync(join(dir, "src"), { recursive: true });
+		const body = Array.from({ length: 10 }, () => fakeBody(64));
+		const pem = [["-----BEGIN ", "PRIVATE KEY-----"].join(""), ...body, ["-----END ", "PRIVATE KEY-----"].join("")];
+		writeFileSync(join(dir, "src/keys.ts"), ["export const key = `", ...pem, "`;", 'console.log("loaded");', ""].join("\n"));
+		// Line 15 is console.log; its ±4 window (11–19) covers the last body lines and END, not BEGIN (line 2).
+		const report = makeReport(dir, [
+			{
+				name: "standards",
+				score: 80,
+				grade: "B",
+				details: {},
+				duration: 10,
+				issues: [{ severity: "warning", message: "console.log found", file: "src/keys.ts", line: 15, rule: "no-console" }],
+			},
+		]);
+		const page = generatePages(report).get("foundations.html") || "";
+		expect(page).toContain("src-hl");
+		expect(page).toContain("console.log(");
+		for (const line of body) expect(leakedWindows(line, page)).toEqual([]);
 	});
 
 	it("handles missing source files gracefully", () => {

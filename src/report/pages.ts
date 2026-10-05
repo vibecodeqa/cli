@@ -1,6 +1,6 @@
 /** Page renderers for the HTML report. */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { type CheckMeta, getCheckMeta } from "../check-meta.js";
 import { suggestFix } from "../commands/shared.js";
@@ -125,27 +125,45 @@ function isCredentialFinding(check: string, rule: string | undefined): boolean {
 	return check === "secrets" || rule === "CWE-598" || rule === "CWE-798" || /secret|credential|password|token/i.test(rule ?? "");
 }
 
+/** Largest file we render snippets from. */
+const MAX_SNIPPET_SOURCE = 2 * 1024 * 1024;
+/** Redacted lines per file for one render; a file with many issues is redacted once. */
+const redactedSources = new Map<string, { mtimeMs: number; size: number; lines: string[] | null }>();
+
+/** The file's lines with credentials redacted over the WHOLE file — a ±4-line
+ *  window can hold a PEM body without its BEGIN line, which only the full text
+ *  identifies. Null when the line structure would not survive redaction. */
+function redactedSourceLines(fullPath: string): string[] | null {
+	const { mtimeMs, size } = statSync(fullPath);
+	const cached = redactedSources.get(fullPath);
+	if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return cached.lines;
+	let lines: string[] | null = null;
+	if (size <= MAX_SNIPPET_SOURCE) {
+		const content = readFileSync(fullPath, "utf-8");
+		const redacted = redactSecrets(content).split("\n");
+		lines = redacted.length === content.split("\n").length ? redacted : null;
+	}
+	if (redactedSources.size > 500) redactedSources.clear();
+	redactedSources.set(fullPath, { mtimeMs, size, lines });
+	return lines;
+}
+
 /** Read source lines around an issue for inline display in the report. */
 function readSourceSnippet(cwd: string, file: string, line: number, radius = 4): string | null {
 	try {
 		const fullPath = join(cwd, file);
 		if (!existsSync(fullPath)) return null;
-		const content = readFileSync(fullPath, "utf-8");
-		const all = content.split("\n");
+		const lines = redactedSourceLines(fullPath);
+		if (!lines) return null;
 		const target = line - 1;
 		const start = Math.max(0, target - radius);
-		const end = Math.min(all.length, target + radius + 1);
-		// A hardcoded credential near any finding would otherwise be copied into
-		// the report. If redaction folds lines together (a PEM body), show nothing.
-		const window = all.slice(start, end);
-		const redacted = redactSecrets(window.join("\n")).split("\n");
-		if (redacted.length !== window.length) return null;
+		const end = Math.min(lines.length, target + radius + 1);
 		let html = "";
 		for (let i = start; i < end; i++) {
 			const num = String(i + 1).padStart(4);
 			const hl = i === target;
 			const cls = hl ? "src-hl" : "src-ln";
-			html += `<div class="${cls}"><span class="src-num">${num}</span>${e(redacted[i - start])}</div>`;
+			html += `<div class="${cls}"><span class="src-num">${num}</span>${e(lines[i])}</div>`;
 		}
 		return html;
 	} catch {

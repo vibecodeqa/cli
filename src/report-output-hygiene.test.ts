@@ -33,13 +33,15 @@ function makeProject(): string[] {
 	writeFileSync(join(project, ".gitignore"), ".dev.vars\n.vibe-check/\n");
 	const pat = fakeGithubPat();
 	const generic = fakeBody(32);
-	writeFileSync(join(project, ".dev.vars"), `GITHUB_TOKEN=${pat.value}\nSESSION_SECRET=${generic}\n`);
+	// Quoted too: in a tool's JSON log this line becomes DB_PASSWORD=\"…\".
+	const quoted = fakeBody(16);
+	writeFileSync(join(project, ".dev.vars"), `GITHUB_TOKEN=${pat.value}\nSESSION_SECRET=${generic}\nDB_PASSWORD="${quoted}"\n`);
 	// A tracked file too, so built-in findings (and their HTML rendering) are exercised.
 	const tracked = fakeGithubPat();
 	writeFileSync(join(project, "src", "client.ts"), `export const token = "${tracked.value}";\n`);
 	execFileSync("git", ["init", "-q"], { cwd: project });
 	execFileSync("git", ["remote", "add", "origin", "https://github.com/example-owner/example-repo.git"], { cwd: project });
-	return [pat.body, generic, tracked.body];
+	return [pat.body, generic, quoted, tracked.body];
 }
 
 function cli(args: string[], env: NodeJS.ProcessEnv): string {
@@ -120,8 +122,11 @@ describe("test-runner output never carries a local credential's value", () => {
 		writeFileSync(join(project, "package.json"), JSON.stringify({ name: "hygiene-fixture", devDependencies: { vitest: "*" } }));
 		writeFileSync(
 			join(project, "src", "env.test.ts"),
+			// One test per line, so every value (quoted ones too) lands in a failure message.
 			'import { readFileSync } from "node:fs";\nimport { expect, it } from "vitest";\n' +
-				'it("has no local overrides", () => {\n\texpect(readFileSync(".dev.vars", "utf-8")).toBe("");\n});\n',
+				'const lines = readFileSync(".dev.vars", "utf-8").split("\\n").filter(Boolean);\n' +
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: source of the generated test file, not a template here
+				'for (const [i, line] of lines.entries()) it(`has no local override ${i}`, () => expect(line).toBe(""));\n',
 		);
 		// The scan asks for `vitest --coverage`; the coverage plugin is not a dependency
 		// here, so a shim drops that one flag and runs the real vitest.
@@ -143,7 +148,7 @@ process.exit(r.status ?? 1);
 		const report = JSON.parse(outputs[".vibe-check/report.json"]!) as VibeReport;
 		const testing = report.checks.find((c) => c.name === "testing")!;
 		// The failure really was parsed into details — the path that used to keep the raw message.
-		expect(JSON.stringify(testing.details)).toContain("has no local overrides");
+		expect(JSON.stringify(testing.details)).toContain("has no local override 2"); // the quoted line
 		expect(JSON.stringify(testing.details)).toContain("[REDACTED]");
 		expectNoLeaks(bodies, outputs);
 	});

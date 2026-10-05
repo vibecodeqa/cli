@@ -58,11 +58,9 @@ const NOT_AFTER_TOKEN = "(?<![A-Za-z0-9_-])";
 const LABELLED_VALUE_PATTERNS: RegExp[] = [
 	// scheme://user:password@host — the password runs to the LAST @ before the host,
 	// so a password containing @ is dropped whole (basicauth, mongodb, mysql, postgres).
-	/(?<![a-z0-9+.-])([a-z][a-z0-9+.-]{1,20}:\/\/[^:/\s@"'`]{1,256}:)([^/\s"'`]{1,256})(?=@[^@/\s"'`]{0,256}(?:[/\s"'`?#]|$))/gi,
+	/(?<![a-z0-9+.-])([a-z][a-z0-9+.-]{1,20}:\/\/[^:/\s@"'`]{0,256}:)([^/\s"'`]{1,256})(?=@[^@/\s"'`]{0,256}(?:[/\s"'`?#]|$))/gi,
 	// https://TOKEN:x-oauth-basic@github.com
 	/(https?:\/\/)([^:/\s@"'`]{1,256})(?=:x-oauth-basic@)/gi,
-	// scheme://TOKEN@host — a token as the whole userinfo (git remotes, Sentry DSNs)
-	/(?<![a-z0-9+.-])([a-z][a-z0-9+.-]{1,20}:\/\/)([^:/\s@"'`]{16,256})(?=@)/gi,
 	// .npmrc
 	/(_authToken[ \t]*=[ \t]*)([^\s"'`]{1,512})/g,
 	// AWS secret access key assignments
@@ -71,30 +69,108 @@ const LABELLED_VALUE_PATTERNS: RegExp[] = [
 	/((?:password|secret|api_key|apikey|token|auth)[ \t]*[:=][ \t]*['"])([A-Za-z0-9+/=]{20,})/gi,
 ];
 
+/** scheme://TOKEN@host — a token as the whole userinfo (git remotes, Sentry DSNs).
+ *  Redacted when it is long or has a digit; `git@`/`deploy@` style users stay. */
+const URL_USERINFO = /(?<![a-z0-9+.-])([a-z][a-z0-9+.-]{1,20}:\/\/)([^:/\s@"'`\\]{6,256})(?=@)/gi;
+
+/** --password VALUE, --token=VALUE and friends on a command line. */
+const CLI_FLAG =
+	/(--(?:password|passwd|pass|token|secret|api-?key|auth-token|access-token|client-secret|private-key)(?:=|[ \t]+))([^\s"'`\\-][^\s"'`\\]{0,511})/gi;
+
+/** ?key=VALUE&token=VALUE in URLs. */
+const QUERY_PARAM =
+	/([?&](?:api[_-]?key|key|token|access_token|id_token|refresh_token|auth|secret|client_secret|password|passwd|sig|signature|code)=)([^&\s"'`#\\]{4,512})/gi;
+
 /** Authorization header values. */
 const AUTH_HEADER = /\b((?:Bearer|Basic|Token)[ \t]+)([A-Za-z0-9._~+/=-]{16,4096})/gi;
 
-/** A name that is a credential whatever its value looks like. */
-const STRONG_NAME = /(?:secret|token|passw(?:or)?d|passphrase|pwd|credential|(?:^|[_.-])(?:sk|pat|pw)$|^(?:sk|pat|pw)[_.-])/i;
-/** A name that is a credential only when the value looks like one. */
-const WEAK_NAME = /(?:key|auth(?!or)|dsn|private|session|cookie)/i;
+/** Name segments that make a value a credential whatever it looks like. A
+ *  segment may also END in one (`clientsecret`, `PGPASSWORD`, `accesstoken`). */
+const STRONG_WORDS = ["secret", "secrets", "token", "password", "passwd", "passphrase", "pwd", "credential", "credentials"];
+/** Short words that count only as a whole segment (`STRIPE_SK`, `GH_PAT`). */
+const STRONG_SEGMENTS = new Set(["sk", "pat", "pw", "pass"]);
+/** `key` is a credential only after one of these (`apiKey`, `PRIVATE_KEY`), not `cacheKey`. */
+const KEY_QUALIFIERS = new Set([
+	"api",
+	"access",
+	"secret",
+	"private",
+	"client",
+	"signing",
+	"encryption",
+	"master",
+	"license",
+	"service",
+	"app",
+	"ssh",
+	"deploy",
+	"webhook",
+	"auth",
+	"admin",
+	"publishable",
+	"subscription",
+	"account",
+	"project",
+	"stripe",
+	"openai",
+	"anthropic",
+]);
+const KEY_COMPOUNDS =
+	/^(?:api|access|secret|private|client|signing|encryption|master|license|service|app|ssh|deploy|webhook|auth|admin)keys?$/;
+/** Segments that make a value a credential only when it also looks like one. */
+const WEAK_SEGMENTS = new Set(["key", "auth", "authorization", "dsn", "private", "session", "cookie"]);
 
-/** NAME=value, NAME: value, "name": "value", NAME="value with spaces". The name
- *  is one token, matched only at a token start, so this stays linear. */
+function nameSegments(name: string): string[] {
+	return name
+		.replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+		.toLowerCase()
+		.split(/[_.-]+/)
+		.filter(Boolean);
+}
+
+/** How strongly a name says its value is a credential, judged per segment so
+ *  `tokenizer`, `keyframes`, `monkey` and `cacheKey` are not credentials. */
+function nameKind(name: string): "strong" | "weak" | null {
+	const segs = nameSegments(name);
+	let weak = false;
+	for (let i = 0; i < segs.length; i++) {
+		const seg = segs[i]!;
+		if (STRONG_SEGMENTS.has(seg) || STRONG_WORDS.some((w) => seg === w || seg.endsWith(w))) return "strong";
+		if (KEY_COMPOUNDS.test(seg)) return "strong";
+		if ((seg === "key" || seg === "keys") && i > 0 && KEY_QUALIFIERS.has(segs[i - 1]!)) return "strong";
+		if (WEAK_SEGMENTS.has(seg) && (seg !== "key" || segs.length === 1)) weak = true;
+	}
+	return weak ? "weak" : null;
+}
+
+/** NAME=value, NAME: value, NAME := value, NAME => value, "name": "value",
+ *  NAME="value with spaces" — also inside JSON-escaped text (a tool's JSON log
+ *  holding `NAME=\"value\"`), where the quotes are `\"` and line breaks are `\n`.
+ *  An unquoted value stops at a backslash so it never runs across an escaped
+ *  line break. The name is one token, matched only at a token start: linear. */
 const ASSIGNMENT =
-	/(?<![A-Za-z0-9_.-])([A-Za-z][A-Za-z0-9_.-]{0,127})(["']?[ \t]*[:=][ \t]*)(?:(["'])([^"'\n]{1,512})\3|([^\s"'`,;]{1,512}))/g;
+	/(?<![A-Za-z0-9_.-])([A-Za-z][A-Za-z0-9_.-]{0,127})((?:\\?["'])?[ \t]*(?::=|=>|[:=])[ \t]*)(?:(\\?["'])((?:[^"'\n\\]|\\[^"'\n]){1,512})\3|([^\s"'`,;\\]{1,512}))/g;
+
+/** An environment reference, not a value: $VAR, ${VAR}, %VAR%, process.env.VAR. */
+const ENV_REFERENCE = /^(?:\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|%[A-Za-z_][A-Za-z0-9_]*%|process\.env\.[A-Za-z_][A-Za-z0-9_]*)$/;
+/** Code, not a value: `token = getToken()`, `password: req.body.password`. */
+const CODE_EXPRESSION = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\([^)]*\))?$/;
 
 function isCredentialValue(name: string, value: string, quoted: boolean): boolean {
 	if (value.startsWith("[REDACTED") || value === "REDACTED") return false;
-	// References, code and literals, not values: $VAR, {expr}, [list], true, 1234.
-	if (/^[[{(<$%]|^process\.env|^(?:true|false|null|undefined|none|nil)$/i.test(value)) return false;
-	if (/^[\d.]+$/.test(value)) return false;
-	// Code, not a value: `token = getToken()`, `password: req.body.password`.
-	if (!quoted && (/[()]/.test(value) || /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(value))) return false;
-	if (STRONG_NAME.test(name)) return value.length >= 6;
-	if (!WEAK_NAME.test(name)) return false;
+	if (ENV_REFERENCE.test(value) || /^(?:true|false|null|undefined|none|nil)$/i.test(value)) return false;
+	const kind = nameKind(name);
+	if (!kind) return false;
+	if (/^\d+(?:\.\d+)?$/.test(value)) return kind === "strong" && /^\d{8,}$/.test(value); // ports, counts vs numeric PINs
+	if (!quoted && (value.includes("(") || value.includes(".")) && CODE_EXPRESSION.test(value)) return false;
+	if (kind === "strong") return value.length >= 6;
+	if (/^[[{(<]/.test(value)) return false; // JSX/props under weak names: key={index}
 	if (quoted && value.length >= 8 && /\s/.test(value)) return true;
 	return value.length >= 20 || (value.length >= 8 && /[A-Za-z]/.test(value) && /\d/.test(value));
+}
+
+function redactWhen(text: string, re: RegExp, keep: (label: string, value: string) => boolean): string {
+	return text.replace(re, (m, label: string, value: string) => (keep(label, value) ? m : `${label}${REDACTED}`));
 }
 
 /** Token formats with a recognisable prefix — the secretlint recommended preset's
@@ -152,7 +228,9 @@ function redactPem(text: string): string {
 		const end = PEM_END.exec(window);
 		// No END in range (truncated output): drop the base64-ish run that follows.
 		const bodyLen = end ? end.index + end[0].length : (/^[A-Za-z0-9+/=\s\\]*/.exec(window)?.[0].length ?? 0);
-		out += text.slice(last, m.index) + REDACTED;
+		// Keep the line breaks so line numbers around the key stay right.
+		const breaks = text.slice(m.index, bodyStart + bodyLen).split("\n").length - 1;
+		out += text.slice(last, m.index) + REDACTED + "\n".repeat(breaks);
 		last = bodyStart + bodyLen;
 		PEM_BEGIN.lastIndex = Math.max(last, PEM_BEGIN.lastIndex);
 	}
@@ -169,7 +247,10 @@ export function redactSecrets(text: string): string {
 		if (!hasUrl && re.source.includes(":\\/\\/")) continue; // URL patterns need a URL
 		out = out.replace(re, (_m, label: string) => `${label}${REDACTED}`);
 	}
-	out = out.replace(AUTH_HEADER, (m, label: string, value: string) => (/\d/.test(value) || value.length >= 24 ? `${label}${REDACTED}` : m));
+	if (hasUrl) out = redactWhen(out, URL_USERINFO, (_l, v) => v.length < 16 && !/\d/.test(v));
+	out = redactWhen(out, QUERY_PARAM, (_l, v) => ENV_REFERENCE.test(v));
+	out = redactWhen(out, CLI_FLAG, (_l, v) => ENV_REFERENCE.test(v));
+	out = redactWhen(out, AUTH_HEADER, (_l, v) => !/\d/.test(v) && v.length < 24);
 	out = out.replace(
 		ASSIGNMENT,
 		(m, name: string, sep: string, quote: string | undefined, quoted: string | undefined, bare: string | undefined) => {
@@ -190,9 +271,25 @@ const REDACT_LOOKAHEAD = 64 * 1024;
  *  may not match any pattern, so the text near that boundary is never kept. */
 const BOUNDARY_MARGIN = 4096;
 
+/** Largest log we parse as JSON to redact field by field. */
+const MAX_JSON_LOG = 4 * 1024 * 1024;
+
+/** A JSON log, parsed, with every string redacted in its unescaped form, and
+ *  re-serialised. Escaping hides quotes and line breaks from text patterns. */
+function redactJsonLog(text: string): string | null {
+	if (text.length > MAX_JSON_LOG || !/^[[{]/.test(text)) return null;
+	try {
+		return JSON.stringify(redactDeep(JSON.parse(text)), null, 1);
+	} catch {
+		return null;
+	}
+}
+
 /** Tool output as it may be persisted: redacted, then capped at `cap` chars. */
 export function redactToolOutput(text: string, cap: number): string {
 	const trimmed = text.trim();
+	const json = redactJsonLog(trimmed);
+	if (json !== null) return redactSecrets(json).slice(0, cap);
 	const prefixed = trimmed.length > cap + REDACT_LOOKAHEAD;
 	let out = redactSecrets(prefixed ? trimmed.slice(0, cap + REDACT_LOOKAHEAD) : trimmed);
 	if (prefixed) out = out.slice(0, Math.max(0, out.length - BOUNDARY_MARGIN));

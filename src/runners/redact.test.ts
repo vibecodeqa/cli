@@ -57,6 +57,19 @@ describe("redactSecrets", () => {
 		["quoted value with spaces", () => ((b) => ({ text: `API_KEY="${b.slice(0, 6)} ${b.slice(6)}"`, body: b }))(fakeBody(18))],
 		["short password", () => ((b) => ({ text: `PASSWORD=${b}`, body: b }))(fakeBody(10))],
 		["*_SK name", () => ((b) => ({ text: `STRIPE_SK=${b}`, body: b }))(fakeBody(12))],
+		// JSON-escaped tool logs (vitest/eslint JSON holding a line of a .env file)
+		["JSON-escaped quoted value", () => ((b) => ({ text: String.raw`{"m":"DB_PASSWORD=\"${b}\"\nNEXT=1"}`, body: b }))(fakeBody(16))],
+		[
+			"JSON-escaped value followed by code on the next line",
+			() => ((b) => ({ text: String.raw`"API_TOKEN=${b}\nconst x = getFoo(a)"`, body: b }))(fakeBody(16)),
+		],
+		["URL password with empty user", () => ((b) => ({ text: `redis://:${b}@cache.internal:6379/0`, body: b }))(fakeBody(16))],
+		["short token userinfo", () => ((b) => ({ text: `https://${b}@git.example.com/r.git`, body: b }))(fakeBody(10))],
+		["--password flag", () => ((b) => ({ text: `mysqldump --password ${b} db`, body: b }))(fakeBody(12))],
+		["query parameter", () => ((b) => ({ text: `GET /v1/data?key=${b}&page=2`, body: b }))(fakeBody(16))],
+		["=> assignment", () => ((b) => ({ text: `'password' => '${b}',`, body: b }))(fakeBody(12))],
+		[":= assignment", () => ((b) => ({ text: `dbPassword := "${b}"`, body: b }))(fakeBody(12))],
+		["value starting with a symbol", () => ((b) => ({ text: `PASSWORD=%${b}`, body: b }))(fakeBody(12))],
 	];
 
 	for (const [name, make] of cases) {
@@ -74,8 +87,23 @@ describe("redactSecrets", () => {
 		expect(redactSecrets(`postgres://admin:${b}@db.internal/app`)).toBe("postgres://admin:[REDACTED]@db.internal/app");
 	});
 
+	it("redacts long numeric passwords but not ports and counts", () => {
+		expect(redactSecrets("DB_PASSWORD=73915582")).toBe("DB_PASSWORD=[REDACTED]");
+		expect(redactSecrets("DB_PORT=5432 tokens: 1234")).toBe("DB_PORT=5432 tokens: 1234");
+	});
+
+	it("matches credential names by segment, not substring", () => {
+		for (const text of ["monkey=banana12345", "keyframes=fade-in-out-2", "cacheKey=user-12345678", "tokenizer: wordpiece-v2-uncased"]) {
+			expect(redactSecrets(text)).toBe(text);
+		}
+		expect(redactSecrets("apiKey=abcd1234efgh")).toBe("apiKey=[REDACTED]");
+		expect(redactSecrets("PGPASSWORD=hunter22")).toBe("PGPASSWORD=[REDACTED]");
+	});
+
 	it("leaves code expressions and references alone", () => {
 		for (const text of [
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: a literal shell-style reference is the input under test
+			"PASSWORD=${DB_PASSWORD}",
 			"const token = getToken();",
 			"password: req.body.password,",
 			"key={index}",
@@ -157,6 +185,11 @@ describe("redaction cost is linear (tool output is attacker-shapeable)", () => {
 		["URL scheme fragments", "https://aaaaaaaa:"],
 		["auth header prefixes", "Bearer "],
 		["sk- prefixes", "sk-aaaaaaaaaaaaaaaaaaa "],
+		["escaped quotes after credential names", 'PASSWORD=\\"aaaa\\\\'],
+		["unterminated escaped quoted values", `TOKEN=\\"${"a".repeat(600)}`],
+		["query parameters", "?key=aaaa&token="],
+		["CLI flags", "--password --token "],
+		["URL userinfo", "https://aaaaaaaaaaaa"],
 	];
 	for (const [name, unit] of pathological) {
 		it(`1 MB of ${name} redacts in under 1 s`, () => {
@@ -177,6 +210,14 @@ describe("redaction cost is linear (tool output is attacker-shapeable)", () => {
 });
 
 describe("redactToolOutput", () => {
+	it("redacts JSON logs field by field, unescaped", () => {
+		const b = fakeBody(16);
+		const log = JSON.stringify({ testResults: [{ message: `expected 'DB_PASSWORD="${b}"\nNEXT=1' to be ''` }] });
+		const out = redactToolOutput(log, 8000);
+		expect(leakedWindows(b, out)).toEqual([]);
+		expect(JSON.parse(out).testResults[0].message).toContain("DB_PASSWORD=");
+	});
+
 	it("never keeps text from near the redacted-prefix boundary, even when redaction shrinks the prefix", () => {
 		// 70 KB of tokens that collapse to [REDACTED], then a credential beyond the prefix.
 		const t = fakeGithubPat();
