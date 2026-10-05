@@ -19,6 +19,8 @@ export interface ReportHistorySnapshot {
 	meta: {
 		duration: number;
 		analyzerSnapshots: AnalyzerSnapshot[];
+		/** Kept so a partial (`--diff`) scan stays recognisable in history. */
+		scan?: { id: string; skipTests: boolean; diffBase: string | null };
 	};
 	checks: Array<{
 		name: string;
@@ -39,6 +41,7 @@ export function buildReportHistorySnapshot(report: VibeReport): ReportHistorySna
 		meta: {
 			duration: normalized.meta.duration,
 			analyzerSnapshots: normalized.meta.analyzerSnapshots ?? [],
+			...scanInfo(normalized),
 		},
 		checks: normalized.checks.map((check) => ({
 			name: check.name,
@@ -49,4 +52,9 @@ export function buildReportHistorySnapshot(report: VibeReport): ReportHistorySna
 			issues: check.issues.map((issue) => issueSnapshot(check.name, issue)),
 		})),
 	};
+}
+
+function scanInfo(report: VibeReport): Pick<ReportHistorySnapshot["meta"], "scan"> {
+	const scan = (report.meta as { scan?: ReportHistorySnapshot["meta"]["scan"] }).scan;
+	return scan ? { scan } : {};
 }

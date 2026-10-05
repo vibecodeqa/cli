@@ -1,0 +1,25 @@
+{
+	"ref": "refs/heads/feature/new",
+	"before": "0000000000000000000000000000000000000000",
+	"after": "cccccccccccccccccccccccccccccccccccccccc",
+	"created": true,
+	"deleted": false,
+	"forced": false,
+	"head_commit": {
+		"id": "cccccccccccccccccccccccccccccccccccccccc",
+		"timestamp": "2026-10-01T09:30:00+10:00",
+		"message": "start"
+	},
+	"repository": {
+		"full_name": "octo-org/widgets",
+		"name": "widgets",
+		"owner": {
+			"login": "octo-org"
+		},
+		"default_branch": "main",
+		"html_url": "https://github.com/octo-org/widgets"
+	},
+	"sender": {
+		"login": "octocat"
+	}
+}

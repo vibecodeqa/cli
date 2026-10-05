@@ -68,6 +68,32 @@ describe("computeTrend", () => {
 		expect(trend.fixed?.[0]).toMatchObject({ rule: "old", file: "src/a.ts" });
 	});
 
+	it("counts repeated fingerprints as a multiset: fixing one of two identical findings reports one fixed", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-trend-"));
+		const dup = { severity: "warning" as const, rule: "no-any", message: "Avoid any", file: "src/a.ts" };
+		const prev = makeReport(80, [{ name: "types", score: 80, issues: 0 }]);
+		prev.checks[0].issues = [
+			{ ...dup, line: 3 },
+			{ ...dup, line: 9 },
+		];
+		writeFileSync(join(dir, "report.json"), JSON.stringify(prev));
+
+		const curr = makeReport(81, [{ name: "types", score: 81, issues: 0 }]);
+		curr.checks[0].issues = [{ ...dup, line: 3 }];
+
+		const trend = computeTrend(curr, dir)!;
+		expect(trend.fixedIssues).toBe(1);
+		expect(trend.newIssues).toBe(0);
+		expect(trend.fixed).toHaveLength(1);
+		expect(trend.fixed?.[0]).toMatchObject({ rule: "no-any", file: "src/a.ts" });
+
+		const back = mkdtempSync(join(tmpdir(), "vcqa-trend-"));
+		writeFileSync(join(back, "report.json"), JSON.stringify(curr));
+		const reverse = computeTrend(prev, back)!;
+		expect(reverse.newIssues).toBe(1);
+		expect(reverse.fixedIssues).toBe(0);
+	});
+
 	it("detects regressions", () => {
 		const dir = mkdtempSync(join(tmpdir(), "vcqa-trend-"));
 		const prev = makeReport(90, [{ name: "lint", score: 90, issues: 1 }]);
