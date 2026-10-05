@@ -90,21 +90,23 @@ describe("test run timeout (#106)", () => {
 	it.skipIf(process.platform === "win32")(
 		"a run past the configured limit is a warning, scores like --skip-tests, reads no coverage and leaves no process",
 		async () => {
-			const dir = makeFixture(30_000, { timeoutMs: 2000 });
+			// 5 s, not less: the fake must start and write pids.json before the limit,
+			// even on a loaded CI runner.
+			const dir = makeFixture(30_000, { timeoutMs: 5000 });
 			const { check, details, toolRuns } = await scanTesting(dir);
 
 			const run = toolRuns.find((r) => r.tool === "vitest");
-			expect(run).toMatchObject({ status: "timeout", timedOut: true, timeoutMs: 2000, ok: false });
-			expect(run?.durationMs).toBeLessThan(10_000);
+			expect(run).toMatchObject({ status: "timeout", timedOut: true, timeoutMs: 5000, ok: false });
+			expect(run?.durationMs).toBeLessThan(15_000);
 
-			expect(details.testTimeoutMs).toBe(2000);
+			expect(details.testTimeoutMs).toBe(5000);
 			expect(details.testTimeoutSource).toBe("config");
 			expect(details.executionStatus).toBe("timeout");
 			expect(details.testProjects).toHaveLength(1);
 			expect(details.testProjects[0]).toMatchObject({
 				status: "timeout",
-				statusLabel: "timed out after 2 s",
-				timeoutMs: 2000,
+				statusLabel: "timed out after 5 s",
+				timeoutMs: 5000,
 				coverageStatus: "not-reported",
 				coverage: null,
 			});
@@ -207,7 +209,9 @@ describe("timeout scoring across projects (#106)", () => {
 				// still read, as before #106, and would differ between the two runs.
 				rmSync(join(dir, "packages/other/coverage"), { recursive: true });
 				const srcRoots = ["packages/slow/src", "packages/other/src"];
-				return runTesting(dir, detectStack(dir), false, srcRoots, undefined, undefined, { timeoutMs: 1500 });
+				// One limit for both projects: generous enough that the failing one
+				// always finishes under load; the 30 s sleeper still times out.
+				return runTesting(dir, detectStack(dir), false, srcRoots, undefined, undefined, { timeoutMs: 5000 });
 			};
 			const bothTimedOut = run(30_000);
 			const oneFailed = run("fail");
@@ -220,7 +224,7 @@ describe("timeout scoring across projects (#106)", () => {
 			// Same static points; only execution differs: 10 when all timed out, 0 here.
 			expect(oneFailed.score).toBe(bothTimedOut.score - 10);
 		},
-		30_000,
+		60_000,
 	);
 });
 
