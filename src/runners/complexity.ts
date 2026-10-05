@@ -15,6 +15,10 @@ interface FunctionMetric {
 	complexity: number;
 }
 
+/** Words the start-of-function patterns would otherwise capture as a name:
+ *  `if (…) {` at module scope or in a class body is a block, not a function. */
+const NOT_FUNCTION_NAMES = new Set(["if", "for", "while", "switch", "catch", "with", "return", "await", "typeof", "new", "super"]);
+
 const MAX_FUNCTION_LINES = 60;
 const MAX_COMPLEXITY = 15;
 
@@ -86,6 +90,17 @@ export function runComplexity(cwd: string, inventory?: FileInventory): CheckResu
 	};
 }
 
+/** The name a line starts a function with, or undefined when it starts none. */
+function functionStartName(trimmed: string): string | undefined {
+	const match =
+		trimmed.match(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)/) ||
+		trimmed.match(/^(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\(/) ||
+		trimmed.match(/^(?:private|public|protected)?\s*(?:async\s+)?(\w+)\s*\([^)]*\)\s*(?::\s*\w[^{]*)?\{/) ||
+		trimmed.match(/^(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{/);
+	if (!match || NOT_FUNCTION_NAMES.has(match[1])) return undefined;
+	return match[1] ?? "";
+}
+
 /** Simple heuristic function extraction — not a full AST parser but good enough for metrics. */
 function extractFunctions(content: string, filePath: string): FunctionMetric[] {
 	const funcs: FunctionMetric[] = [];
@@ -101,14 +116,10 @@ function extractFunctions(content: string, filePath: string): FunctionMetric[] {
 
 		// Detect function start
 		if (funcStart === -1) {
-			const match =
-				trimmed.match(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)/) ||
-				trimmed.match(/^(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\(/) ||
-				trimmed.match(/^(?:private|public|protected)?\s*(?:async\s+)?(\w+)\s*\([^)]*\)\s*(?::\s*\w[^{]*)?\{/) ||
-				trimmed.match(/^(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{/);
-			if (match) {
+			const name = functionStartName(trimmed);
+			if (name !== undefined) {
 				funcStart = i;
-				funcName = match[1] || "anonymous";
+				funcName = name || "anonymous";
 				braceCount = 0;
 			}
 		}
