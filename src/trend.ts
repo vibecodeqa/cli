@@ -2,12 +2,14 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { checkSide, compareCheckSides, formatTransition, type StatusTransition } from "./delta.js";
 import { type IssueSnapshot, issueSnapshot, readIssueFingerprint } from "./issue-fingerprint.js";
 import type { VibeReport } from "./types.js";
 
 export interface TrendDelta {
 	scoreDelta: number; // positive = improved
-	checkDeltas: { name: string; prev: number; curr: number; delta: number }[];
+	/** `delta` is 0 and `transition` is set when either side did not run (#107). */
+	checkDeltas: { name: string; prev: number; curr: number; delta: number; transition?: StatusTransition }[];
 	newIssues: number;
 	fixedIssues: number;
 	introduced?: IssueSnapshot[];
@@ -34,11 +36,13 @@ export function computeTrend(report: VibeReport, outputDir: string): TrendDelta 
 	for (const curr of report.checks) {
 		const prevCheck = prev.checks.find((c) => c.name === curr.name);
 		const prevScore = prevCheck?.score ?? 0;
+		const { delta, transition } = compareCheckSides(checkSide(prevCheck), checkSide(curr));
 		checkDeltas.push({
 			name: curr.name,
 			prev: prevScore,
 			curr: curr.score,
-			delta: curr.score - prevScore,
+			delta,
+			...(transition ? { transition } : {}),
 		});
 	}
 
@@ -107,10 +111,16 @@ export function trendHTML(trend: TrendDelta): string {
 		const c = d.delta > 0 ? "var(--pass)" : "var(--fail)";
 		deltas += `<span class="td-item" style="color:${c}">${d.name} ${d.delta > 0 ? "+" : ""}${d.delta}</span>`;
 	}
+	let transitions = "";
+	for (const d of trend.checkDeltas) {
+		if (!d.transition) continue;
+		transitions += `<span class="td-item" style="color:var(--muted)">${d.name}: ${formatTransition(d.transition)}</span>`;
+	}
 
 	return `<div class="trend">
 <div class="trend-head"><span class="trend-arrow" style="color:${color}">${arrow}</span><span style="color:${color};font-weight:700">${trend.scoreDelta > 0 ? "+" : ""}${trend.scoreDelta} pts</span><span class="trend-vs">vs ${trend.prevTimestamp.split("T")[0]}</span></div>
 <div class="trend-stats">${trend.fixedIssues > 0 ? `<span style="color:var(--pass)">${trend.fixedIssues} fixed</span>` : ""}${trend.newIssues > 0 ? `<span style="color:var(--fail)">${trend.newIssues} new</span>` : ""}</div>
 ${deltas ? `<div class="trend-deltas">${deltas}</div>` : ""}
+${transitions ? `<div class="trend-deltas trend-status">${transitions}</div>` : ""}
 </div>`;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeDelta, formatDeltaMarkdown } from "./delta.js";
+import { checkRunState, computeDelta, formatCheckChangeBullets, formatDeltaMarkdown, formatTransition } from "./delta.js";
 import type { VibeReport } from "./types.js";
 
 function makeReport(overrides: Partial<VibeReport> = {}): VibeReport {
@@ -112,5 +112,88 @@ describe("formatDeltaMarkdown", () => {
 		expect(md).toContain("Fixed");
 		expect(md).toContain("lint");
 		expect(md).toContain("+10");
+	});
+});
+
+describe("not-run checks (#107)", () => {
+	const lintUnavailable = {
+		name: "lint",
+		status: "unavailable",
+		score: 100,
+		grade: "A" as const,
+		details: { skipped: true, unavailable: true, status: "unavailable", reason: "Dart SDK not installed" },
+		issues: [],
+		duration: 1,
+	};
+	const lintScored = {
+		name: "lint",
+		status: "failed",
+		score: 72,
+		grade: "C" as const,
+		details: { status: "failed" },
+		issues: [],
+		duration: 1,
+	};
+
+	it("reports a status transition, not a 100 → 72 delta, when lint was unavailable before", () => {
+		const delta = computeDelta(makeReport({ checks: [lintUnavailable] }), makeReport({ checks: [lintScored] }));
+		const lint = delta.checks.find((c) => c.name === "lint")!;
+		expect(lint.delta).toBe(0);
+		expect(lint.transition).toEqual({ before: { state: "unavailable" }, after: { state: "ran", score: 72 } });
+		expect(formatTransition(lint.transition!)).toBe("unavailable → 72");
+
+		const bullets = formatCheckChangeBullets(delta, 8);
+		expect(bullets).toContain("lint: unavailable → 72");
+		expect(bullets).not.toContain("100 → 72");
+		expect(bullets).not.toMatch(/\(-28\)/);
+
+		const md = formatDeltaMarkdown(delta);
+		expect(md).toContain("## Status Changes");
+		expect(md).toContain("| lint | unavailable | 72 |");
+		expect(md).not.toContain("## Check Changes");
+		expect(md).not.toContain("100");
+	});
+
+	it("does not report removing a tool as an improvement", () => {
+		const scored64 = { ...lintScored, score: 64, grade: "D" as const };
+		const delta = computeDelta(makeReport({ checks: [scored64] }), makeReport({ checks: [lintUnavailable] }));
+		const bullets = formatCheckChangeBullets(delta, 8);
+		expect(bullets).toContain("lint: 64 → unavailable");
+		expect(bullets).not.toMatch(/\+\d/);
+		expect(bullets).not.toContain("✅");
+		expect(formatDeltaMarkdown(delta)).not.toMatch(/\+36/);
+	});
+
+	it("falls back to details flags for reports without a status field", () => {
+		const legacyComingSoon = { name: "ai-review", score: 100, grade: "A" as const, details: { comingSoon: true }, issues: [], duration: 1 };
+		const legacySkipped = { name: "lint", score: 100, grade: "A" as const, details: { skipped: true }, issues: [], duration: 1 };
+		const legacyRunnerError = {
+			name: "types",
+			score: 0,
+			grade: "F" as const,
+			details: { skipped: true, reason: "runner error: boom" },
+			issues: [],
+			duration: 1,
+		};
+		expect(checkRunState(legacyComingSoon)).toBe("unavailable");
+		expect(checkRunState(legacySkipped)).toBe("skipped");
+		expect(checkRunState(legacyRunnerError)).toBe("ran");
+		expect(checkRunState(undefined)).toBe("absent");
+
+		const delta = computeDelta(makeReport({ checks: [legacySkipped] }), makeReport({ checks: [lintScored] }));
+		expect(delta.checks[0]).toMatchObject({ delta: 0, transition: { before: { state: "skipped" }, after: { state: "ran", score: 72 } } });
+	});
+
+	it("reports nothing when a check stays skipped", () => {
+		const skipped = { ...lintUnavailable, status: "skipped", details: { skipped: true, status: "skipped" } };
+		const delta = computeDelta(makeReport({ checks: [skipped] }), makeReport({ checks: [skipped] }));
+		expect(delta.checks).toHaveLength(0);
+	});
+
+	it("keeps numeric deltas when both sides ran", () => {
+		const delta = computeDelta(makeReport({ checks: [{ ...lintScored, score: 60 }] }), makeReport({ checks: [lintScored] }));
+		expect(delta.checks[0]).toMatchObject({ delta: 12 });
+		expect(delta.checks[0].transition).toBeUndefined();
+		expect(formatCheckChangeBullets(delta, 8)).toContain("✅ lint: 60 → 72 (+12)");
 	});
 });

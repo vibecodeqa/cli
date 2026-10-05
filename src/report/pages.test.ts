@@ -225,3 +225,32 @@ describe("report generation", () => {
 		expect(index).toContain("Feature Map");
 	});
 });
+
+describe("actions page delta (#107)", () => {
+	const unavailable: CheckResult = {
+		name: "lint",
+		score: 100,
+		grade: "A",
+		details: { skipped: true, unavailable: true, status: "unavailable" },
+		issues: [],
+		duration: 1,
+	};
+	const scored: CheckResult = { name: "lint", score: 72, grade: "C", details: { status: "failed" }, issues: [], duration: 1 };
+	(unavailable as CheckResult & { status: string }).status = "unavailable";
+	(scored as CheckResult & { status: string }).status = "failed";
+
+	it("shows the status transition and no 100 → 72 score change", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-report-"));
+		const html = generatePages(makeReport(dir, [scored]), undefined, makeReport(dir, [unavailable])).get("actions.html")!;
+		expect(html).toContain("Status changes:");
+		expect(html).toContain("lint: unavailable → 72");
+		expect(html).not.toContain("lint -28");
+	});
+
+	it("does not show removing the tool as an improvement", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-report-"));
+		const html = generatePages(makeReport(dir, [unavailable]), undefined, makeReport(dir, [{ ...scored, score: 64 }])).get("actions.html")!;
+		expect(html).toContain("lint: 64 → unavailable");
+		expect(html).not.toContain("lint +36");
+	});
+});

@@ -106,6 +106,40 @@ describe("computeTrend", () => {
 	});
 });
 
+describe("computeTrend not-run checks (#107)", () => {
+	it("emits a status transition instead of a numeric delta when either side did not run", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-trend-"));
+		const prev = makeReport(70, [{ name: "lint", score: 100, issues: 0 }]);
+		prev.checks[0].details = { skipped: true, unavailable: true, status: "unavailable" };
+		writeFileSync(join(dir, "report.json"), JSON.stringify(prev));
+		const curr = makeReport(70, [{ name: "lint", score: 72, issues: 0 }]);
+		curr.checks[0].details = { status: "failed" };
+
+		const trend = computeTrend(curr, dir)!;
+		const lint = trend.checkDeltas.find((d) => d.name === "lint")!;
+		expect(lint.delta).toBe(0);
+		expect(lint.transition).toEqual({ before: { state: "unavailable" }, after: { state: "ran", score: 72 } });
+
+		const html = trendHTML(trend);
+		expect(html).toContain("lint: unavailable → 72");
+		expect(html).not.toContain("lint -28");
+	});
+
+	it("does not report a removed tool as +N", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-trend-"));
+		const prev = makeReport(70, [{ name: "lint", score: 64, issues: 0 }]);
+		writeFileSync(join(dir, "report.json"), JSON.stringify(prev));
+		const curr = makeReport(70, [{ name: "lint", score: 100, issues: 0 }]);
+		curr.checks[0].details = { skipped: true, comingSoon: true };
+
+		const trend = computeTrend(curr, dir)!;
+		expect(trend.checkDeltas[0].delta).toBe(0);
+		const html = trendHTML(trend);
+		expect(html).toContain("lint: 64 → unavailable");
+		expect(html).not.toContain("+36");
+	});
+});
+
 describe("formatTrend", () => {
 	it("formats improvement", () => {
 		const out = formatTrend({

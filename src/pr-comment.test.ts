@@ -25,3 +25,39 @@ describe("pr-comment module", () => {
 		expect(result).toBe(false);
 	});
 });
+
+describe("PR comment body (#107)", () => {
+	const base = {
+		version: "0.56.0",
+		timestamp: "2026-10-05T00:00:00Z",
+		score: 80,
+		grade: "B" as const,
+		meta: { cwd: "/tmp", node: "v22", duration: 100, stack: {} as any, repoUrl: null, branch: "main" },
+	};
+	const unavailable = {
+		name: "lint",
+		status: "unavailable",
+		score: 100,
+		grade: "A" as const,
+		details: { skipped: true, unavailable: true, status: "unavailable" },
+		issues: [],
+		duration: 1,
+	};
+	const scored = { name: "lint", status: "failed", score: 72, grade: "C" as const, details: { status: "failed" }, issues: [], duration: 1 };
+
+	it("lists lint unavailable → 72 as a status change, not a 100 → 72 regression", async () => {
+		const { buildCommentBody } = await import("./pr-comment.js");
+		const body = buildCommentBody({ ...base, checks: [scored] }, null, { ...base, checks: [unavailable] });
+		expect(body).toContain("lint: unavailable → 72");
+		expect(body).not.toContain("100 → 72");
+		expect(body).not.toContain("(-28)");
+	});
+
+	it("does not show removing the tool as a +N improvement", async () => {
+		const { buildCommentBody } = await import("./pr-comment.js");
+		const body = buildCommentBody({ ...base, checks: [unavailable] }, null, { ...base, checks: [{ ...scored, score: 64 }] });
+		expect(body).toContain("lint: 64 → unavailable");
+		expect(body).not.toContain("+36");
+		expect(body).not.toContain("64 → 100");
+	});
+});

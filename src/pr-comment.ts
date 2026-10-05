@@ -2,7 +2,7 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { computeDelta } from "./delta.js";
+import { computeDelta, formatCheckChangeBullets } from "./delta.js";
 import type { TrendDelta } from "./trend.js";
 import type { VibeReport } from "./types.js";
 
@@ -74,7 +74,7 @@ function detectPR(cwd: string): PRInfo | null {
 	return null;
 }
 
-function buildCommentBody(report: VibeReport, trend: TrendDelta | null, prevReport?: VibeReport): string {
+export function buildCommentBody(report: VibeReport, trend: TrendDelta | null, prevReport?: VibeReport): string {
 	const grade = report.grade;
 	const score = report.score;
 	const gradeEmoji = grade === "A" ? "🟢" : grade === "B" ? "🟡" : grade === "C" ? "🟠" : "🔴";
@@ -89,14 +89,7 @@ function buildCommentBody(report: VibeReport, trend: TrendDelta | null, prevRepo
 		if (delta.introduced.length > 0) body += ` · ${delta.introduced.length} new`;
 		body += "\n\n";
 
-		const changed = delta.checks.filter((c) => c.delta !== 0).sort((a, b) => b.delta - a.delta);
-		if (changed.length > 0) {
-			for (const c of changed.slice(0, 6)) {
-				const a = c.delta > 0 ? "+" : "";
-				body += `- ${c.delta > 0 ? "✅" : "⚠️"} ${c.name}: ${c.before} → ${c.after} (${a}${c.delta})\n`;
-			}
-			body += "\n";
-		}
+		body += formatCheckChangeBullets(delta, 6);
 	} else if (trend) {
 		const arrow = trend.scoreDelta > 0 ? "📈" : trend.scoreDelta < 0 ? "📉" : "➡️";
 		body += `${arrow} **${trend.scoreDelta > 0 ? "+" : ""}${trend.scoreDelta}** vs previous`;

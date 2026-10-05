@@ -3,16 +3,24 @@ import type { AnalyzerMetric, AnalyzerSnapshot, CheckResult, Issue } from "./typ
 const DETAIL_DENYLIST = new Set(["assessment", "containerSvg", "graph", "reason", "skipped", "status", "toolRuns"]);
 
 export function buildAnalyzerSnapshots(checks: CheckResult[]): AnalyzerSnapshot[] {
-	return checks.map((check) => ({
-		analyzerId: check.name,
-		status: checkStatus(check),
-		score: Number.isFinite(Number(check.score)) ? Number(check.score) : undefined,
-		findingCount: check.issues.length,
-		severityCounts: severityCounts(check.issues),
-		metrics: normalizedMetrics(check),
-		durationMs: check.duration,
-	}));
+	return checks.map((check) => {
+		const status = checkStatus(check);
+		// A check that did not run carries a placeholder 100 (core.ts); it is
+		// not a measurement, so the snapshot has no score key at all (#107).
+		const score = !NOT_RUN.has(status) && Number.isFinite(Number(check.score)) ? Number(check.score) : undefined;
+		return {
+			analyzerId: check.name,
+			status,
+			...(score === undefined ? {} : { score }),
+			findingCount: check.issues.length,
+			severityCounts: severityCounts(check.issues),
+			metrics: normalizedMetrics(check),
+			durationMs: check.duration,
+		};
+	});
 }
+
+const NOT_RUN = new Set<string>(["skipped", "unavailable"]);
 
 function checkStatus(check: CheckResult): AnalyzerSnapshot["status"] {
 	const details = check.details as Record<string, unknown>;

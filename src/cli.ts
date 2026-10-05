@@ -11,7 +11,7 @@ import { runInit } from "./commands/init.js";
 import { validateCwd } from "./commands/shared.js";
 import { loadConfig } from "./config.js";
 import { scan } from "./core.js";
-import { computeDelta } from "./delta.js";
+import { computeDelta, formatCheckChangeBullets } from "./delta.js";
 import { detectStack, detectWorkspace } from "./detect.js";
 import { postPRComment } from "./pr-comment.js";
 import { generatePages } from "./report/html.js";
@@ -184,14 +184,7 @@ function generateMarkdown(report: VibeReport, trend: TrendDelta | null, prevRepo
 		md += "\n\n";
 
 		// Per-check changes
-		const changed = delta.checks.filter((c) => c.delta !== 0).sort((a, b) => b.delta - a.delta);
-		if (changed.length > 0) {
-			for (const c of changed.slice(0, 8)) {
-				const a = c.delta > 0 ? "+" : "";
-				md += `- ${c.delta > 0 ? "✅" : "⚠️"} ${c.name}: ${c.before} → ${c.after} (${a}${c.delta})\n`;
-			}
-			md += "\n";
-		}
+		md += formatCheckChangeBullets(delta, 8);
 	} else if (trend) {
 		const arrow = trend.scoreDelta > 0 ? "📈" : trend.scoreDelta < 0 ? "📉" : "➡️";
 		md += `${arrow} **${trend.scoreDelta > 0 ? "+" : ""}${trend.scoreDelta}** vs previous`;

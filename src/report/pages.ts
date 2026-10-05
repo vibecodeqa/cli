@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type CheckMeta, getCheckMeta } from "../check-meta.js";
 import { suggestFix } from "../commands/shared.js";
-import type { ScanDelta } from "../delta.js";
+import { formatTransition, type ScanDelta, scoreChanges, statusTransitions } from "../delta.js";
 import { buildCoverageMapInput, generateCoverageMap } from "../diagrams/coverage.js";
 import { loadHistory } from "../history.js";
 import {
@@ -1001,13 +1001,19 @@ export function actionsPage(allChecks: CheckResult[], fl: FL, linter: string, de
 		const dArrow = delta.scoreDelta > 0 ? "&#9650;" : delta.scoreDelta < 0 ? "&#9660;" : "&#9644;";
 
 		// Per-check changes
-		const changed = delta.checks.filter((c) => c.delta !== 0).sort((a, b) => b.delta - a.delta);
+		const changed = scoreChanges(delta);
 		const checkDeltas = changed
 			.slice(0, 10)
 			.map((c) => {
 				const cc = c.delta > 0 ? "var(--pass)" : "var(--fail)";
 				return `<span class="delta-chip" style="color:${cc}">${c.name} ${c.delta > 0 ? "+" : ""}${c.delta}</span>`;
 			})
+			.join("");
+		// Checks that started or stopped running — listed apart from score changes,
+		// because a not-run check's placeholder 100 is not a score (#107).
+		const statusChips = statusTransitions(delta)
+			.slice(0, 10)
+			.map((c) => `<span class="delta-chip" style="color:var(--muted)">${e(c.name)}: ${e(formatTransition(c.transition))}</span>`)
 			.join("");
 
 		// Fixed issues list
@@ -1047,6 +1053,7 @@ export function actionsPage(allChecks: CheckResult[], fl: FL, linter: string, de
     <span style="color:var(--muted)">${delta.after.issueCount} remaining</span>
   </div>
   ${checkDeltas ? `<div class="delta-checks">${checkDeltas}</div>` : ""}
+  ${statusChips ? `<div class="delta-checks delta-status"><span class="delta-status-label">Status changes:</span> ${statusChips}</div>` : ""}
   ${fixedList}${newList}
 </div>`;
 	}
