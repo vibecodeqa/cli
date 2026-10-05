@@ -380,6 +380,37 @@ describe("detectCiContext — the checkout, not GITHUB_SHA, is the scanned commi
 	});
 });
 
+describe("detectCiContext — pull_request without a readable event payload", () => {
+	it("takes the PR number from GITHUB_REF, the branch from GITHUB_HEAD_REF, head/base from the merge parents", () => {
+		const { dir, base, head, merge } = prRepo();
+		const env = actionsEnv("pull_request", {
+			GITHUB_EVENT_PATH: join(dir, "missing-event.json"),
+			GITHUB_SHA: merge,
+			GITHUB_REF: "refs/pull/42/merge",
+			GITHUB_HEAD_REF: "feature/login",
+			GITHUB_BASE_REF: "main",
+		});
+		const ctx = detectCiContext(dir, env);
+		expect(ctx.event).toBeNull();
+		expect(ctx.git).toMatchObject({ sha: merge, headSha: head, baseSha: base, branch: "feature/login", prNumber: 42 });
+		expect(currentGitSha(dir, env)).toBe(head);
+		expect(detectPR(dir, env)).toEqual({ owner: "octo-org", repo: "widgets", prNumber: 42 });
+	});
+
+	it("without local git still records the PR number and branch", () => {
+		const dir = noGitDir();
+		const ctx = detectCiContext(dir, {
+			GITHUB_ACTIONS: "true",
+			GITHUB_EVENT_NAME: "pull_request",
+			GITHUB_SHA: "1".repeat(40),
+			GITHUB_REF: "refs/pull/7/merge",
+			GITHUB_HEAD_REF: "fix/thing",
+			GITHUB_RUN_ID: "1",
+		});
+		expect(ctx.git).toMatchObject({ sha: "1".repeat(40), headSha: null, branch: "fix/thing", prNumber: 7 });
+	});
+});
+
 describe("consumers share the context", () => {
 	it("--upload and --pr-comment agree with the report on a pull_request run", () => {
 		const { dir, head: mergeSha } = gitRepo();

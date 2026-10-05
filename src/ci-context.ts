@@ -152,7 +152,10 @@ function applyEvent(
 	checkout: Checkout,
 ): EventEffect {
 	const pr = event.pull_request;
-	if (PR_MERGE_EVENTS.has(eventName) && pr) return applyPullRequest(git, pr, env, checkout);
+	if (PR_MERGE_EVENTS.has(eventName)) {
+		const fromRun = pr ?? pullRequestFromEnv(env, checkout);
+		if (fromRun) return applyPullRequest(git, fromRun, env, checkout);
+	}
 	if (eventName === "pull_request_target" && pr) return applyPullRequestTarget(git, pr, env, checkout);
 	if (!checkout.onEventCommit) return describeLocalCheckout(git, checkout);
 	if (eventName === "merge_group" && event.merge_group) {
@@ -189,6 +192,24 @@ function applyPullRequest(
 	git.branch = headRef;
 	git.prNumber = num(pr.number);
 	return NO_EFFECT;
+}
+
+/** The PR as far as the environment alone can say, for a run whose event
+ *  payload is unreadable: number from `GITHUB_REF` (`refs/pull/N/merge`),
+ *  branch from `GITHUB_HEAD_REF`, and head/base from the merge commit's
+ *  parents ([base, head]) when the checkout is that merge. */
+function pullRequestFromEnv(env: NodeJS.ProcessEnv, checkout: Checkout): GitHubEventPayload["pull_request"] | null {
+	const match = /^refs\/pull\/(\d+)\/(?:merge|head)$/.exec(env.GITHUB_REF || "");
+	const number = match ? Number.parseInt(match[1]!, 10) : Number.NaN;
+	const headRef = env.GITHUB_HEAD_REF || undefined;
+	if (!(number > 0) && !headRef) return null;
+	const parents = checkout.onEventCommit ? commitParents(checkout.cwd, checkout.localHead) : [];
+	const [baseSha, headSha] = parents.length === 2 ? parents : [];
+	return {
+		number: number > 0 ? number : undefined,
+		head: { ref: headRef, sha: headSha },
+		base: { ref: env.GITHUB_BASE_REF || undefined, sha: baseSha },
+	};
 }
 
 /** Runs in the base repository's context: the default checkout is the base
