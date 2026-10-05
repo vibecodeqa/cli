@@ -4,7 +4,7 @@
  * to display "what changed since last scan."
  */
 
-import { readIssueFingerprint } from "./issue-fingerprint.js";
+import { comparableFingerprints } from "./issue-fingerprint.js";
 import type { Issue, VibeReport } from "./types.js";
 
 export interface DeltaIssue {
@@ -35,11 +35,6 @@ export interface ScanDelta {
 	introduced: DeltaIssue[];
 }
 
-/** Fingerprint an issue for stable matching (ignores line numbers which shift after edits). */
-function issueKey(check: string, iss: Issue): string {
-	return readIssueFingerprint(check, iss);
-}
-
 /** Compute a structured delta between two scan reports. */
 export function computeDelta(before: VibeReport, after: VibeReport): ScanDelta {
 	const beforeIssueCount = before.checks.reduce((s, c) => s + c.issues.length, 0);
@@ -48,6 +43,9 @@ export function computeDelta(before: VibeReport, after: VibeReport): ScanDelta {
 	const checks: CheckDelta[] = [];
 	const allFixed: DeltaIssue[] = [];
 	const allIntroduced: DeltaIssue[] = [];
+	// Stored fingerprints when both reports share a fingerprint version; v1
+	// recomputed on both sides across the v1/v2 boundary (#97).
+	const issueKey = comparableFingerprints(before, after);
 
 	for (const afterCheck of after.checks) {
 		const beforeCheck = before.checks.find((c) => c.name === afterCheck.name);

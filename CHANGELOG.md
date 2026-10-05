@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Issue fingerprints v2 — a finding keeps its identity when its number moves
+Fingerprints hashed check + rule + path + message, so a message carrying a
+measurement ("AdminLayout: 65 lines (max 60)") re-identified the finding every
+time the number changed, duplication identity included line numbers, and
+repeated findings in one file shared one fingerprint (#97).
+- **Fixed**: `trend` counts findings per fingerprint as a multiset, as the delta
+  report already did — fixing one of two identical findings now reports one
+  fixed instead of nothing.
+- **Changed**: reports now carry `meta.fingerprintVersion: 2`, and fingerprints
+  are computed differently:
+  - file-scoped measured rules (standards `large-file`, context
+    `high-token-count`, architecture `high-fan-out`, performance
+    `barrel-import`) are keyed by file, not message;
+  - complexity findings by file + function name;
+  - duplication by the sorted pair of paths without `:line`, plus a hash of
+    the clone snippet;
+  - these runners emit the key as `Issue.subject`;
+  - other findings that point at a line add a hash of that source line, and
+    only findings that are still identical get an occurrence ordinal.
+- **Compatibility**: comparing a v1 report (no `fingerprintVersion`) with a v2
+  report recomputes v1 fingerprints on both sides, so the first scan after the
+  upgrade shows no churn. Anything that stores fingerprints and matches them
+  across scans — rather than going through `trend`/`delta` — will see v2 values
+  differ from v1 for subject-keyed, line-anchored and repeated findings, and
+  must treat a `fingerprintVersion` change as a re-baseline. Project-level aggregate findings (for example "N unused files")
+  still keep their message in the key, as before.
+
 ## 0.56.0 (2026-08-18)
 
 ### A linter that cannot read your language no longer grades it

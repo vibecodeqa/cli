@@ -14,7 +14,7 @@ import { getCheckIgnore, isCheckEnabled, loadConfig, type VcqaConfig } from "./c
 import { detectRepoUrl, detectStack, detectWorkspace } from "./detect.js";
 import { buildFileInventory } from "./file-inventory.js";
 import { setGlobalIgnore, setGlobalIgnoreNames, setGlobalScanPolicy, setGlobalSrcRoots } from "./fs-utils.js";
-import { withIssueFingerprints } from "./issue-fingerprint.js";
+import { FINGERPRINT_VERSION, inventoryLineReader, type SourceLineReader, withIssueFingerprints } from "./issue-fingerprint.js";
 import { runAccessibility } from "./runners/accessibility.js";
 import { runArchitecture } from "./runners/architecture.js";
 import { runBestPractices } from "./runners/best-practices.js";
@@ -117,6 +117,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		envIgnore: process.env.VCQA_IGNORE,
 	});
 	const fileInventory = buildFileInventory(resolvedCwd, workspace, scanPolicy);
+	const readSourceLine = inventoryLineReader(fileInventory);
 
 	setGlobalSrcRoots(workspace.isMonorepo ? workspace.srcRoots : undefined);
 	setGlobalIgnore(config.ignore);
@@ -268,7 +269,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 			result.details = { ...result.details, toolRuns };
 		}
 
-		result = normalizeCheckResult(result);
+		result = normalizeCheckResult(result, readSourceLine);
 
 		// Apply per-check ignore patterns
 		const patterns = getCheckIgnore(config, result.name);
@@ -313,13 +314,14 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 			scanPolicy: scanPolicySummary(scanPolicy),
 			fileInventory: fileInventory.summary,
 			analyzerSnapshots: buildAnalyzerSnapshots(checks),
+			fingerprintVersion: FINGERPRINT_VERSION,
 			repoUrl,
 			branch,
 		},
 	};
 }
 
-function normalizeCheckResult(result: CheckResult): NormalizedCheckResult {
+function normalizeCheckResult(result: CheckResult, readSourceLine?: SourceLineReader): NormalizedCheckResult {
 	const originalScore = result.score;
 	const issues = [...(Array.isArray(result.issues) ? result.issues : [])];
 	const details = { ...(result.details ?? {}) };
@@ -347,7 +349,7 @@ function normalizeCheckResult(result: CheckResult): NormalizedCheckResult {
 		score,
 		grade: gradeFromScore(score),
 		details: normalizedDetails,
-		issues: withIssueFingerprints(result.name, issues),
+		issues: withIssueFingerprints(result.name, issues, readSourceLine),
 	};
 }
 

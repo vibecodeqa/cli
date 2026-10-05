@@ -15,7 +15,8 @@
 import type { FileInventory } from "../file-inventory.js";
 import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
-import type { CheckResult, Issue } from "../types.js";
+import { type FingerprintedIssue, normalizePath } from "../issue-fingerprint.js";
+import type { CheckResult } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
 const MAX_FILE_TOKENS = 4000; // ~400 lines; beyond this LLMs lose mid-context info
@@ -24,7 +25,7 @@ const CHARS_PER_TOKEN = 3.5; // empirical average for code
 
 export function runContext(cwd: string, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
-	const issues: Issue[] = [];
+	const issues: FingerprintedIssue[] = [];
 
 	// Collect source files with imports
 	const sourceFiles = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
@@ -62,6 +63,8 @@ export function runContext(cwd: string, inventory?: FileInventory): CheckResult 
 				message: `~${f.tokens} tokens (>${MAX_FILE_TOKENS}) — large context cost for LLMs`,
 				file: f.path,
 				rule: "high-token-count",
+				// Identity is the file, not its token count (#97).
+				subject: normalizePath(f.path),
 			});
 		}
 	}

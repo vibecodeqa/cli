@@ -16,7 +16,8 @@ import { cruise } from "dependency-cruiser";
 import type { FileInventory } from "../file-inventory.js";
 import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles, type SourceFile } from "../fs-utils.js";
-import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
+import { type FingerprintedIssue, normalizePath } from "../issue-fingerprint.js";
+import type { CheckResult, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { generateContainerDiagram } from "./diagrams.js";
 
@@ -45,7 +46,7 @@ export interface ArchGraph {
 
 export async function runArchitecture(cwd: string, workspace?: WorkspaceInfo, inventory?: FileInventory): Promise<CheckResult> {
 	const start = Date.now();
-	const issues: Issue[] = [];
+	const issues: FingerprintedIssue[] = [];
 	const files = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 
 	if (files.length < 2) {
@@ -161,6 +162,8 @@ export async function runArchitecture(cwd: string, workspace?: WorkspaceInfo, in
 				message: `High fan-out: imports ${node.imports.length} modules — hard to test in isolation`,
 				file: path,
 				rule: "high-fan-out",
+				// Identity is the file, not its import count (#97).
+				subject: normalizePath(path),
 			});
 		}
 	}

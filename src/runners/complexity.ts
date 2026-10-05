@@ -3,7 +3,8 @@
 import type { FileInventory } from "../file-inventory.js";
 import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
-import type { CheckResult, Issue } from "../types.js";
+import { type FingerprintedIssue, normalizePath } from "../issue-fingerprint.js";
+import type { CheckResult } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
 interface FunctionMetric {
@@ -19,7 +20,7 @@ const MAX_COMPLEXITY = 15;
 
 export function runComplexity(cwd: string, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
-	const issues: Issue[] = [];
+	const issues: FingerprintedIssue[] = [];
 	const functions: FunctionMetric[] = [];
 
 	const sourceFiles = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
@@ -44,6 +45,8 @@ export function runComplexity(cwd: string, inventory?: FileInventory): CheckResu
 					file: f.file,
 					line: f.startLine,
 					rule: "long-function",
+					// Identity is the function, not its length (#97).
+					subject: `${normalizePath(f.file)}#${f.name}`,
 				});
 			}
 			if (f.complexity > MAX_COMPLEXITY) {
@@ -54,6 +57,7 @@ export function runComplexity(cwd: string, inventory?: FileInventory): CheckResu
 					file: f.file,
 					line: f.startLine,
 					rule: "high-complexity",
+					subject: `${normalizePath(f.file)}#${f.name}`,
 				});
 			}
 		}
