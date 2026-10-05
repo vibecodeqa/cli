@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { buildReportHistorySnapshot } from "../report-contract.js";
 import type { CheckResult, VibeReport } from "../types.js";
 
 // We test categoryPage indirectly through generatePages
@@ -252,5 +253,74 @@ describe("actions page delta (#107)", () => {
 		const html = generatePages(makeReport(dir, [unavailable]), undefined, makeReport(dir, [{ ...scored, score: 64 }])).get("actions.html")!;
 		expect(html).toContain("lint: 64 → unavailable");
 		expect(html).not.toContain("lint +36");
+	});
+});
+
+describe("trends page with not-run checks (#107)", () => {
+	function writeHistory(dir: string, entries: { timestamp: string; checks: CheckResult[] }[]): string {
+		const historyDir = join(dir, "history");
+		mkdirSync(historyDir, { recursive: true });
+		for (const { timestamp, checks } of entries) {
+			const report = { ...makeReport(dir, checks), timestamp };
+			writeFileSync(join(historyDir, `${timestamp}.json`), JSON.stringify(buildReportHistorySnapshot(report)));
+		}
+		return historyDir;
+	}
+	const lint = (score: number): CheckResult => ({
+		name: "lint",
+		score,
+		grade: "C",
+		details: { status: "failed" },
+		issues: [],
+		duration: 1,
+	});
+	const lintUnavailable: CheckResult = {
+		name: "lint",
+		score: 100,
+		grade: "A",
+		details: { skipped: true, unavailable: true, status: "unavailable" },
+		issues: [],
+		duration: 1,
+	};
+	const structure = (score: number): CheckResult => ({ name: "structure", score, grade: "B", details: {}, issues: [], duration: 1 });
+	const trendRows = (html: string) =>
+		[...html.matchAll(/<div class="trend-row">(.*?)<\/div>/g)].map((m) =>
+			m[1]
+				.replace(/<[^>]+>/g, " ")
+				.replace(/\s+/g, " ")
+				.trim(),
+		);
+
+	it("shows uninstalling a tool as a transition, not +36", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-report-"));
+		const historyDir = writeHistory(dir, [
+			{ timestamp: "2026-10-01T00:00:00.000Z", checks: [lint(64), structure(80)] },
+			{ timestamp: "2026-10-02T00:00:00.000Z", checks: [lint(70), structure(84)] },
+			{ timestamp: "2026-10-03T00:00:00.000Z", checks: [lintUnavailable, structure(86)] },
+		]);
+		const r2 = makeReport(dir, [lintUnavailable, structure(86)]);
+		const html = generatePages(r2, historyDir).get("trends.html")!;
+		const rows = trendRows(html);
+		expect(rows).toContain("structure 80 → 86 +6");
+		expect(rows).toContain("lint 64 → unavailable status");
+		expect(html).not.toContain("+36");
+		expect(rows.join("\n")).not.toMatch(/lint.*100/);
+		// The lint card plots only the scans where lint ran and labels its current state.
+		expect(html).toMatch(/<span class="trend-name">lint<\/span><span class="trend-status muted">unavailable<\/span>/);
+	});
+
+	it("shows installing a tool, and a dropped check, as transitions (legacy details flags)", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-report-"));
+		const legacySkipped: CheckResult = { name: "lint", score: 100, grade: "A", details: { skipped: true }, issues: [], duration: 1 };
+		const historyDir = writeHistory(dir, [
+			{ timestamp: "2026-10-01T00:00:00.000Z", checks: [legacySkipped, structure(80)] },
+			{ timestamp: "2026-10-02T00:00:00.000Z", checks: [lint(72)] },
+			{ timestamp: "2026-10-03T00:00:00.000Z", checks: [lint(75)] },
+		]);
+		const html = generatePages(makeReport(dir, [lint(75)]), historyDir).get("trends.html")!;
+		const rows = trendRows(html);
+		expect(rows).toContain("lint skipped → 75 status");
+		expect(rows).toContain("structure 80 → not present status");
+		expect(html).not.toContain("-25");
 	});
 });

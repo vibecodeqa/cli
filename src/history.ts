@@ -2,13 +2,17 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { type CheckRunState, checkRunState } from "./delta.js";
 import type { IssueSnapshot } from "./issue-fingerprint.js";
 import type { AnalyzerSnapshot, VibeReport } from "./types.js";
 
 export interface HistoryEntry {
 	timestamp: string;
 	score: number;
+	/** Scores of checks that ran. A not-run check's placeholder 100 is left out (#107). */
 	checkScores: Map<string, number>;
+	/** Run state of every check in the snapshot (from `status`, else the details flags). */
+	checkStates: Map<string, Exclude<CheckRunState, "absent">>;
 	issues: IssueSnapshot[];
 	analyzerSnapshots: AnalyzerSnapshot[];
 }
@@ -27,26 +31,36 @@ export function loadHistory(historyDir: string): HistoryEntry[] {
 			const raw: VibeReport = JSON.parse(readFileSync(join(historyDir, file), "utf-8"));
 			if (raw.score === null || raw.score === undefined || !Number.isFinite(Number(raw.score)) || !raw.checks) continue;
 			const checkScores = new Map<string, number>();
+			const checkStates: HistoryEntry["checkStates"] = new Map();
 			const issues: IssueSnapshot[] = [];
 			const analyzerSnapshots = normalizeAnalyzerSnapshots(raw.meta?.analyzerSnapshots);
-			for (const c of raw.checks) {
-				if (c.score !== null && c.score !== undefined && Number.isFinite(Number(c.score))) {
-					checkScores.set(c.name, Number(c.score));
-				}
-				if (Array.isArray((c as { issues?: unknown }).issues)) {
-					for (const issue of (c as { issues: unknown[] }).issues) {
-						const snapshot = normalizeHistoryIssue(c.name, issue);
-						if (snapshot) issues.push(snapshot);
-					}
-				}
-			}
-			entries.push({ timestamp: raw.timestamp, score: Number(raw.score), checkScores, issues, analyzerSnapshots });
+			for (const c of raw.checks) readHistoryCheck(c, checkScores, checkStates, issues);
+			entries.push({ timestamp: raw.timestamp, score: Number(raw.score), checkScores, checkStates, issues, analyzerSnapshots });
 		} catch {
 			// skip corrupt files
 		}
 	}
 
 	return entries.slice(-30);
+}
+
+function readHistoryCheck(
+	c: VibeReport["checks"][number],
+	checkScores: HistoryEntry["checkScores"],
+	checkStates: HistoryEntry["checkStates"],
+	issues: IssueSnapshot[],
+): void {
+	const state = checkRunState(c);
+	if (state !== "absent") checkStates.set(c.name, state);
+	if (state === "ran" && c.score !== null && c.score !== undefined && Number.isFinite(Number(c.score))) {
+		checkScores.set(c.name, Number(c.score));
+	}
+	if (Array.isArray((c as { issues?: unknown }).issues)) {
+		for (const issue of (c as { issues: unknown[] }).issues) {
+			const snapshot = normalizeHistoryIssue(c.name, issue);
+			if (snapshot) issues.push(snapshot);
+		}
+	}
 }
 
 function normalizeAnalyzerSnapshots(raw: unknown): AnalyzerSnapshot[] {

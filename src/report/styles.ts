@@ -226,6 +226,8 @@ h3{font-size:0.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:
 .trend-row-val{width:2rem;text-align:center;color:var(--muted)}
 .trend-row-arrow{color:var(--muted);font-size:0.6rem}
 .trend-row-delta{width:2.5rem;text-align:right;font-weight:700}
+.trend-row-state{width:auto;min-width:2rem;font-weight:400;font-style:italic}
+.trend-status{font-size:0.75rem;font-style:italic}
 
 .footer{text-align:center;color:var(--muted);font-size:0.58rem;margin-top:2rem;padding:0.8rem 0;border-top:1px solid var(--border)}
 .footer a{color:var(--muted)}
