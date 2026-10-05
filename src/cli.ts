@@ -31,6 +31,7 @@ interface ParsedFlags {
 	jsonOnly: boolean;
 	ciMode: boolean;
 	skipTests: boolean;
+	testTimeoutMs: number | null;
 	watchMode: boolean;
 	badgeMode: boolean;
 	sarifMode: boolean;
@@ -64,6 +65,11 @@ function parseFlags(): ParsedFlags {
 
 	const topN = parseValueFlag("--top", 5) ?? 0;
 	const failUnder = parseValueFlag("--fail-under");
+	const testTimeoutMs = parseValueFlag("--test-timeout");
+	if (args.includes("--test-timeout") && !testTimeoutMs) {
+		console.error("--test-timeout needs a positive whole number of milliseconds, e.g. --test-timeout 300000");
+		process.exit(2);
+	}
 
 	let diffBase: string | null = null;
 	const diffIdx = args.indexOf("--diff");
@@ -84,6 +90,7 @@ function parseFlags(): ParsedFlags {
 		jsonOnly: flags.has("--json"),
 		ciMode: flags.has("--ci"),
 		skipTests: flags.has("--skip-tests"),
+		testTimeoutMs,
 		watchMode: flags.has("--watch"),
 		badgeMode: flags.has("--badge"),
 		sarifMode: flags.has("--sarif"),
@@ -122,6 +129,7 @@ function printHelp(): void {
 
   \x1b[1mFlags:\x1b[0m
     --skip-tests      Skip test execution (faster scan)
+    --test-timeout MS Per-project test run limit in ms (default: 120000)
     --ci              CI mode (exit 1 if score < 60)
     --fail-under N    Exit 1 if score below N (e.g. --fail-under 80)
     --json            Output JSON only (no terminal UI)
@@ -633,6 +641,7 @@ async function main() {
 	// Run scan using core API with progress output
 	const report = await scan(cwd, {
 		skipTests,
+		testTimeoutMs: flags.testTimeoutMs ?? undefined,
 		config,
 		onProgress: quietMode
 			? undefined
