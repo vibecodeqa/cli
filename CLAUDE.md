@@ -208,7 +208,7 @@ Tries dedicated tools first, falls back to built-in:
 
 ## Flags
 
-`--skip-tests`, `--ci`, `--fail-under N`, `--json`, `--badge`, `--sarif`, `--upload`, `--top [N]`, `--diff [base]`, `--watch`, `-v`, `-h`
+`--skip-tests`, `--test-timeout MS`, `--ci`, `--fail-under N`, `--json`, `--badge`, `--sarif`, `--upload`, `--top [N]`, `--diff [base]`, `--watch`, `-v`, `-h`
 
 ## Testing
 

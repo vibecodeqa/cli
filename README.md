@@ -254,6 +254,7 @@ Auto-detects: TypeScript/JavaScript/Dart, React/Vue/Svelte/Flutter, Vite/Webpack
 | Flag | Description |
 |------|-------------|
 | `--skip-tests` | Skip test execution (fast mode) |
+| `--test-timeout MS` | Per-project test run limit in ms, 1–2147483647 (default 120000; overrides `checks.testing.settings.timeoutMs` in `.vcqa.json`) |
 | `--ci` | CI mode (exit 1 if score < `failUnder` from config, else 60) |
 | `--fail-under N` | Exit 1 if score < N; overrides config and `--ci` |
 | `--json` | JSON output |

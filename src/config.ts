@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 export interface VcqaConfig {
 	/** Disable or configure individual checks */
-	checks?: Record<string, { enabled?: boolean; ignore?: string[] }>;
+	checks?: Record<string, { enabled?: boolean; ignore?: string[]; settings?: Record<string, unknown> }>;
 	/** Extra glob patterns to ignore, merged with the versioned default exclusion policy. */
 	ignore?: string[];
 	/** Default fail-under threshold (overridden by --fail-under flag) */
@@ -47,6 +47,13 @@ export function isCheckEnabled(config: VcqaConfig, checkName: string): boolean {
 /** Get per-check ignore patterns (for filtering issues after scan) */
 export function getCheckIgnore(config: VcqaConfig, checkName: string): string[] | undefined {
 	return config.checks?.[checkName]?.ignore;
+}
+
+/** Get per-check settings (`checks.<name>.settings`). Values are unvalidated —
+ * the check that reads a setting validates it and falls back to its default. */
+export function getCheckSettings(config: VcqaConfig, checkName: string): Record<string, unknown> {
+	const settings = config.checks?.[checkName]?.settings;
+	return settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
 }
 
 function validate(raw: Record<string, unknown>): VcqaConfig {

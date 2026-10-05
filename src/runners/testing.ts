@@ -16,7 +16,7 @@ import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles, normalizeToolPath, readDeps } from "../fs-utils.js";
 import type { AnalyzerMetric, CheckResult, Issue, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
-import { run } from "./exec.js";
+import { MAX_TIMER_MS, runWithTreeKill } from "./exec-tree.js";
 import { redactSecrets } from "./redact.js";
 
 // ── Types ──
@@ -49,7 +49,65 @@ interface CoverageData {
 }
 
 type TestCaseStatus = "passed" | "failed" | "skipped" | "todo" | "unknown";
-type TestProjectRunStatus = "passed" | "failed" | "partial" | "no-tests-matched" | "parse-failed" | "command-failed" | "skipped";
+type TestProjectRunStatus =
+	| "passed"
+	| "failed"
+	| "partial"
+	| "no-tests-matched"
+	| "parse-failed"
+	| "command-failed"
+	| "timeout"
+	| "skipped";
+
+/** Default per-project test run limit. Override with `--test-timeout <ms>` or
+ * `.vcqa.json` `checks.testing.settings.timeoutMs`. */
+export const DEFAULT_TEST_TIMEOUT_MS = 120_000;
+
+export interface TestingOptions {
+	/** From `--test-timeout`; wins over the config setting. */
+	timeoutMs?: number;
+	/** `checks.testing.settings` from `.vcqa.json` / package.json#vcqa. */
+	settings?: Record<string, unknown>;
+}
+
+export interface EffectiveTestTimeout {
+	ms: number;
+	source: "flag" | "config" | "default";
+	/** Set when `settings.timeoutMs` was present but not a positive integer. */
+	invalidSetting?: unknown;
+}
+
+/** Largest accepted test timeout: 2^31-1 ms (~24.8 days), the most a Node
+ * timer can wait. Larger values are rejected, not clamped. */
+export const MAX_TEST_TIMEOUT_MS = MAX_TIMER_MS;
+
+/** A test timeout is a whole number of ms from 1 to {@link MAX_TEST_TIMEOUT_MS}. */
+export function isValidTestTimeout(value: unknown): value is number {
+	return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= MAX_TEST_TIMEOUT_MS;
+}
+
+export function resolveTestTimeout(options: TestingOptions = {}): EffectiveTestTimeout {
+	const configured = options.settings?.timeoutMs;
+	const invalid = configured !== undefined && !isValidTestTimeout(configured) ? { invalidSetting: configured } : {};
+	if (isValidTestTimeout(options.timeoutMs)) return { ms: options.timeoutMs, source: "flag", ...invalid };
+	if (isValidTestTimeout(configured)) return { ms: configured, source: "config" };
+	return { ms: DEFAULT_TEST_TIMEOUT_MS, source: "default", ...invalid };
+}
+
+/** Base allowance for a whole scan, test runs aside. */
+export const SCAN_BASE_TIMEOUT_MS = 120_000;
+
+/** Time limit for a whole scan that runs tests (e.g. the monitor's scan
+ * subprocess): the base allowance plus one full test limit per test project,
+ * capped at what a timer can hold. A tighter limit would kill the scan before
+ * a configured test timeout could take effect. */
+export function scanTimeoutWithTests(testTimeoutMs: number, testProjects: number): number {
+	return Math.min(SCAN_BASE_TIMEOUT_MS + testTimeoutMs * Math.max(1, testProjects), MAX_TIMER_MS);
+}
+
+function formatSeconds(ms: number): string {
+	return `${Number((ms / 1000).toFixed(1))} s`;
+}
 type TestCoverageStatus = "reported" | "not-reported";
 
 interface TestCaseReport {
@@ -94,6 +152,8 @@ interface NormalizedTestProjectReport extends TestExecutionReport {
 	reportParsed: boolean;
 	coverageStatus: TestCoverageStatus;
 	coverage: CoverageData | null;
+	/** Set when the run was killed for exceeding this limit (ms). */
+	timeoutMs?: number;
 }
 
 // ── Classification rules ──
@@ -484,7 +544,7 @@ function commandForTestTarget(target: TestRunTarget): string {
 		: "npx jest --json --coverage --coverageReporters=json-summary";
 }
 
-function statusLabel(status: TestProjectRunStatus): string {
+function statusLabel(status: TestProjectRunStatus, timeoutMs?: number): string {
 	switch (status) {
 		case "passed":
 			return "passed";
@@ -498,6 +558,8 @@ function statusLabel(status: TestProjectRunStatus): string {
 			return "report could not be parsed";
 		case "command-failed":
 			return "command failed";
+		case "timeout":
+			return timeoutMs ? `timed out after ${formatSeconds(timeoutMs)}` : "timed out";
 		case "skipped":
 			return "skipped";
 	}
@@ -518,8 +580,14 @@ export function normalizeTestProjectReport(input: {
 	executionOk: boolean | null;
 	coverage: CoverageData | null;
 	skipped?: boolean;
+	/** The limit the run exceeded; marks the project as timed out. */
+	timedOutAfterMs?: number;
 }): NormalizedTestProjectReport {
-	const status = input.skipped ? "skipped" : reportStatus(input.report, input.executionOk);
+	const status: TestProjectRunStatus = input.skipped
+		? "skipped"
+		: input.timedOutAfterMs !== undefined
+			? "timeout"
+			: reportStatus(input.report, input.executionOk);
 	const base = input.report ?? {
 		runner: input.target.runner,
 		cwd: input.target.cwd,
@@ -543,11 +611,12 @@ export function normalizeTestProjectReport(input: {
 		path: input.target.projectPath ?? ".",
 		command: input.command,
 		status,
-		statusLabel: statusLabel(status),
+		statusLabel: statusLabel(status, input.timedOutAfterMs),
 		executionOk: input.executionOk,
 		reportParsed: Boolean(input.report),
 		coverageStatus: input.coverage ? "reported" : "not-reported",
 		coverage: input.coverage,
+		...(status === "timeout" ? { timeoutMs: input.timedOutAfterMs } : {}),
 	};
 }
 
@@ -558,6 +627,7 @@ export function summarizeTestProjectStatus(projects: Pick<NormalizedTestProjectR
 	if (projects.some((p) => p.status === "passed" || p.status === "partial")) {
 		return projects.every((p) => p.status === "passed") ? "passed" : "partial";
 	}
+	if (projects.some((p) => p.status === "timeout")) return "timeout";
 	if (projects.every((p) => p.status === "no-tests-matched")) return "no-tests-matched";
 	return "parse-failed";
 }
@@ -565,8 +635,9 @@ export function summarizeTestProjectStatus(projects: Pick<NormalizedTestProjectR
 function runTestsWithCoverage(
 	cwd: string,
 	stack: StackInfo,
-	srcRoots?: string[],
-	workspace?: WorkspaceInfo,
+	srcRoots: string[] | undefined,
+	workspace: WorkspaceInfo | undefined,
+	timeoutMs: number,
 ): {
 	execution: { passed: number; failed: number; total: number } | null;
 	coverage: CoverageData | null;
@@ -577,13 +648,30 @@ function runTestsWithCoverage(
 	let execution: { passed: number; failed: number; total: number } | null = null;
 	let coverage: CoverageData | null = null;
 	const reports: NormalizedTestProjectReport[] = [];
+	let anyTimedOut = false;
 
 	for (const root of roots) {
 		const cmd = commandForTestTarget(root);
-		const { stdout, ok } = run(cmd, root.cwd, 120_000, {
+		const { stdout, ok, timedOut } = runWithTreeKill(cmd, root.cwd, timeoutMs, {
 			projectId: root.projectId,
 			projectPath: root.projectPath,
 		});
+		if (timedOut) {
+			// Not run, rather than failed: no report to trust, and whatever coverage
+			// file is on disk predates this run.
+			anyTimedOut = true;
+			reports.push(
+				normalizeTestProjectReport({
+					target: root,
+					command: cmd,
+					report: null,
+					executionOk: false,
+					coverage: null,
+					timedOutAfterMs: timeoutMs,
+				}),
+			);
+			continue;
+		}
 		const report = parseTestExecutionReport(stdout, root.cwd, cwd);
 		const parsed = report ? { passed: report.passed, failed: report.failed, total: report.total } : null;
 		const projectCoverage = readCoverageFile(root.cwd);
@@ -600,7 +688,9 @@ function runTestsWithCoverage(
 		coverage ??= projectCoverage;
 	}
 
-	coverage ??= readCoverageFile(cwd, srcRoots);
+	// The repo-level fallback cannot tell whose run wrote a file; after a timeout
+	// it is as likely to be the timed-out project's stale output as anything.
+	if (!anyTimedOut) coverage ??= readCoverageFile(cwd, srcRoots);
 
 	return { execution, coverage, reports };
 }
@@ -720,8 +810,10 @@ export function runTesting(
 	srcRoots?: string[],
 	workspace?: WorkspaceInfo,
 	inventory?: FileInventory,
+	options: TestingOptions = {},
 ): CheckResult {
 	const start = Date.now();
+	const testTimeout = resolveTestTimeout(options);
 	const issues: Issue[] = [];
 
 	// 1. Discover test files and classify by layer
@@ -871,7 +963,14 @@ export function runTesting(
 
 	if (!skipExec) {
 		// Run tests ONCE with both coverage and JSON output
-		const combined = runTestsWithCoverage(cwd, stack, srcRoots, workspace);
+		if ("invalidSetting" in testTimeout) {
+			issues.push({
+				severity: "info",
+				message: `checks.testing.settings.timeoutMs must be a whole number of ms from 1 to ${MAX_TEST_TIMEOUT_MS}; using ${testTimeout.ms} ms`,
+				rule: "invalid-test-timeout-setting",
+			});
+		}
+		const combined = runTestsWithCoverage(cwd, stack, srcRoots, workspace, testTimeout.ms);
 		execution = combined.execution;
 		coverage = combined.coverage;
 		testReports = combined.reports;
@@ -896,23 +995,7 @@ export function runTesting(
 		);
 	}
 
-	for (const report of testReports) {
-		const staticTestCount = staticTestFilesForProject(report.path, testFiles);
-		if (report.status === "no-tests-matched" && staticTestCount > 0) {
-			issues.push({
-				severity: "warning",
-				message: `${report.path} has ${staticTestCount} discovered test file${staticTestCount === 1 ? "" : "s"}, but ${report.runner} matched 0 tests`,
-				rule: "test-run-no-tests-matched",
-			});
-		}
-		if (report.status === "parse-failed" || report.status === "command-failed") {
-			issues.push({
-				severity: report.status === "command-failed" ? "error" : "warning",
-				message: `${report.path} ${report.runner} ${report.statusLabel}`,
-				rule: `test-run-${report.status}`,
-			});
-		}
-	}
+	issues.push(...projectRunIssues(testReports, testFiles));
 
 	if (coverage) {
 		if (coverage.branches < 50) {
@@ -946,14 +1029,7 @@ export function runTesting(
 	score += pyramidScore;
 
 	// Execution (20 points)
-	if (execution) {
-		const passRate = execution.total > 0 ? execution.passed / execution.total : 0;
-		score += Math.round(passRate * 20);
-	} else if (!skipExec) {
-		// Couldn't run tests
-	} else {
-		score += 10; // partial credit when skipped
-	}
+	score += testExecutionPoints(execution, skipExec, testReports);
 
 	// Coverage (20 points)
 	if (coverage) {
@@ -1003,6 +1079,13 @@ export function runTesting(
 					}
 				: {}),
 			executionStatus: summarizeTestProjectStatus(testReports),
+			...(skipExec
+				? {}
+				: {
+						testTimeoutMs: testTimeout.ms,
+						testTimeoutSource: testTimeout.source,
+						...("invalidSetting" in testTimeout ? { testTimeoutInvalidSetting: testTimeout.invalidSetting } : {}),
+					}),
 			...(execution ? { passed: execution.passed, failed: execution.failed, total: execution.total } : {}),
 			...(testReports.length > 0 ? { testReports } : {}),
 			...(testReports.length > 0
@@ -1014,6 +1097,7 @@ export function runTesting(
 							command: report.command,
 							status: report.status,
 							statusLabel: report.statusLabel,
+							...(report.timeoutMs !== undefined ? { timeoutMs: report.timeoutMs } : {}),
 							reportParsed: report.reportParsed,
 							executionOk: report.executionOk,
 							passed: report.passed,
@@ -1139,4 +1223,53 @@ function staticTestFilesForProject(projectPath: string, testFiles: TestFile[]): 
 	if (projectPath === ".") return testFiles.length;
 	const prefix = `${projectPath.replace(/^\/+|\/+$/g, "")}/`;
 	return testFiles.filter((file) => file.path.startsWith(prefix)).length;
+}
+
+function projectRunIssues(testReports: NormalizedTestProjectReport[], testFiles: TestFile[]): Issue[] {
+	const issues: Issue[] = [];
+	for (const report of testReports) {
+		const staticTestCount = staticTestFilesForProject(report.path, testFiles);
+		if (report.status === "no-tests-matched" && staticTestCount > 0) {
+			issues.push({
+				severity: "warning",
+				message: `${report.path} has ${staticTestCount} discovered test file${staticTestCount === 1 ? "" : "s"}, but ${report.runner} matched 0 tests`,
+				rule: "test-run-no-tests-matched",
+			});
+		}
+		if (report.status === "timeout") {
+			issues.push({
+				severity: "warning",
+				message: `${report.path} ${report.runner} ${report.statusLabel} — tests not scored; raise --test-timeout or checks.testing.settings.timeoutMs`,
+				rule: "test-run-timeout",
+			});
+		}
+		if (report.status === "parse-failed" || report.status === "command-failed") {
+			issues.push({
+				severity: report.status === "command-failed" ? "error" : "warning",
+				message: `${report.path} ${report.runner} ${report.statusLabel}`,
+				rule: `test-run-${report.status}`,
+			});
+		}
+	}
+	return issues;
+}
+
+/** Execution points (of 20). Pass rate over the projects that reported; 10
+ * when tests were not run at all — `--skip-tests`, or EVERY project that ran
+ * stopped at the time limit (a timeout says how fast the machine is, not
+ * whether the tests pass); otherwise 0. A timeout never lifts a project whose
+ * command failed: one failed project and one timed-out project score 0. */
+export function testExecutionPoints(
+	execution: { passed: number; failed: number; total: number } | null,
+	skipExec: boolean,
+	testReports: Pick<NormalizedTestProjectReport, "status">[],
+): number {
+	if (execution) {
+		const passRate = execution.total > 0 ? execution.passed / execution.total : 0;
+		return Math.round(passRate * 20);
+	}
+	if (skipExec) return 10;
+	const ran = testReports.filter((report) => report.status !== "skipped");
+	if (ran.length > 0 && ran.every((report) => report.status === "timeout")) return 10;
+	return 0; // couldn't run tests
 }

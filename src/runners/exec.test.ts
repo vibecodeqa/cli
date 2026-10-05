@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterToolRuns, run, startToolRecording, type ToolRun, takeToolRuns } from "./exec.js";
+import { filterToolRuns, recordToolRun, run, startToolRecording, type ToolRun, takeToolRuns } from "./exec.js";
 
 /** Provenance is the mechanism that makes a report auditable — without it a
  *  clean score cannot be distinguished from a tool that never ran, or one that
@@ -71,6 +71,23 @@ describe("tool run provenance", () => {
 		expect(r.exitCode).toBe(2);
 	});
 
+	it("records a timeout as a timeout, not as a failure (#106)", () => {
+		startToolRecording();
+		const result = run("sleep 5", "/tmp", 200);
+		const [r] = takeToolRuns();
+		expect(result.ok).toBe(false);
+		expect(r).toMatchObject({ status: "timeout", timedOut: true, timeoutMs: 200, ok: false, notFound: false });
+	});
+
+	it("does not mark an ordinary failure as timed out", () => {
+		startToolRecording();
+		run("sh -c 'exit 1'", "/tmp");
+		const [r] = takeToolRuns();
+		expect(r.status).toBe("failed");
+		expect(r.timedOut).toBeUndefined();
+		expect(r.timeoutMs).toBeUndefined();
+	});
+
 	it("names the package rather than npx for delegated tools", () => {
 		startToolRecording();
 		run("npx --yes knip --reporter json", "/tmp", 1);
@@ -99,6 +116,38 @@ describe("tool run provenance", () => {
 		run('sh -c \'head -c 40000 /dev/zero | tr "\\\\0" "x"\'', "/tmp");
 		const [r] = takeToolRuns();
 		expect(r.output.length).toBeLessThanOrEqual(8000);
+	});
+
+	it("records an externally executed run exactly as run() would (#106)", () => {
+		const noisy = "node -e \"process.stdout.write('x'.repeat(20000))\"";
+		startToolRecording({ analyzerId: "testing" });
+		run(noisy, "/tmp", 60_000, { projectId: "app" });
+		const viaRun = takeToolRuns()[0];
+		startToolRecording({ analyzerId: "testing" });
+		recordToolRun(
+			noisy,
+			"/tmp",
+			{ status: "success", exitCode: 0, ok: true, durationMs: viaRun.durationMs, output: `${"x".repeat(20000)}\n` },
+			{ projectId: "app" },
+		);
+		const viaRecord = takeToolRuns()[0];
+		expect(viaRecord).toEqual(viaRun);
+		expect(viaRecord.output.length).toBeLessThan(20000);
+	});
+
+	it("does not call a timed-out run whose output mentions ENOENT a missing binary", () => {
+		startToolRecording();
+		recordToolRun("npx vitest run", "/tmp", {
+			status: "timeout",
+			exitCode: null,
+			ok: false,
+			durationMs: 5,
+			output: "ENOENT: no such file",
+			timedOut: true,
+			timeoutMs: 5,
+		});
+		const [r] = takeToolRuns();
+		expect(r).toMatchObject({ tool: "vitest", status: "timeout", notFound: false });
 	});
 
 	it("filters tool runs by analyzer and project for page-specific logs", () => {

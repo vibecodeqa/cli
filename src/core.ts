@@ -12,7 +12,7 @@ import { resolve } from "node:path";
 import { buildAnalyzerSnapshots } from "./analyzer-snapshot.js";
 import { CHECK_META, type CheckMeta, getCheckMeta } from "./check-meta.js";
 import { type CiContext, detectCiContext, type ReportProvenanceMeta } from "./ci-context.js";
-import { getCheckIgnore, isCheckEnabled, loadConfig, type VcqaConfig } from "./config.js";
+import { getCheckIgnore, getCheckSettings, isCheckEnabled, loadConfig, type VcqaConfig } from "./config.js";
 import { detectRepoUrl, detectStack, detectWorkspace } from "./detect.js";
 import { buildFileInventory } from "./file-inventory.js";
 import { setGlobalIgnore, setGlobalIgnoreNames, setGlobalScanPolicy, setGlobalSrcRoots } from "./fs-utils.js";
@@ -83,6 +83,8 @@ type ScoreMode = "available-scored" | "available-unscored" | "not-applicable" | 
 export interface ScanOptions {
 	/** Skip test execution (faster scan). Default: false */
 	skipTests?: boolean;
+	/** Time limit for each test run, in ms. Overrides `checks.testing.settings.timeoutMs`. Default: 120000 */
+	testTimeoutMs?: number;
 	/** Base ref the caller will filter issues against (`--diff`). Recorded in
 	 *  `meta.scan.diffBase` so the report says it is partial. Default: null */
 	diffBase?: string | null;
@@ -168,7 +170,14 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		{ name: "env-validation", fn: () => runEnvValidation(resolvedCwd) },
 		{ name: "git-hygiene", fn: () => runGitHygiene(resolvedCwd, fileInventory) },
 		{ name: "memory-safety", fn: () => runMemorySafety(resolvedCwd, workspace, fileInventory) },
-		{ name: "testing", fn: () => runTesting(resolvedCwd, stack, skipTests, srcRoots, workspace, fileInventory) },
+		{
+			name: "testing",
+			fn: () =>
+				runTesting(resolvedCwd, stack, skipTests, srcRoots, workspace, fileInventory, {
+					timeoutMs: options.testTimeoutMs,
+					settings: getCheckSettings(config, "testing"),
+				}),
+		},
 		{ name: "secrets", fn: () => runSecrets(resolvedCwd, fileInventory) },
 		{ name: "security", fn: () => runSecurity(resolvedCwd, fileInventory) },
 		{ name: "dependencies", fn: () => runDependencies(resolvedCwd, stack) },
