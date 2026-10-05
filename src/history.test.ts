@@ -180,6 +180,32 @@ describe("loadHistory", () => {
 		expect(entries[0].checkScores.has("testing")).toBe(false);
 	});
 
+	it("keeps not-run checks out of checkScores and records their run state (#107)", () => {
+		writeFileSync(
+			join(tmp, "2026-05-15T11-00-00.json"),
+			JSON.stringify({
+				timestamp: "2026-05-15T11:00:00.000Z",
+				score: 80,
+				checks: [
+					{ name: "lint", score: 100, details: { skipped: true, unavailable: true, status: "unavailable" } },
+					{ name: "ai-review", score: 100, details: { comingSoon: true } },
+					{ name: "deps", score: 100, details: { skipped: true } },
+					{ name: "types", score: 0, details: { skipped: true, reason: "runner error: boom" } },
+					{ name: "structure", score: 90, details: {} },
+				],
+			}),
+		);
+		const [entry] = loadHistory(tmp);
+		expect([...entry.checkScores]).toEqual([["structure", 90]]);
+		expect(Object.fromEntries(entry.checkStates)).toEqual({
+			lint: "unavailable",
+			"ai-review": "unavailable",
+			deps: "skipped",
+			types: "runner-error",
+			structure: "ran",
+		});
+	});
+
 	it("limits to last 30 entries", () => {
 		for (let i = 0; i < 40; i++) {
 			const day = String(i + 1).padStart(2, "0");
