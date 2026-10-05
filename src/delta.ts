@@ -71,6 +71,16 @@ export function compareCheckSides(before: CheckSide, after: CheckSide): { delta:
 	return { delta: 0, transition: { before, after } };
 }
 
+/**
+ * Whether a check's issues can be diffed between two scans: only when it ran
+ * on both sides. A crashed, skipped, unavailable or absent side has no issue
+ * list to compare, so diffing against it would report every issue on the
+ * other side as fixed (or new) when nothing changed in the code (#107).
+ */
+export function issuesComparable(before: CheckSide, after: CheckSide): boolean {
+	return before.state === "ran" && after.state === "ran";
+}
+
 /** "72", "failed (runner error)", "unavailable", "skipped" or "not present". */
 export function formatCheckSide(side: CheckSide): string {
 	if (side.state === "ran") return String(side.score);
@@ -98,7 +108,9 @@ export interface CheckDelta {
 	delta: number;
 	/** Set instead of a numeric delta when the check's run state changed. */
 	transition?: StatusTransition;
+	/** Issues no longer reported. Always empty when either side did not run, crashed or is absent. */
 	fixed: DeltaIssue[];
+	/** Issues newly reported. Always empty when either side did not run, crashed or is absent. */
 	introduced: DeltaIssue[];
 }
 
@@ -158,8 +170,8 @@ export function computeDelta(before: VibeReport, after: VibeReport): ScanDelta {
 	const allIntroduced: DeltaIssue[] = [];
 
 	// Union of check names: a check present only in `before` (tool removed,
-	// check dropped or renamed) still gets a "72 → not present" transition and
-	// its issues count as fixed.
+	// check dropped or renamed) still gets a "72 → not present" transition.
+	// Its issues are not counted as fixed: the check stopped looking.
 	const names = [...after.checks.map((c) => c.name)];
 	for (const c of before.checks) if (!names.includes(c.name)) names.push(c.name);
 
@@ -170,14 +182,18 @@ export function computeDelta(before: VibeReport, after: VibeReport): ScanDelta {
 		const afterSide = checkSide(afterCheck);
 		const { delta: scoreChange, transition } = compareCheckSides(beforeSide, afterSide);
 
-		// Build multiset of issue keys for before and after
-		const beforeKeys = issueMultiset(name, beforeCheck);
-		const afterKeys = issueMultiset(name, afterCheck);
-
-		// Fixed: in before but not in after (or count decreased)
-		const fixed = multisetDifference(name, beforeKeys, afterKeys);
-		// Introduced: in after but not in before (or count increased)
-		const introduced = multisetDifference(name, afterKeys, beforeKeys);
+		// Issues are diffed only when the check ran on both sides; otherwise
+		// the change is the status transition, not N fixed / N new.
+		let fixed: DeltaIssue[] = [];
+		let introduced: DeltaIssue[] = [];
+		if (issuesComparable(beforeSide, afterSide)) {
+			const beforeKeys = issueMultiset(name, beforeCheck);
+			const afterKeys = issueMultiset(name, afterCheck);
+			// Fixed: in before but not in after (or count decreased)
+			fixed = multisetDifference(name, beforeKeys, afterKeys);
+			// Introduced: in after but not in before (or count increased)
+			introduced = multisetDifference(name, afterKeys, beforeKeys);
+		}
 		allFixed.push(...fixed);
 		allIntroduced.push(...introduced);
 

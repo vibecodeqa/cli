@@ -414,3 +414,39 @@ describe("crashed runner on the actions and trends pages (#107)", () => {
 		expect(html).not.toContain("+72");
 	});
 });
+
+describe("actions page does not count issues of a check that did not run on one side (#107)", () => {
+	const issues = ["a", "b", "c"].map((f) => ({ severity: "warning" as const, message: `issue in ${f}`, file: `src/${f}.ts`, rule: "r" }));
+	const ran: CheckResult = { name: "lint", score: 72, grade: "C", details: { status: "failed" }, issues, duration: 1 };
+	const crashed: CheckResult = {
+		name: "lint",
+		score: 0,
+		grade: "F",
+		details: { skipped: true, status: "failed", reason: "runner error: boom" },
+		issues: [],
+		duration: 0,
+	};
+	const unavailable: CheckResult = {
+		name: "lint",
+		score: 100,
+		grade: "A",
+		details: { skipped: true, unavailable: true, status: "unavailable" },
+		issues: [],
+		duration: 1,
+	};
+	const cases = Object.entries({ crashed, unavailable, dropped: undefined }).flatMap(([kind, other]) => [
+		{ title: `ran (3 issues) → ${kind}`, prev: [ran], curr: other ? [other] : [] },
+		{ title: `${kind} → ran (3 issues)`, prev: other ? [other] : [], curr: [ran] },
+	]);
+
+	it.each(cases)("$title: 0 fixed, 0 new", ({ prev, curr }) => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-report-"));
+		const html = generatePages(makeReport(dir, curr), undefined, makeReport(dir, prev)).get("actions.html")!;
+		const banner = html.slice(html.indexOf('<div class="delta-banner">'));
+		expect(banner).toContain('<span style="color:var(--pass)">0 fixed</span>');
+		expect(banner).toContain('<span style="color:var(--fail)">0 new</span>');
+		expect(banner).not.toContain("Fixed (");
+		expect(banner).not.toContain("New (");
+		expect(banner).toContain("Status changes:");
+	});
+});

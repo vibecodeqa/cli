@@ -197,7 +197,7 @@ describe("not-run checks (#107)", () => {
 		expect(formatCheckChangeBullets(delta, 8)).toContain("✅ lint: 60 → 72 (+12)");
 	});
 
-	it("reports a check that disappeared as a transition and counts its issues as fixed", () => {
+	it("reports a check that disappeared as a transition and does not count its issues as fixed", () => {
 		const lintWithIssues = {
 			...lintScored,
 			issues: [
@@ -209,10 +209,10 @@ describe("not-run checks (#107)", () => {
 		const lint = delta.checks.find((c) => c.name === "lint")!;
 		expect(lint).toMatchObject({ before: 72, after: null, delta: 0 });
 		expect(lint.transition).toEqual({ before: { state: "ran", score: 72 }, after: { state: "absent" } });
-		expect(lint.fixed).toHaveLength(2);
-		expect(delta.fixed.map((f) => f.check)).toEqual(["lint", "lint"]);
+		expect(lint.fixed).toHaveLength(0);
+		expect(delta.fixed).toHaveLength(0);
 		expect(formatCheckChangeBullets(delta, 8)).toContain("lint: 72 → not present");
-		expect(formatDeltaMarkdown(delta)).toContain("## Fixed (2)");
+		expect(formatDeltaMarkdown(delta)).not.toContain("## Fixed");
 	});
 
 	it("carries null, not the placeholder 100, for a side that did not run", () => {
@@ -284,5 +284,70 @@ describe("crashed runner (#107)", () => {
 		// `status` is an open vocabulary (schema 0.6.0): an unknown value counts as ran.
 		expect(checkRunState({ ...lintScored, status: "timeout" })).toBe("ran");
 		expect(checkRunState({ ...lintScored, status: "timeout", details: { status: "timeout" } })).toBe("ran");
+	});
+});
+
+describe("issues of a check that did not run on one side are not diffed (#107)", () => {
+	const threeIssues = [
+		{ severity: "error" as const, message: "unused var", file: "src/a.ts", rule: "no-unused" },
+		{ severity: "warning" as const, message: "prefer const", file: "src/b.ts", rule: "prefer-const" },
+		{ severity: "warning" as const, message: "no any", file: "src/c.ts", rule: "no-any" },
+	];
+	const lintRan = {
+		name: "lint",
+		status: "failed",
+		score: 72,
+		grade: "C" as const,
+		details: { status: "failed" },
+		issues: threeIssues,
+		duration: 1,
+	};
+	const notRun = {
+		crashed: {
+			name: "lint",
+			status: "failed",
+			score: 0,
+			grade: "F" as const,
+			details: { skipped: true, status: "failed", reason: "runner error: boom" },
+			issues: [],
+			duration: 0,
+		},
+		unavailable: {
+			name: "lint",
+			status: "unavailable",
+			score: 100,
+			grade: "A" as const,
+			details: { skipped: true, unavailable: true, status: "unavailable" },
+			issues: [],
+			duration: 1,
+		},
+		dropped: undefined,
+	};
+	const cases = Object.entries(notRun).flatMap(([kind, other]) => [
+		{ title: `ran (3 issues) → ${kind}`, before: [lintRan], after: other ? [other] : [] },
+		{ title: `${kind} → ran (3 issues)`, before: other ? [other] : [], after: [lintRan] },
+	]);
+
+	it.each(cases)("$title: 0 fixed, 0 new; only the status transition", ({ before, after }) => {
+		const delta = computeDelta(makeReport({ checks: before }), makeReport({ checks: after }));
+		expect(delta.fixed).toHaveLength(0);
+		expect(delta.introduced).toHaveLength(0);
+		const lint = delta.checks.find((c) => c.name === "lint")!;
+		expect(lint.transition).toBeDefined();
+		expect(lint.fixed).toHaveLength(0);
+		expect(lint.introduced).toHaveLength(0);
+
+		const md = formatDeltaMarkdown(delta);
+		expect(md).toContain("| 0 fixed, 0 new |");
+		expect(md).not.toContain("## Fixed");
+		expect(md).not.toContain("## New Issues");
+		expect(md).not.toMatch(/\b3 (fixed|new)\b/);
+		expect(formatCheckChangeBullets(delta, 8)).not.toMatch(/fixed|new/);
+	});
+
+	it("still diffs issues when the check ran on both sides", () => {
+		const delta = computeDelta(makeReport({ checks: [lintRan] }), makeReport({ checks: [{ ...lintRan, issues: threeIssues.slice(1) }] }));
+		expect(delta.fixed).toHaveLength(1);
+		expect(delta.introduced).toHaveLength(0);
 	});
 });

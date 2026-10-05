@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkSide, compareCheckSides, type StatusTransition } from "./delta.js";
+import { checkSide, compareCheckSides, issuesComparable, type StatusTransition } from "./delta.js";
 import { type IssueSnapshot, issueSnapshot, readIssueFingerprint } from "./issue-fingerprint.js";
 import type { VibeReport } from "./types.js";
 
@@ -37,11 +37,14 @@ export function computeTrend(report: VibeReport, outputDir: string): TrendDelta 
 	const checkDeltas: TrendDelta["checkDeltas"] = [];
 
 	// Union of names, so a check that disappeared reads "72 → not present".
+	// Issues are compared only for checks that ran in both scans (#107).
+	const comparable = new Set<string>();
 	const names = report.checks.map((c) => c.name);
 	for (const c of prev.checks) if (!names.includes(c.name)) names.push(c.name);
 	for (const name of names) {
 		const prevSide = checkSide(prev.checks.find((c) => c.name === name));
 		const currSide = checkSide(report.checks.find((c) => c.name === name));
+		if (issuesComparable(prevSide, currSide)) comparable.add(name);
 		const { delta, transition } = compareCheckSides(prevSide, currSide);
 		checkDeltas.push({
 			name,
@@ -52,8 +55,8 @@ export function computeTrend(report: VibeReport, outputDir: string): TrendDelta 
 		});
 	}
 
-	const prevIssueMap = issueMap(prev);
-	const currIssueMap = issueMap(report);
+	const prevIssueMap = issueMap(prev, comparable);
+	const currIssueMap = issueMap(report, comparable);
 	const introduced = [...currIssueMap.entries()].filter(([fp]) => !prevIssueMap.has(fp)).map(([, issue]) => issue);
 	const fixed = [...prevIssueMap.entries()].filter(([fp]) => !currIssueMap.has(fp)).map(([, issue]) => issue);
 	const newIssues = introduced.length;
@@ -62,9 +65,10 @@ export function computeTrend(report: VibeReport, outputDir: string): TrendDelta 
 	return { scoreDelta, checkDeltas, newIssues, fixedIssues, introduced, fixed, prevTimestamp: prev.timestamp };
 }
 
-function issueMap(report: VibeReport): Map<string, IssueSnapshot> {
+function issueMap(report: VibeReport, comparable: Set<string>): Map<string, IssueSnapshot> {
 	const out = new Map<string, IssueSnapshot>();
 	for (const check of report.checks) {
+		if (!comparable.has(check.name)) continue;
 		for (const issue of check.issues) {
 			const fp = readIssueFingerprint(check.name, issue);
 			out.set(fp, issueSnapshot(check.name, issue));

@@ -144,7 +144,7 @@ describe("computeTrend not-run checks (#107)", () => {
 		expect(trend.checkDeltas).toHaveLength(1);
 		expect(trend.checkDeltas[0]).toMatchObject({ name: "lint", prev: 72, curr: null, delta: 0 });
 		expect(formatTransition(trend.checkDeltas[0].transition!)).toBe("72 → not present");
-		expect(trend.fixedIssues).toBe(2);
+		expect(trend.fixedIssues).toBe(0);
 	});
 });
 
@@ -172,6 +172,41 @@ describe("computeTrend crashed runner (#107)", () => {
 		const lint = computeTrend(makeReport(70, [{ name: "lint", score: 72, issues: 0 }]), dir)!.checkDeltas[0];
 		expect(lint).toMatchObject({ prev: null, curr: 72, delta: 0 });
 		expect(formatTransition(lint.transition!)).toBe("failed (runner error) → 72");
+	});
+});
+
+describe("computeTrend does not diff issues of a check that did not run on one side (#107)", () => {
+	const crashed = { skipped: true, status: "failed", reason: "runner error: boom" };
+	const unavailable = { skipped: true, unavailable: true, status: "unavailable" };
+	const notRun = (details: Record<string, unknown> | null): VibeReport => {
+		if (!details) return makeReport(70, [{ name: "structure", score: 80, issues: 0 }]);
+		const r = makeReport(70, [
+			{ name: "lint", score: 0, issues: 0 },
+			{ name: "structure", score: 80, issues: 0 },
+		]);
+		r.checks[0].details = details;
+		return r;
+	};
+	const ran = () =>
+		makeReport(70, [
+			{ name: "lint", score: 72, issues: 3 },
+			{ name: "structure", score: 80, issues: 0 },
+		]);
+	const cases = Object.entries({ crashed, unavailable, dropped: null }).flatMap(([kind, details]) => [
+		{ title: `ran (3 issues) → ${kind}`, prev: ran, curr: () => notRun(details) },
+		{ title: `${kind} → ran (3 issues)`, prev: () => notRun(details), curr: ran },
+	]);
+
+	it.each(cases)("$title: 0 fixed, 0 new", ({ prev, curr }) => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-trend-"));
+		writeFileSync(join(dir, "report.json"), JSON.stringify(prev()));
+		const trend = computeTrend(curr(), dir)!;
+		expect(trend.fixedIssues).toBe(0);
+		expect(trend.newIssues).toBe(0);
+		expect(trend.fixed).toEqual([]);
+		expect(trend.introduced).toEqual([]);
+		expect(trend.checkDeltas.find((d) => d.name === "lint")!.transition).toBeDefined();
+		expect(formatTrend(trend)).not.toMatch(/fixed|new/);
 	});
 });
 
