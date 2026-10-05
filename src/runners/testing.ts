@@ -1016,7 +1016,7 @@ export function runTesting(
 	score += pyramidScore;
 
 	// Execution (20 points)
-	score += executionPoints(execution, skipExec, testReports);
+	score += testExecutionPoints(execution, skipExec, testReports);
 
 	// Coverage (20 points)
 	if (coverage) {
@@ -1241,17 +1241,22 @@ function projectRunIssues(testReports: NormalizedTestProjectReport[], testFiles:
 	return issues;
 }
 
-function executionPoints(
+/** Execution points (of 20). Pass rate over the projects that reported; 10
+ * when tests were not run at all — `--skip-tests`, or EVERY project that ran
+ * stopped at the time limit (a timeout says how fast the machine is, not
+ * whether the tests pass); otherwise 0. A timeout never lifts a project whose
+ * command failed: one failed project and one timed-out project score 0. */
+export function testExecutionPoints(
 	execution: { passed: number; failed: number; total: number } | null,
 	skipExec: boolean,
-	testReports: NormalizedTestProjectReport[],
+	testReports: Pick<NormalizedTestProjectReport, "status">[],
 ): number {
 	if (execution) {
 		const passRate = execution.total > 0 ? execution.passed / execution.total : 0;
 		return Math.round(passRate * 20);
 	}
-	// Partial credit when not run: skipped, or stopped at the time limit. A
-	// timeout says how fast the machine is, not whether the tests pass.
-	if (skipExec || testReports.some((report) => report.status === "timeout")) return 10;
+	if (skipExec) return 10;
+	const ran = testReports.filter((report) => report.status !== "skipped");
+	if (ran.length > 0 && ran.every((report) => report.status === "timeout")) return 10;
 	return 0; // couldn't run tests
 }

@@ -13,13 +13,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { scan } from "../core.js";
+import { detectStack } from "../detect.js";
 import type { ToolRun } from "./exec.js";
-import { resolveTestTimeout } from "./testing.js";
+import { resolveTestTimeout, runTesting, testExecutionPoints } from "./testing.js";
 
 const FAKE_VITEST = `#!/usr/bin/env node
 const { spawn } = require("node:child_process");
 const { mkdirSync, readFileSync, writeFileSync } = require("node:fs");
-const sleepMs = Number(readFileSync("fake-sleep-ms", "utf-8"));
+const mode = readFileSync("fake-sleep-ms", "utf-8").trim();
+if (mode === "fail") { console.error("boom"); process.exit(1); }
+const sleepMs = Number(mode);
 const grandchild = spawn("sleep", ["60"], { stdio: "ignore" });
 writeFileSync("pids.json", JSON.stringify({ fake: process.pid, grandchild: grandchild.pid }));
 setTimeout(() => {
@@ -39,9 +42,10 @@ afterEach(() => {
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function makeFixture(sleepMs: number, settings?: Record<string, unknown>): string {
-	const dir = mkdtempSync(join(tmpdir(), "vcqa-timeout-"));
-	dirs.push(dir);
+function makeFixture(sleepMs: number | "fail", settings?: Record<string, unknown>, into?: string): string {
+	const dir = into ?? mkdtempSync(join(tmpdir(), "vcqa-timeout-"));
+	if (!into) dirs.push(dir);
+	mkdirSync(dir, { recursive: true });
 	writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "timeout-fixture", devDependencies: { vitest: "1.0.0" } }));
 	if (settings) writeFileSync(join(dir, ".vcqa.json"), JSON.stringify({ checks: { testing: { settings } } }));
 	mkdirSync(join(dir, "src"));
@@ -171,4 +175,51 @@ describe("resolveTestTimeout", () => {
 		expect(resolveTestTimeout({ settings: { timeoutMs: 3e9 } })).toEqual({ ms: 120_000, source: "default", invalidSetting: 3e9 });
 		expect(resolveTestTimeout({ timeoutMs: 2 ** 31, settings: { timeoutMs: 9000 } })).toEqual({ ms: 9000, source: "config" });
 	});
+});
+
+describe("timeout scoring across projects (#106)", () => {
+	const timedOut = { status: "timeout" as const };
+
+	it("gives 10/20 only when every project that ran timed out", () => {
+		expect(testExecutionPoints(null, false, [timedOut])).toBe(10);
+		expect(testExecutionPoints(null, false, [timedOut, timedOut, { status: "skipped" }])).toBe(10);
+		expect(testExecutionPoints(null, false, [timedOut, { status: "command-failed" }])).toBe(0);
+		expect(testExecutionPoints(null, false, [timedOut, { status: "parse-failed" }])).toBe(0);
+		expect(testExecutionPoints(null, false, [])).toBe(0);
+		expect(testExecutionPoints(null, true, [])).toBe(10);
+	});
+
+	it("scores the projects that reported by pass rate, timed-out ones aside", () => {
+		expect(testExecutionPoints({ passed: 1, failed: 1, total: 2 }, false, [timedOut, { status: "failed" }])).toBe(10);
+		expect(testExecutionPoints({ passed: 0, failed: 3, total: 3 }, false, [timedOut, { status: "failed" }])).toBe(0);
+	});
+
+	it.skipIf(process.platform === "win32")(
+		"a timed-out project does not hide another project's failed command",
+		() => {
+			const run = (second: number | "fail") => {
+				const dir = mkdtempSync(join(tmpdir(), "vcqa-timeout-mono-"));
+				dirs.push(dir);
+				writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "mono", private: true }));
+				makeFixture(30_000, undefined, join(dir, "packages/slow"));
+				makeFixture(second, undefined, join(dir, "packages/other"));
+				// Keep coverage out of the comparison: a failed run's coverage file is
+				// still read, as before #106, and would differ between the two runs.
+				rmSync(join(dir, "packages/other/coverage"), { recursive: true });
+				const srcRoots = ["packages/slow/src", "packages/other/src"];
+				return runTesting(dir, detectStack(dir), false, srcRoots, undefined, undefined, { timeoutMs: 1500 });
+			};
+			const bothTimedOut = run(30_000);
+			const oneFailed = run("fail");
+			const statuses = (check: typeof oneFailed) =>
+				(check.details as Record<string, any>).testProjects.map((p: { status: string }) => p.status).sort();
+
+			expect(statuses(bothTimedOut)).toEqual(["timeout", "timeout"]);
+			expect(statuses(oneFailed)).toEqual(["command-failed", "timeout"]);
+			expect(oneFailed.issues.some((i) => i.rule === "test-run-command-failed" && i.severity === "error")).toBe(true);
+			// Same static points; only execution differs: 10 when all timed out, 0 here.
+			expect(oneFailed.score).toBe(bothTimedOut.score - 10);
+		},
+		30_000,
+	);
 });
