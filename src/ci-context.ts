@@ -66,7 +66,7 @@ export interface GitHubEventPayload {
 
 export interface CiContext {
 	git: ReportGitProvenance;
-	/** null = known not to be running in CI. */
+	/** null = not running in CI, or in a CI run with no run id to name it by. */
 	ci: ReportCiProvenance | null;
 	/** `owner/repo` from `GITHUB_REPOSITORY`, when set. */
 	repository: string | null;
@@ -279,15 +279,19 @@ function commitParents(cwd: string, sha: string | null): string[] {
 	return parents;
 }
 
-function githubActionsRun(env: NodeJS.ProcessEnv, eventName: string, repository: string | null): ReportCiProvenance {
-	const runId = env.GITHUB_RUN_ID || "";
+/** The Actions run, or null when there is no run id to name it by (some
+ *  Actions-compatible runners and local emulators) — schema 0.6.0 requires a
+ *  non-empty `runId`, so a run without one is reported as no run. */
+function githubActionsRun(env: NodeJS.ProcessEnv, eventName: string, repository: string | null): ReportCiProvenance | null {
+	const runId = env.GITHUB_RUN_ID;
+	if (!runId) return null;
 	const server = (env.GITHUB_SERVER_URL || "https://github.com").replace(/\/+$/, "");
 	const attempt = Number.parseInt(env.GITHUB_RUN_ATTEMPT || "", 10);
 	return {
 		provider: "github-actions",
 		runId,
 		runAttempt: Number.isFinite(attempt) && attempt > 0 ? attempt : 1,
-		runUrl: runId && repository ? `${server}/${repository}/actions/runs/${runId}` : "",
+		runUrl: repository ? `${server}/${repository}/actions/runs/${runId}` : "",
 		event: eventName,
 		actor: env.GITHUB_ACTOR || null,
 	};

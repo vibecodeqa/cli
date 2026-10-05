@@ -246,10 +246,17 @@ describe("detectCiContext — GitHub Actions", () => {
 		expect(ctx.headShaNote).toBeNull();
 	});
 
-	it("missing run metadata degrades to empty strings, not a broken URL", () => {
+	it("no GITHUB_RUN_ID: ci is null rather than an empty runId the schema rejects", () => {
+		const { dir, head } = gitRepo();
+		const ctx = detectCiContext(dir, { GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: "push", GITHUB_SHA: head });
+		expect(ctx.ci).toBeNull();
+		expect(ctx.git.sha).toBe(head);
+	});
+
+	it("run id without a repository: no run URL, but a schema-valid run", () => {
 		const { dir } = gitRepo();
-		const ctx = detectCiContext(dir, { GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: "push" });
-		expect(ctx.ci).toEqual({ provider: "github-actions", runId: "", runAttempt: 1, runUrl: "", event: "push", actor: null });
+		const ctx = detectCiContext(dir, { GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: "push", GITHUB_RUN_ID: "77" });
+		expect(ctx.ci).toEqual({ provider: "github-actions", runId: "77", runAttempt: 1, runUrl: "", event: "push", actor: null });
 	});
 });
 
