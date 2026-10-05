@@ -1,0 +1,33 @@
+{
+	"action": "synchronize",
+	"number": 42,
+	"pull_request": {
+		"number": 42,
+		"head": {
+			"ref": "feature/login",
+			"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"repo": {
+				"full_name": "octo-org/widgets"
+			}
+		},
+		"base": {
+			"ref": "main",
+			"sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			"repo": {
+				"full_name": "octo-org/widgets"
+			}
+		}
+	},
+	"repository": {
+		"full_name": "octo-org/widgets",
+		"name": "widgets",
+		"owner": {
+			"login": "octo-org"
+		},
+		"default_branch": "main",
+		"html_url": "https://github.com/octo-org/widgets"
+	},
+	"sender": {
+		"login": "octocat"
+	}
+}

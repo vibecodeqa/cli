@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import type { VibeReport } from "./types.js";
-import { buildReportUploadPayload, repoSlugFromReport } from "./upload.js";
+import { buildReportUploadPayload, currentGitSha, repoSlugFromReport } from "./upload.js";
+
+const EVENTS = join(import.meta.dirname!, "..", "fixtures", "github-events");
 
 function report(): VibeReport {
 	return {
@@ -82,5 +88,46 @@ describe("upload payload contract", () => {
 		missingRepo.meta.repoUrl = null;
 
 		expect(buildReportUploadPayload(missingRepo)).toBeNull();
+	});
+});
+
+describe("upload sha", () => {
+	// Every case passes an explicit env, so the GITHUB_* of a CI run executing
+	// this suite cannot leak in.
+	const dirs: string[] = [];
+	afterEach(() => {
+		for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+	});
+	const repoWithCommit = () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-upload-git-"));
+		dirs.push(dir);
+		const git = (...args: string[]) =>
+			execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args], {
+				cwd: dir,
+				encoding: "utf-8",
+				stdio: ["pipe", "pipe", "pipe"],
+			}).trim();
+		git("init", "-q");
+		writeFileSync(join(dir, "a.txt"), "a\n");
+		git("add", "a.txt");
+		git("commit", "-q", "-m", "init");
+		return { dir, head: git("rev-parse", "HEAD") };
+	};
+
+	it("uses the PR head sha on pull_request, not the merge sha", () => {
+		const { dir } = repoWithCommit();
+		const env = { GITHUB_ACTIONS: "true", GITHUB_EVENT_PATH: join(EVENTS, "pull_request.json"), GITHUB_SHA: "1".repeat(40) };
+		expect(currentGitSha(dir, env)).toBe("a".repeat(40));
+	});
+
+	it("uses GITHUB_SHA on push", () => {
+		const { dir } = repoWithCommit();
+		const env = { GITHUB_ACTIONS: "true", GITHUB_EVENT_PATH: join(EVENTS, "push.json"), GITHUB_SHA: "c".repeat(40) };
+		expect(currentGitSha(dir, env)).toBe("c".repeat(40));
+	});
+
+	it("falls back to the local HEAD outside CI", () => {
+		const { dir, head } = repoWithCommit();
+		expect(currentGitSha(dir, {})).toBe(head);
 	});
 });

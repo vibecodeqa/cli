@@ -13,14 +13,23 @@ export function e(s: string): string {
 	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-/** Make a file path a clickable GitHub link if repoUrl is available. */
-export function fileLink(path: string, line: number | undefined, repoUrl: string | null, branch: string): string {
+/** The tree file links should point at: the scanned commit when the report
+ *  knows it (a permalink that stays correct after the branch moves), else the
+ *  branch, else "" — meaning no link at all. */
+export function linkRef(meta: { branch?: string | null; git?: { sha?: string | null } | null }): string {
+	return meta.git?.sha || meta.branch || "";
+}
+
+/** Make a file path a clickable link into the repo at `ref` (a commit sha or a
+ *  branch). Plain text when there is no http(s) repoUrl or no ref — a link with
+ *  an empty ref would be `/blob//…`, which resolves nowhere. */
+export function fileLink(path: string, line: number | undefined, repoUrl: string | null, ref: string): string {
 	const clean = path.split(":")[0]!;
-	if (!repoUrl || !/^https?:\/\//.test(repoUrl)) return e(path);
+	if (!repoUrl || !/^https?:\/\//.test(repoUrl) || !ref) return e(path);
 	// Encode path segments for URL safety (spaces, #, ?, etc.)
 	const encodedPath = clean.split("/").map(encodeURIComponent).join("/");
 	const safeRepoUrl = repoUrl.replace(/ /g, "%20");
-	const href = `${safeRepoUrl}/blob/${encodeURIComponent(branch)}/${encodedPath}${line ? `#L${line}` : ""}`;
+	const href = `${safeRepoUrl}/blob/${encodeURIComponent(ref)}/${encodedPath}${line ? `#L${line}` : ""}`;
 	return `<a href="${e(href)}" target="_blank" rel="noopener" class="flink">${e(path)}</a>`;
 }
 
