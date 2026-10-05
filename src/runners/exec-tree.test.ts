@@ -3,7 +3,7 @@
  * supervisor, the parent dying, or the parent giving up on its output. */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -163,5 +163,52 @@ describe.skipIf(!posix)("runWithTreeKill", () => {
 		process.kill(parent.pid as number, "SIGKILL");
 		expect(await waitFor(() => !isAlive(pids[0]))).toBe(true);
 		expect(await waitFor(() => !isAlive(pids[1]))).toBe(true);
+	});
+});
+
+describe.skipIf(!posix)("runWithTreeKill records through the shared recorder", () => {
+	// A token-shaped value, assembled at runtime so no literal sits in the source.
+	const alnum = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+	const body = Array.from({ length: 36 }, (_, i) => alnum[(i * 7 + 3) % alnum.length]).join("");
+	const value = ["gh", "p_", body].join("");
+	const windows = Array.from({ length: body.length - 4 }, (_, i) => body.slice(i, i + 5));
+	const expectAbsent = (text: string) => {
+		for (const w of windows) expect(text).not.toContain(w);
+	};
+
+	it("processes the output of a successful run", () => {
+		const dir = tempDir();
+		writeFileSync(join(dir, "v.txt"), `before ${value} after\n`);
+		startToolRecording();
+		const res = runWithTreeKill("cat v.txt", dir, 10_000);
+		const [r] = takeToolRuns();
+		expect(res.ok).toBe(true);
+		expect(r).toMatchObject({ status: "success", ok: true });
+		expect(r.output).toContain("before");
+		expectAbsent(r.output);
+		expectAbsent(r.command);
+	});
+
+	it("processes the output of a timed-out run", () => {
+		const dir = tempDir();
+		writeFileSync(join(dir, "v.txt"), `${value}\n`);
+		startToolRecording();
+		const res = runWithTreeKill("cat v.txt; exec sleep 60", dir, 500);
+		const [r] = takeToolRuns();
+		expect(res.timedOut).toBe(true);
+		expect(r).toMatchObject({ status: "timeout", timedOut: true });
+		expectAbsent(r.output);
+	});
+
+	it("processes a value that straddles the output cap", () => {
+		const dir = tempDir();
+		// The value starts 10 characters before the 8000-character cap.
+		writeFileSync(join(dir, "v.txt"), `${"x".repeat(7990)}${value}${"y".repeat(100)}\n`);
+		startToolRecording();
+		runWithTreeKill("cat v.txt", dir, 10_000);
+		const [r] = takeToolRuns();
+		expect(r.output.length).toBeLessThanOrEqual(8000);
+		expect(r.output.startsWith("xxxx")).toBe(true);
+		expectAbsent(r.output);
 	});
 });

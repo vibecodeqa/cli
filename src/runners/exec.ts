@@ -151,8 +151,9 @@ export function run(cmd: string, cwd: string, timeout = 60_000, context: ToolRun
 
 type ToolRunResult = Pick<ToolRun, "status" | "exitCode" | "ok" | "durationMs" | "output" | "timedOut" | "timeoutMs">;
 
-/** The one place a ToolRun entry is built: command, cwd, context, capped
- * output and the not-found guess. Every recorded run goes through it. */
+/** The one place a ToolRun entry is built: command, cwd, context and the
+ * not-found guess. Command and output are passed through whole — `record()`
+ * processes and caps them, so every recorded run is stored the same way. */
 function toolRunEntry(cmd: string, cwd: string, result: ToolRunResult, context: ToolRunContext): ToolRun {
 	return {
 		tool: toolNameOf(cmd),
@@ -160,7 +161,7 @@ function toolRunEntry(cmd: string, cwd: string, result: ToolRunResult, context: 
 		cwd,
 		...normalizedContext({ ...defaultContext, ...context }),
 		...result,
-		output: result.output.trim().slice(0, MAX_OUTPUT),
+		output: result.output,
 		notFound: !result.ok && !result.timedOut && /not found|ENOENT|command not found/i.test(result.output),
 	};
 }
