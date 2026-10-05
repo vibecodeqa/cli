@@ -55,24 +55,39 @@ export function computeTrend(report: VibeReport, outputDir: string): TrendDelta 
 		});
 	}
 
-	const prevIssueMap = issueMap(prev, comparable);
-	const currIssueMap = issueMap(report, comparable);
-	const introduced = [...currIssueMap.entries()].filter(([fp]) => !prevIssueMap.has(fp)).map(([, issue]) => issue);
-	const fixed = [...prevIssueMap.entries()].filter(([fp]) => !currIssueMap.has(fp)).map(([, issue]) => issue);
+	const prevIssues = issueMultiset(prev, comparable);
+	const currIssues = issueMultiset(report, comparable);
+	const introduced = surplus(currIssues, prevIssues);
+	const fixed = surplus(prevIssues, currIssues);
 	const newIssues = introduced.length;
 	const fixedIssues = fixed.length;
 
 	return { scoreDelta, checkDeltas, newIssues, fixedIssues, introduced, fixed, prevTimestamp: prev.timestamp };
 }
 
-function issueMap(report: VibeReport, comparable: Set<string>): Map<string, IssueSnapshot> {
-	const out = new Map<string, IssueSnapshot>();
+/** Group issues of comparable checks by fingerprint, keeping every occurrence
+ * (a multiset, as in delta.ts). */
+function issueMultiset(report: VibeReport, comparable: Set<string>): Map<string, IssueSnapshot[]> {
+	const out = new Map<string, IssueSnapshot[]>();
 	for (const check of report.checks) {
 		if (!comparable.has(check.name)) continue;
 		for (const issue of check.issues) {
 			const fp = readIssueFingerprint(check.name, issue);
-			out.set(fp, issueSnapshot(check.name, issue));
+			const list = out.get(fp);
+			const snap = issueSnapshot(check.name, issue);
+			if (list) list.push(snap);
+			else out.set(fp, [snap]);
 		}
+	}
+	return out;
+}
+
+/** Occurrences in `a` beyond the count of the same fingerprint in `b`. */
+function surplus(a: Map<string, IssueSnapshot[]>, b: Map<string, IssueSnapshot[]>): IssueSnapshot[] {
+	const out: IssueSnapshot[] = [];
+	for (const [fp, list] of a) {
+		const other = b.get(fp)?.length ?? 0;
+		if (list.length > other) out.push(...list.slice(other));
 	}
 	return out;
 }

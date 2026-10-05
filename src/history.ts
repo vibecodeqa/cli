@@ -19,7 +19,16 @@ export interface HistoryEntry {
 	analyzerSnapshots: AnalyzerSnapshot[];
 }
 
-/** Load history entries from historyDir, sorted oldest-first. Returns last 30 max. */
+/** A `--diff` scan: its issues were filtered to the changed files, so it is
+ *  not comparable with a full scan — not as a trend baseline, not as a
+ *  history point. Marked by `meta.scan.diffBase` (report and history snapshot). */
+export function isPartialScan(report: { meta?: unknown } | null | undefined): boolean {
+	const scan = (report?.meta as { scan?: { diffBase?: unknown } } | undefined)?.scan;
+	return typeof scan?.diffBase === "string" && scan.diffBase.length > 0;
+}
+
+/** Load history entries from historyDir, sorted oldest-first, leaving out
+ *  partial (`--diff`) scans. Returns last 30 max. */
 export function loadHistory(historyDir: string): HistoryEntry[] {
 	if (!existsSync(historyDir)) return [];
 
@@ -31,7 +40,7 @@ export function loadHistory(historyDir: string): HistoryEntry[] {
 	for (const file of files) {
 		try {
 			const raw: VibeReport = JSON.parse(readFileSync(join(historyDir, file), "utf-8"));
-			if (raw.score === null || raw.score === undefined || !Number.isFinite(Number(raw.score)) || !raw.checks) continue;
+			if (!isComparableSnapshot(raw)) continue;
 			const checkScores = new Map<string, number>();
 			const checkStates: HistoryEntry["checkStates"] = new Map();
 			const checkReasons = new Map<string, string>();
@@ -72,6 +81,12 @@ function readHistoryCheck(
 			if (snapshot) issues.push(snapshot);
 		}
 	}
+}
+
+/** A scored, full-scan snapshot: one the series can compare. */
+function isComparableSnapshot(raw: VibeReport): boolean {
+	if (raw.score === null || raw.score === undefined || !Number.isFinite(Number(raw.score)) || !raw.checks) return false;
+	return !isPartialScan(raw);
 }
 
 function normalizeAnalyzerSnapshots(raw: unknown): AnalyzerSnapshot[] {

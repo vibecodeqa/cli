@@ -2,7 +2,9 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type HistoryEntry, loadHistory, scoreDeltaBadge } from "./history.js";
+import { type HistoryEntry, isPartialScan, loadHistory, scoreDeltaBadge } from "./history.js";
+import { buildReportHistorySnapshot } from "./report-contract.js";
+import type { VibeReport } from "./types.js";
 
 const tmp = join(tmpdir(), "vibe-check-history-test");
 
@@ -222,6 +224,48 @@ describe("loadHistory", () => {
 
 		const entries = loadHistory(tmp);
 		expect(entries).toHaveLength(1);
+	});
+});
+
+describe("partial (--diff) scans in history", () => {
+	it("isPartialScan reads meta.scan.diffBase", () => {
+		expect(isPartialScan({ meta: { scan: { id: "x", skipTests: false, diffBase: "main" } } })).toBe(true);
+		expect(isPartialScan({ meta: { scan: { id: "x", skipTests: false, diffBase: null } } })).toBe(false);
+		expect(isPartialScan({ meta: {} })).toBe(false);
+		expect(isPartialScan(undefined)).toBe(false);
+	});
+
+	it("the history snapshot keeps the partial marker", () => {
+		const report = {
+			version: "0.56.0",
+			timestamp: "2026-10-01T00:00:00.000Z",
+			score: 90,
+			grade: "A",
+			checks: [],
+			meta: {
+				cwd: "/tmp",
+				node: "v24",
+				duration: 1,
+				stack: {},
+				repoUrl: null,
+				branch: "",
+				scan: { id: "s1", skipTests: true, diffBase: "HEAD" },
+			},
+		} as unknown as VibeReport;
+		const snapshot = buildReportHistorySnapshot(report);
+		expect(snapshot.meta.scan).toEqual({ id: "s1", skipTests: true, diffBase: "HEAD" });
+		expect(isPartialScan(snapshot)).toBe(true);
+	});
+
+	it("loadHistory leaves partial scans out of the series", () => {
+		writeReport(tmp, "2026-05-15T10-00-00.json", 72, [{ name: "lint", score: 80 }], "2026-05-15T10:00:00.000Z");
+		writeReport(tmp, "2026-05-16T10-00-00.json", 99, [{ name: "lint", score: 99 }], "2026-05-16T10:00:00.000Z", {
+			scan: { id: "p", skipTests: true, diffBase: "main" },
+		});
+		writeReport(tmp, "2026-05-17T10-00-00.json", 75, [{ name: "lint", score: 82 }], "2026-05-17T10:00:00.000Z", {
+			scan: { id: "f", skipTests: true, diffBase: null },
+		});
+		expect(loadHistory(tmp).map((e) => e.score)).toEqual([72, 75]);
 	});
 });
 

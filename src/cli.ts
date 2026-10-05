@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { getCheckMeta } from "./check-meta.js";
+import { type CiContext, detectCiContext } from "./ci-context.js";
 import { runExplain } from "./commands/explain.js";
 import { runFix } from "./commands/fix.js";
 import { runInit } from "./commands/init.js";
@@ -13,6 +14,7 @@ import { loadConfig } from "./config.js";
 import { scan } from "./core.js";
 import { computeDelta, formatCheckChangeBullets } from "./delta.js";
 import { detectStack, detectWorkspace } from "./detect.js";
+import { isPartialScan } from "./history.js";
 import { postPRComment } from "./pr-comment.js";
 import { generatePages } from "./report/html.js";
 import { buildReportHistorySnapshot, withFreshAnalyzerSnapshots } from "./report-contract.js";
@@ -434,7 +436,7 @@ async function writeOutputs(report: VibeReport, outputDir: string, flags: Parsed
 
 // ── Upload ──
 
-async function handleUpload(report: VibeReport, cwd: string, quietMode: boolean): Promise<void> {
+async function handleUpload(report: VibeReport, cwd: string, quietMode: boolean, ciContext: CiContext): Promise<void> {
 	const token = process.env.VCQA_TOKEN || process.env.GITHUB_TOKEN;
 	if (!token) {
 		if (!quietMode) console.log("  \x1b[33m\u26a0 Set VCQA_TOKEN to enable upload\x1b[0m");
@@ -443,7 +445,7 @@ async function handleUpload(report: VibeReport, cwd: string, quietMode: boolean)
 	// buildReportUploadPayload owns the repo-slug rule and returns null when
 	// there is no remote to attribute the report to. Deriving the slug a second
 	// time here, just to explain the refusal, would be a second copy of it.
-	const payload = buildReportUploadPayload(report, currentGitSha(cwd));
+	const payload = buildReportUploadPayload(report, currentGitSha(cwd, ciContext));
 	if (!payload) {
 		if (!quietMode) console.log("  \x1b[33m\u26a0 No git remote — can't upload\x1b[0m");
 		return;
@@ -623,10 +625,16 @@ async function main() {
 	const quietMode = jsonOnly || flags.markdownMode;
 	if (!quietMode) printHeader(cwd, stack, workspace);
 
+	// Where this run is, detected once: the report, --upload and --pr-comment
+	// must describe the same commit, and each detection spawns git.
+	const ciContext = detectCiContext(cwd);
+
 	// Run scan using core API with progress output
 	const report = await scan(cwd, {
 		skipTests,
 		config,
+		diffBase,
+		ciContext,
 		onProgress: quietMode
 			? undefined
 			: (check, result) => {
@@ -655,8 +663,6 @@ async function main() {
 	}
 	report.meta.analyzerSnapshots = withFreshAnalyzerSnapshots(report).meta.analyzerSnapshots;
 
-	const trend = computeTrend(report, outputDir);
-
 	// Load previous report BEFORE writeOutputs overwrites it (for delta in markdown/PR)
 	let prevReport: VibeReport | undefined;
 	const prevReportPath = join(outputDir, "report.json");
@@ -667,6 +673,10 @@ async function main() {
 			/* corrupt */
 		}
 	}
+	// A --diff report covers only the changed files. Compared with a full scan,
+	// either way round, every issue outside the diff would read as fixed or new.
+	if (isPartialScan(report) || isPartialScan(prevReport)) prevReport = undefined;
+	const trend = prevReport ? computeTrend(report, outputDir) : null;
 
 	await writeOutputs(report, outputDir, flags, prevReport);
 
@@ -679,10 +689,10 @@ async function main() {
 	}
 
 	if (flags.annotations) emitAnnotations(report);
-	if (flags.uploadMode) await handleUpload(report, cwd, quietMode);
+	if (flags.uploadMode) await handleUpload(report, cwd, quietMode, ciContext);
 
 	if (flags.prComment) {
-		const posted = await postPRComment(report, trend, cwd, prevReport);
+		const posted = await postPRComment(report, trend, cwd, prevReport, ciContext);
 		if (!quietMode) {
 			if (posted) console.log("  \x1b[32m\u2713 PR comment posted\x1b[0m");
 			else console.log("  \x1b[2mNo PR detected or no GITHUB_TOKEN — skipping PR comment\x1b[0m");

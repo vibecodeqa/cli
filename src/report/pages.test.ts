@@ -453,3 +453,36 @@ describe("actions page does not count issues of a check that did not run on one 
 		expect(banner).toContain("Status changes:");
 	});
 });
+
+describe("report file links", () => {
+	const issueCheck = (): CheckResult => ({
+		name: "lint",
+		score: 90,
+		grade: "A",
+		details: {},
+		issues: [{ severity: "warning", message: "console.log found", file: "src/auth.ts", line: 2, rule: "no-console" }],
+		duration: 10,
+	});
+	const allHtml = (pages: Map<string, string>) => [...pages.values()].join("\n");
+
+	it("detached HEAD with no sha: no /blob// links, file names stay plain text", () => {
+		const report = makeReport(mkdtempSync(join(tmpdir(), "vcqa-report-")), [issueCheck()]);
+		report.meta.repoUrl = "https://github.com/octo-org/widgets";
+		report.meta.branch = "";
+		const html = allHtml(generatePages(report));
+		expect(html).not.toContain("/blob//");
+		expect(html).not.toContain("https://github.com/octo-org/widgets/blob/");
+		expect(html).toContain("src/auth.ts");
+	});
+
+	it("links to the scanned commit sha when the report carries one", () => {
+		const sha = "c".repeat(40);
+		const report = makeReport(mkdtempSync(join(tmpdir(), "vcqa-report-")), [issueCheck()]);
+		report.meta.repoUrl = "https://github.com/octo-org/widgets";
+		report.meta.branch = "";
+		Object.assign(report.meta, { git: { sha } });
+		const html = allHtml(generatePages(report));
+		expect(html).toContain(`https://github.com/octo-org/widgets/blob/${sha}/src/auth.ts#L2`);
+		expect(html).not.toContain("/blob//");
+	});
+});

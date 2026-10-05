@@ -1139,21 +1139,37 @@ function shouldSkipConventionEntry(entry: string): boolean {
 	return discoveryConventions.ignoredConventionEntries.includes(entry) || entry.startsWith(".");
 }
 
-/** Detect GitHub/GitLab repo URL from git remote. */
+/** Detect GitHub/GitLab repo URL from git remote, and the checked-out branch.
+ *
+ *  `branch` is "" when it is not known — a detached HEAD (which is how
+ *  `actions/checkout` leaves a pull_request run), or no git at all. It is never
+ *  guessed: a guessed "main" mislabels every PR scan and points file links at
+ *  the wrong tree. */
 export function detectRepoUrl(cwd: string): { repoUrl: string | null; branch: string } {
+	return { repoUrl: detectRemoteUrl(cwd), branch: detectLocalBranch(cwd) ?? "" };
+}
+
+/** The current local branch, or null on a detached HEAD / outside git. */
+export function detectLocalBranch(cwd: string): string | null {
+	try {
+		return execSync("git branch --show-current", { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim() || null;
+	} catch {
+		return null;
+	}
+}
+
+function detectRemoteUrl(cwd: string): string | null {
 	try {
 		const remote = execSync("git remote get-url origin", { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-		const branch = execSync("git branch --show-current", { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim() || "main";
 		// Convert SSH to HTTPS
-		const url = remote
+		return remote
 			.replace(/^git@github\.com:/, "https://github.com/")
 			.replace(/^git@gitlab\.com:/, "https://gitlab.com/")
 			.replace(/^git@bitbucket\.org:/, "https://bitbucket.org/")
 			.replace(/^ssh:\/\/git@github\.com\//, "https://github.com/")
 			.replace(/^ssh:\/\/git@gitlab\.com\//, "https://gitlab.com/")
 			.replace(/\.git$/, "");
-		return { repoUrl: url, branch };
 	} catch {
-		return { repoUrl: null, branch: "main" };
+		return null;
 	}
 }

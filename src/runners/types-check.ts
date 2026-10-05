@@ -10,7 +10,7 @@ import { isIgnoredPath, normalizeToolPath } from "../fs-utils.js";
 import type { CheckResult, Issue, ProjectContext, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
-import { DART_SDK_MISSING_REASON, hasDartSdk, unavailableResult } from "./toolchain.js";
+import { DART_SDK_MISSING_REASON, dependencyGap, hasDartSdk, unavailableResult } from "./toolchain.js";
 
 interface TypeCheckTarget {
 	cwd: string;
@@ -77,6 +77,35 @@ export function runTypeCheck(cwd: string, isDart = false, workspace?: WorkspaceI
 		);
 	}
 
+	// A TypeScript target type-checks against the project's own compiler and
+	// `@types`. Without its dependencies, `npx tsc` either resolves some other
+	// package or reports a wall of module-not-found errors — neither is a
+	// measurement of the code (#100). Such targets are not run at all.
+	const unavailableTargets: Array<{ id: string; path: string; command: string; reason: string }> = [];
+	const runnableTargets = isDart
+		? targets
+		: targets.filter((target) => {
+				// `npx tsc` must find the project's own TypeScript; a package script
+				// (`pnpm typecheck`) needs the install but resolves its own binaries.
+				const gap = dependencyGap(target.cwd, cwd, target.mode === "script" ? undefined : "typescript");
+				if (!gap) return true;
+				unavailableTargets.push({
+					id: target.projectId ?? "root",
+					path: target.projectPath ?? ".",
+					command: target.command,
+					reason: gap,
+				});
+				return false;
+			});
+	if (runnableTargets.length === 0) {
+		return unavailableResult(
+			"types",
+			unavailableTargets[0]!.reason,
+			{ tool: "tsc", projects: unavailableTargets, excluded: plan.excluded, strategy: plan.strategy },
+			start,
+		);
+	}
+
 	if (isDart) {
 		for (const root of targets) {
 			parseDartAnalyzeErrors(
@@ -90,7 +119,7 @@ export function runTypeCheck(cwd: string, isDart = false, workspace?: WorkspaceI
 			);
 		}
 	} else {
-		for (const target of targets) {
+		for (const target of runnableTargets) {
 			parseTscOutput(
 				run(`${target.command} 2>&1 || true`, target.cwd, target.mode === "build" || target.mode === "script" ? 60_000 : 30_000, {
 					projectId: target.projectId,
@@ -113,7 +142,7 @@ export function runTypeCheck(cwd: string, isDart = false, workspace?: WorkspaceI
 		details: {
 			errors: errorCount,
 			ok: errorCount === 0,
-			projects: targets.map((t) => ({
+			projects: runnableTargets.map((t) => ({
 				id: t.projectId ?? "root",
 				path: t.projectPath ?? ".",
 				tool: t.tool,
@@ -122,6 +151,7 @@ export function runTypeCheck(cwd: string, isDart = false, workspace?: WorkspaceI
 				authoritative: t.authoritative,
 				reason: t.reason,
 			})),
+			...(unavailableTargets.length > 0 ? { unavailableProjects: unavailableTargets } : {}),
 			excluded: plan.excluded,
 			excludedRootFallback: plan.excluded.some((target) => target.projectPath === "."),
 			strategy: plan.strategy,
