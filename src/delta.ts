@@ -78,8 +78,10 @@ export interface DeltaIssue {
 export interface CheckDelta {
 	name: string;
 	label: string;
-	before: number;
-	after: number;
+	/** Score before; null when the check did not run or was absent (see `transition`). */
+	before: number | null;
+	/** Score after; null when the check did not run or was absent (see `transition`). */
+	after: number | null;
 	/** Score change; 0 whenever either side did not run (see `transition`). */
 	delta: number;
 	/** Set instead of a numeric delta when the check's run state changed. */
@@ -102,6 +104,38 @@ function issueKey(check: string, iss: Issue): string {
 	return readIssueFingerprint(check, iss);
 }
 
+type IssueMultiset = Map<string, { count: number; issue: Issue }>;
+
+function issueMultiset(name: string, check: CheckResult | undefined): IssueMultiset {
+	const out: IssueMultiset = new Map();
+	for (const iss of check?.issues ?? []) {
+		const key = issueKey(name, iss);
+		const entry = out.get(key);
+		if (entry) entry.count++;
+		else out.set(key, { count: 1, issue: iss });
+	}
+	return out;
+}
+
+/** Issues in `from` beyond their count in `minus`, as DeltaIssues. */
+function multisetDifference(name: string, from: IssueMultiset, minus: IssueMultiset): DeltaIssue[] {
+	const out: DeltaIssue[] = [];
+	for (const [key, entry] of from) {
+		const diff = entry.count - (minus.get(key)?.count ?? 0);
+		for (let i = 0; i < diff; i++) {
+			out.push({
+				check: name,
+				severity: entry.issue.severity,
+				message: entry.issue.message,
+				file: typeof entry.issue.file === "string" ? entry.issue.file : undefined,
+				line: entry.issue.line,
+				rule: entry.issue.rule,
+			});
+		}
+	}
+	return out;
+}
+
 /** Compute a structured delta between two scan reports. */
 export function computeDelta(before: VibeReport, after: VibeReport): ScanDelta {
 	const beforeIssueCount = before.checks.reduce((s, c) => s + c.issues.length, 0);
@@ -111,76 +145,35 @@ export function computeDelta(before: VibeReport, after: VibeReport): ScanDelta {
 	const allFixed: DeltaIssue[] = [];
 	const allIntroduced: DeltaIssue[] = [];
 
-	for (const afterCheck of after.checks) {
-		const beforeCheck = before.checks.find((c) => c.name === afterCheck.name);
-		const beforeScore = beforeCheck?.score ?? 0;
-		const { delta: scoreChange, transition } = compareCheckSides(checkSide(beforeCheck), checkSide(afterCheck));
+	// Union of check names: a check present only in `before` (tool removed,
+	// check dropped or renamed) still gets a "72 → not present" transition and
+	// its issues count as fixed.
+	const names = [...after.checks.map((c) => c.name)];
+	for (const c of before.checks) if (!names.includes(c.name)) names.push(c.name);
+
+	for (const name of names) {
+		const beforeCheck = before.checks.find((c) => c.name === name);
+		const afterCheck = after.checks.find((c) => c.name === name);
+		const beforeSide = checkSide(beforeCheck);
+		const afterSide = checkSide(afterCheck);
+		const { delta: scoreChange, transition } = compareCheckSides(beforeSide, afterSide);
 
 		// Build multiset of issue keys for before and after
-		const beforeKeys = new Map<string, { count: number; issue: Issue }>();
-		const afterKeys = new Map<string, { count: number; issue: Issue }>();
-
-		if (beforeCheck) {
-			for (const iss of beforeCheck.issues) {
-				const key = issueKey(afterCheck.name, iss);
-				const entry = beforeKeys.get(key);
-				if (entry) entry.count++;
-				else beforeKeys.set(key, { count: 1, issue: iss });
-			}
-		}
-		for (const iss of afterCheck.issues) {
-			const key = issueKey(afterCheck.name, iss);
-			const entry = afterKeys.get(key);
-			if (entry) entry.count++;
-			else afterKeys.set(key, { count: 1, issue: iss });
-		}
-
-		const fixed: DeltaIssue[] = [];
-		const introduced: DeltaIssue[] = [];
+		const beforeKeys = issueMultiset(name, beforeCheck);
+		const afterKeys = issueMultiset(name, afterCheck);
 
 		// Fixed: in before but not in after (or count decreased)
-		for (const [key, bEntry] of beforeKeys) {
-			const aEntry = afterKeys.get(key);
-			const aCount = aEntry?.count ?? 0;
-			const diff = bEntry.count - aCount;
-			for (let i = 0; i < diff; i++) {
-				const di: DeltaIssue = {
-					check: afterCheck.name,
-					severity: bEntry.issue.severity,
-					message: bEntry.issue.message,
-					file: typeof bEntry.issue.file === "string" ? bEntry.issue.file : undefined,
-					line: bEntry.issue.line,
-					rule: bEntry.issue.rule,
-				};
-				fixed.push(di);
-				allFixed.push(di);
-			}
-		}
-
+		const fixed = multisetDifference(name, beforeKeys, afterKeys);
 		// Introduced: in after but not in before (or count increased)
-		for (const [key, aEntry] of afterKeys) {
-			const bEntry = beforeKeys.get(key);
-			const bCount = bEntry?.count ?? 0;
-			const diff = aEntry.count - bCount;
-			for (let i = 0; i < diff; i++) {
-				const di: DeltaIssue = {
-					check: afterCheck.name,
-					severity: aEntry.issue.severity,
-					message: aEntry.issue.message,
-					file: typeof aEntry.issue.file === "string" ? aEntry.issue.file : undefined,
-					line: aEntry.issue.line,
-					rule: aEntry.issue.rule,
-				};
-				introduced.push(di);
-				allIntroduced.push(di);
-			}
-		}
+		const introduced = multisetDifference(name, afterKeys, beforeKeys);
+		allFixed.push(...fixed);
+		allIntroduced.push(...introduced);
 
 		checks.push({
-			name: afterCheck.name,
-			label: afterCheck.name,
-			before: beforeScore,
-			after: afterCheck.score,
+			name,
+			label: name,
+			before: beforeSide.score ?? null,
+			after: afterSide.score ?? null,
 			delta: scoreChange,
 			...(transition ? { transition } : {}),
 			fixed,

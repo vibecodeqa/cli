@@ -196,4 +196,30 @@ describe("not-run checks (#107)", () => {
 		expect(delta.checks[0].transition).toBeUndefined();
 		expect(formatCheckChangeBullets(delta, 8)).toContain("✅ lint: 60 → 72 (+12)");
 	});
+
+	it("reports a check that disappeared as a transition and counts its issues as fixed", () => {
+		const lintWithIssues = {
+			...lintScored,
+			issues: [
+				{ severity: "error" as const, message: "unused var", file: "src/a.ts", rule: "no-unused" },
+				{ severity: "warning" as const, message: "prefer const", file: "src/b.ts", rule: "prefer-const" },
+			],
+		};
+		const delta = computeDelta(makeReport({ checks: [lintWithIssues] }), makeReport({ checks: [] }));
+		const lint = delta.checks.find((c) => c.name === "lint")!;
+		expect(lint).toMatchObject({ before: 72, after: null, delta: 0 });
+		expect(lint.transition).toEqual({ before: { state: "ran", score: 72 }, after: { state: "absent" } });
+		expect(lint.fixed).toHaveLength(2);
+		expect(delta.fixed.map((f) => f.check)).toEqual(["lint", "lint"]);
+		expect(formatCheckChangeBullets(delta, 8)).toContain("lint: 72 → not present");
+		expect(formatDeltaMarkdown(delta)).toContain("## Fixed (2)");
+	});
+
+	it("carries null, not the placeholder 100, for a side that did not run", () => {
+		const delta = computeDelta(makeReport({ checks: [lintUnavailable] }), makeReport({ checks: [lintScored] }));
+		expect(delta.checks[0]).toMatchObject({ before: null, after: 72 });
+		const back = computeDelta(makeReport({ checks: [lintScored] }), makeReport({ checks: [lintUnavailable] }));
+		expect(back.checks[0]).toMatchObject({ before: 72, after: null });
+		expect(JSON.stringify(back)).not.toContain('"after":100');
+	});
 });
