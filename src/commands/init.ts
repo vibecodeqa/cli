@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: npx @vibecodeqa/cli --ci --fail-under 70 --sarif --badge
+      - run: npx @vibecodeqa/cli --ci --sarif --badge
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
@@ -85,8 +85,8 @@ jobs:
 			_checks_help: 'Set { "enabled": false } to disable. Add "ignore": ["generated/**"] to skip files per-check.',
 			ignore: [],
 			_ignore_help: 'Global file patterns to skip: ["vendor/**", "*.generated.ts", "proto/**"]',
-			failUnder: 60,
-			_failUnder_help: "Exit with code 1 if score below this. Overridden by --fail-under flag.",
+			failUnder: 70,
+			_failUnder_help: "Exit with code 1 if score below this, including under --ci. Overridden by --fail-under flag.",
 		};
 		writeFileSync(vcqaConfigPath, `${JSON.stringify(config, null, 2)}\n`);
 		console.log(`  \x1b[32m+\x1b[0m .vcqa.json`);

@@ -3,8 +3,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkSide, compareCheckSides, issuesComparable, type StatusTransition } from "./delta.js";
-import { type IssueSnapshot, issueSnapshot, readIssueFingerprint } from "./issue-fingerprint.js";
-import type { VibeReport } from "./types.js";
+import { comparableFingerprints, type IssueSnapshot, issueSnapshot } from "./issue-fingerprint.js";
+import type { Issue, VibeReport } from "./types.js";
 
 export interface TrendDelta {
 	scoreDelta: number; // positive = improved
@@ -55,8 +55,10 @@ export function computeTrend(report: VibeReport, outputDir: string): TrendDelta 
 		});
 	}
 
-	const prevIssues = issueMultiset(prev, comparable);
-	const currIssues = issueMultiset(report, comparable);
+	// Across a fingerprint-version boundary both sides are re-keyed as v1 (#97).
+	const keyOf = comparableFingerprints(prev, report);
+	const prevIssues = issueMultiset(prev, comparable, keyOf);
+	const currIssues = issueMultiset(report, comparable, keyOf);
 	const introduced = surplus(currIssues, prevIssues);
 	const fixed = surplus(prevIssues, currIssues);
 	const newIssues = introduced.length;
@@ -67,12 +69,16 @@ export function computeTrend(report: VibeReport, outputDir: string): TrendDelta 
 
 /** Group issues of comparable checks by fingerprint, keeping every occurrence
  * (a multiset, as in delta.ts). */
-function issueMultiset(report: VibeReport, comparable: Set<string>): Map<string, IssueSnapshot[]> {
+function issueMultiset(
+	report: VibeReport,
+	comparable: Set<string>,
+	keyOf: (checkName: string, issue: Issue) => string,
+): Map<string, IssueSnapshot[]> {
 	const out = new Map<string, IssueSnapshot[]>();
 	for (const check of report.checks) {
 		if (!comparable.has(check.name)) continue;
 		for (const issue of check.issues) {
-			const fp = readIssueFingerprint(check.name, issue);
+			const fp = keyOf(check.name, issue);
 			const list = out.get(fp);
 			const snap = issueSnapshot(check.name, issue);
 			if (list) list.push(snap);

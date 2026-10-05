@@ -4,7 +4,7 @@
  * to display "what changed since last scan."
  */
 
-import { readIssueFingerprint } from "./issue-fingerprint.js";
+import { comparableFingerprints } from "./issue-fingerprint.js";
 import type { CheckResult, Issue, VibeReport } from "./types.js";
 
 /**
@@ -135,14 +135,11 @@ export interface ScanDelta {
 	introduced: DeltaIssue[];
 }
 
-/** Fingerprint an issue for stable matching (ignores line numbers which shift after edits). */
-function issueKey(check: string, iss: Issue): string {
-	return readIssueFingerprint(check, iss);
-}
-
 type IssueMultiset = Map<string, { count: number; issue: Issue }>;
 
-function issueMultiset(name: string, check: CheckResult | undefined): IssueMultiset {
+/** Count a check's issues per fingerprint. `issueKey` comes from
+ * `comparableFingerprints`, so both reports are keyed by the same scheme. */
+function issueMultiset(name: string, check: CheckResult | undefined, issueKey: (check: string, iss: Issue) => string): IssueMultiset {
 	const out: IssueMultiset = new Map();
 	for (const iss of check?.issues ?? []) {
 		const key = issueKey(name, iss);
@@ -180,6 +177,9 @@ export function computeDelta(before: VibeReport, after: VibeReport): ScanDelta {
 	const checks: CheckDelta[] = [];
 	const allFixed: DeltaIssue[] = [];
 	const allIntroduced: DeltaIssue[] = [];
+	// Stored fingerprints when both reports share a fingerprint version; v1
+	// recomputed on both sides across the v1/v2 boundary (#97).
+	const issueKey = comparableFingerprints(before, after);
 
 	// Union of check names: a check present only in `before` (tool removed,
 	// check dropped or renamed) still gets a "72 → not present" transition.
@@ -199,8 +199,8 @@ export function computeDelta(before: VibeReport, after: VibeReport): ScanDelta {
 		let fixed: DeltaIssue[] = [];
 		let introduced: DeltaIssue[] = [];
 		if (issuesComparable(beforeSide, afterSide)) {
-			const beforeKeys = issueMultiset(name, beforeCheck);
-			const afterKeys = issueMultiset(name, afterCheck);
+			const beforeKeys = issueMultiset(name, beforeCheck, issueKey);
+			const afterKeys = issueMultiset(name, afterCheck, issueKey);
 			// Fixed: in before but not in after (or count decreased)
 			fixed = multisetDifference(name, beforeKeys, afterKeys);
 			// Introduced: in after but not in before (or count increased)

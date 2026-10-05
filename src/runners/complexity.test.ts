@@ -56,6 +56,19 @@ export function greet(name: string): string {
 		cleanup();
 	});
 
+	it("does not take a module-scope if/for/while/switch block for a function (#97)", () => {
+		const body = Array.from({ length: 65 }, (_, i) => `  total += ${i};`).join("\n");
+		const blocks = ["if (ready) {", "for (const k of keys) {", "while (pending()) {", "switch (mode) {"].map(
+			(head) => `${head}\n${body}\n}`,
+		);
+		setup({ "src/top.ts": `let total = 0;\n${blocks.join("\n")}\nexport function realOne() {\n${body}\n}\n` });
+		const result = runComplexity(TMP);
+		const long = result.issues.filter((i) => i.rule === "long-function");
+		expect(long.map((i) => i.message.split(":")[0])).toEqual(["realOne"]);
+		expect(result.details.functionCount).toBe(1);
+		cleanup();
+	});
+
 	it("flags complex functions", () => {
 		const branches = Array.from({ length: 20 }, (_, i) => `  if (x > ${i}) { y += ${i}; }`).join("\n");
 		setup({

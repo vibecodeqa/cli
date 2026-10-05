@@ -19,6 +19,8 @@ export interface ReportHistorySnapshot {
 	meta: {
 		duration: number;
 		analyzerSnapshots: AnalyzerSnapshot[];
+		/** Which fingerprint scheme the issue snapshots use; absent = v1 (#97). */
+		fingerprintVersion?: number;
 		/** Kept so a partial (`--diff`) scan stays recognisable in history. */
 		scan?: { id: string; skipTests: boolean; diffBase: string | null };
 	};
@@ -41,6 +43,7 @@ export function buildReportHistorySnapshot(report: VibeReport): ReportHistorySna
 		meta: {
 			duration: normalized.meta.duration,
 			analyzerSnapshots: normalized.meta.analyzerSnapshots ?? [],
+			...(normalized.meta.fingerprintVersion === undefined ? {} : { fingerprintVersion: normalized.meta.fingerprintVersion }),
 			...scanInfo(normalized),
 		},
 		checks: normalized.checks.map((check) => ({

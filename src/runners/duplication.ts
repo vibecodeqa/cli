@@ -25,7 +25,8 @@ import {
 } from "@jscpd/core";
 import { type FileInventory, inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles, readDeps, type SourceFile } from "../fs-utils.js";
-import type { CheckResult, Issue } from "../types.js";
+import { type FingerprintedIssue, normalizePath, snippetDigest } from "../issue-fingerprint.js";
+import type { CheckResult } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
 
@@ -76,12 +77,13 @@ export async function runDuplication(cwd: string, inventory?: FileInventory): Pr
 
 	// Rank biggest clones first; stable tie-break for deterministic output.
 	clones.sort((a, b) => b.lines - a.lines || a.fileA.localeCompare(b.fileA) || a.lineA - b.lineA);
-	const issues: Issue[] = clones.slice(0, MAX_ISSUES).map((c) => ({
+	const issues: FingerprintedIssue[] = clones.slice(0, MAX_ISSUES).map((c) => ({
 		severity: "warning",
 		message: `Duplicate (${c.lines} lines): ${c.snippet.slice(0, 100)}`,
 		file: `${c.fileA}:${c.lineA} ↔ ${c.fileB}:${c.lineB}`,
 		rule: "duplicate-code",
 		snippet: c.snippet,
+		subject: cloneSubject(c.fileA, c.fileB, c.snippet),
 	}));
 
 	return {
@@ -320,6 +322,16 @@ function scoreFromPct(dupPct: number): number {
 	return Math.max(10, Math.round(30 - (dupPct - 50)));
 }
 
+/**
+ * Clone identity (#97): the two paths without their `:line` (an edit above
+ * either clone must not re-identify it), sorted so A↔B equals B↔A, plus a
+ * hash of the normalised snippet so two clones between the same files differ.
+ */
+export function cloneSubject(fileA: string, fileB: string, snippet?: string): string {
+	const pair = [normalizePath(fileA), normalizePath(fileB)].sort().join(" ↔ ");
+	return snippet ? `${pair}#${snippetDigest(snippet)}` : pair;
+}
+
 function tryJscpd(cwd: string): CheckResult | null {
 	// jscpd writes JSON to a file, not stdout. Use a temp output dir.
 	const tmpDir = join(cwd, ".vibe-check", "jscpd-tmp");
@@ -348,7 +360,7 @@ function tryJscpd(cwd: string): CheckResult | null {
 		const data = JSON.parse(rawData);
 		if (!data.statistics) return null;
 
-		const issues: Issue[] = [];
+		const issues: FingerprintedIssue[] = [];
 		const clones = data.duplicates || [];
 		for (const d of clones.slice(0, MAX_ISSUES)) {
 			const fileA = d.firstFile?.name || "?";
@@ -359,6 +371,7 @@ function tryJscpd(cwd: string): CheckResult | null {
 				message: `Duplicate (${lines} lines)`,
 				file: `${fileA}:${d.firstFile?.start} ↔ ${fileB}:${d.secondFile?.start}`,
 				rule: "duplicate-code",
+				subject: cloneSubject(fileA, fileB, typeof d.fragment === "string" ? d.fragment : undefined),
 			});
 		}
 

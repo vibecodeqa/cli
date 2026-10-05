@@ -3,7 +3,8 @@
 import type { FileInventory } from "../file-inventory.js";
 import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
-import type { CheckResult, Issue } from "../types.js";
+import { type FingerprintedIssue, normalizePath } from "../issue-fingerprint.js";
+import type { CheckResult } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
 interface FunctionMetric {
@@ -14,12 +15,16 @@ interface FunctionMetric {
 	complexity: number;
 }
 
+/** Words the start-of-function patterns would otherwise capture as a name:
+ *  `if (…) {` at module scope or in a class body is a block, not a function. */
+const NOT_FUNCTION_NAMES = new Set(["if", "for", "while", "switch", "catch", "with", "return", "await", "typeof", "new", "super"]);
+
 const MAX_FUNCTION_LINES = 60;
 const MAX_COMPLEXITY = 15;
 
 export function runComplexity(cwd: string, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
-	const issues: Issue[] = [];
+	const issues: FingerprintedIssue[] = [];
 	const functions: FunctionMetric[] = [];
 
 	const sourceFiles = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
@@ -44,6 +49,8 @@ export function runComplexity(cwd: string, inventory?: FileInventory): CheckResu
 					file: f.file,
 					line: f.startLine,
 					rule: "long-function",
+					// Identity is the function, not its length (#97).
+					subject: `${normalizePath(f.file)}#${f.name}`,
 				});
 			}
 			if (f.complexity > MAX_COMPLEXITY) {
@@ -54,6 +61,7 @@ export function runComplexity(cwd: string, inventory?: FileInventory): CheckResu
 					file: f.file,
 					line: f.startLine,
 					rule: "high-complexity",
+					subject: `${normalizePath(f.file)}#${f.name}`,
 				});
 			}
 		}
@@ -82,6 +90,17 @@ export function runComplexity(cwd: string, inventory?: FileInventory): CheckResu
 	};
 }
 
+/** The name a line starts a function with, or undefined when it starts none. */
+function functionStartName(trimmed: string): string | undefined {
+	const match =
+		trimmed.match(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)/) ||
+		trimmed.match(/^(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\(/) ||
+		trimmed.match(/^(?:private|public|protected)?\s*(?:async\s+)?(\w+)\s*\([^)]*\)\s*(?::\s*\w[^{]*)?\{/) ||
+		trimmed.match(/^(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{/);
+	if (!match || NOT_FUNCTION_NAMES.has(match[1])) return undefined;
+	return match[1] ?? "";
+}
+
 /** Simple heuristic function extraction — not a full AST parser but good enough for metrics. */
 function extractFunctions(content: string, filePath: string): FunctionMetric[] {
 	const funcs: FunctionMetric[] = [];
@@ -97,14 +116,10 @@ function extractFunctions(content: string, filePath: string): FunctionMetric[] {
 
 		// Detect function start
 		if (funcStart === -1) {
-			const match =
-				trimmed.match(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)/) ||
-				trimmed.match(/^(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\(/) ||
-				trimmed.match(/^(?:private|public|protected)?\s*(?:async\s+)?(\w+)\s*\([^)]*\)\s*(?::\s*\w[^{]*)?\{/) ||
-				trimmed.match(/^(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{/);
-			if (match) {
+			const name = functionStartName(trimmed);
+			if (name !== undefined) {
 				funcStart = i;
-				funcName = match[1] || "anonymous";
+				funcName = name || "anonymous";
 				braceCount = 0;
 			}
 		}
