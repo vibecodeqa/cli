@@ -2,7 +2,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { computeTrend, formatTrend, trendHTML } from "./trend.js";
+import { formatTransition } from "./delta.js";
+import { computeTrend, formatTrend } from "./trend.js";
 import type { VibeReport } from "./types.js";
 
 function makeReport(score: number, checks: { name: string; score: number; issues: number }[]): VibeReport {
@@ -120,9 +121,8 @@ describe("computeTrend not-run checks (#107)", () => {
 		expect(lint.delta).toBe(0);
 		expect(lint.transition).toEqual({ before: { state: "unavailable" }, after: { state: "ran", score: 72 } });
 
-		const html = trendHTML(trend);
-		expect(html).toContain("lint: unavailable → 72");
-		expect(html).not.toContain("lint -28");
+		expect(lint).toMatchObject({ prev: null, curr: 72 });
+		expect(formatTransition(lint.transition!)).toBe("unavailable → 72");
 	});
 
 	it("does not report a removed tool as +N", () => {
@@ -133,10 +133,18 @@ describe("computeTrend not-run checks (#107)", () => {
 		curr.checks[0].details = { skipped: true, comingSoon: true };
 
 		const trend = computeTrend(curr, dir)!;
-		expect(trend.checkDeltas[0].delta).toBe(0);
-		const html = trendHTML(trend);
-		expect(html).toContain("lint: 64 → unavailable");
-		expect(html).not.toContain("+36");
+		expect(trend.checkDeltas[0]).toMatchObject({ prev: 64, curr: null, delta: 0 });
+		expect(formatTransition(trend.checkDeltas[0].transition!)).toBe("64 → unavailable");
+	});
+
+	it("reports a check that disappeared as a transition", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-trend-"));
+		writeFileSync(join(dir, "report.json"), JSON.stringify(makeReport(70, [{ name: "lint", score: 72, issues: 2 }])));
+		const trend = computeTrend(makeReport(70, []), dir)!;
+		expect(trend.checkDeltas).toHaveLength(1);
+		expect(trend.checkDeltas[0]).toMatchObject({ name: "lint", prev: 72, curr: null, delta: 0 });
+		expect(formatTransition(trend.checkDeltas[0].transition!)).toBe("72 → not present");
+		expect(trend.fixedIssues).toBe(2);
 	});
 });
 
@@ -174,21 +182,5 @@ describe("formatTrend", () => {
 		);
 		// Should contain unicode block characters
 		expect(out).toMatch(/[▁▂▃▄▅▆▇█]/);
-	});
-});
-
-describe("trendHTML", () => {
-	it("generates valid HTML", () => {
-		const html = trendHTML({
-			scoreDelta: 5,
-			checkDeltas: [{ name: "lint", prev: 70, curr: 75, delta: 5 }],
-			newIssues: 0,
-			fixedIssues: 2,
-			prevTimestamp: "2026-05-29T00:00:00Z",
-		});
-		expect(html).toContain("+5 pts");
-		expect(html).toContain("2 fixed");
-		expect(html).toContain("lint +5");
-		expect(html).toContain("var(--pass)");
 	});
 });
