@@ -138,6 +138,25 @@ describe.skipIf(!posix)("runWithTreeKill", () => {
 		expect(result.marker).not.toContain("vcqa:timed-out");
 	});
 
+	it("Ctrl-\\ (SIGQUIT to the supervisor) kills the group too", async () => {
+		const dir = tempDir();
+		const { pids } = await startParent(dir, SLEEPER);
+		process.kill(pids[1], "SIGQUIT");
+		expect(await waitFor(() => existsSync(join(dir, "result.json")))).toBe(true);
+		expect(isAlive(pids[0])).toBe(false);
+		expect(JSON.parse(readFileSync(join(dir, "result.json"), "utf-8")).status).toBe(131);
+	});
+
+	it("records a command killed by a signal as 128 + its signal number", () => {
+		const dir = tempDir();
+		startToolRecording();
+		runWithTreeKill("kill -9 $$", dir, 10_000);
+		runWithTreeKill("kill -TERM $$", dir, 10_000);
+		const [killed, terminated] = takeToolRuns();
+		expect(killed).toMatchObject({ status: "failed", exitCode: 137, ok: false });
+		expect(terminated).toMatchObject({ status: "failed", exitCode: 143, ok: false });
+	});
+
 	it("kills the group when the parent dies outright", async () => {
 		const dir = tempDir();
 		const { parent, pids } = await startParent(dir, SLEEPER);

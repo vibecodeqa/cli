@@ -87,7 +87,7 @@ const relay = (fd) => (chunk) => {
 child.stdout.on("data", relay(1));
 child.stderr.on("data", relay(2));
 const timer = setTimeout(() => stop(124, true), timeoutMs);
-for (const [sig, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]]) process.on(sig, () => stop(code, false));
+for (const [sig, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129], ["SIGQUIT", 131]]) process.on(sig, () => stop(code, false));
 if (!win) {
 	try {
 		const watch = new (require("node:net").Socket)({ fd: 4, readable: true, writable: false });
@@ -109,7 +109,7 @@ child.on("exit", (code, signal) => {
 	clearTimeout(timer);
 	// Grandchildren that outlive the command (a stray watcher) go too.
 	signalTree("SIGKILL");
-	const status = code ?? (signal ? 128 : 1);
+	const status = code ?? (signal ? 128 + (require("node:os").constants.signals[signal] ?? 0) : 1);
 	// Relay what is still buffered, but do not wait on a process outside the
 	// group that holds the pipes open: stop once they close, go quiet, or 2 s pass.
 	const done = () => { report("${EXIT_MARKER}" + status); process.exit(status); };
