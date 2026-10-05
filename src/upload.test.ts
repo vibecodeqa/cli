@@ -116,13 +116,23 @@ describe("upload sha", () => {
 
 	it("uses the PR head sha on pull_request, not the merge sha", () => {
 		const { dir } = repoWithCommit();
-		const env = { GITHUB_ACTIONS: "true", GITHUB_EVENT_PATH: join(EVENTS, "pull_request.json"), GITHUB_SHA: "1".repeat(40) };
+		const env = {
+			GITHUB_ACTIONS: "true",
+			GITHUB_EVENT_NAME: "pull_request",
+			GITHUB_EVENT_PATH: join(EVENTS, "pull_request.json"),
+			GITHUB_SHA: "1".repeat(40),
+		};
 		expect(currentGitSha(dir, env)).toBe("a".repeat(40));
 	});
 
 	it("uses GITHUB_SHA on push", () => {
 		const { dir } = repoWithCommit();
-		const env = { GITHUB_ACTIONS: "true", GITHUB_EVENT_PATH: join(EVENTS, "push.json"), GITHUB_SHA: "c".repeat(40) };
+		const env = {
+			GITHUB_ACTIONS: "true",
+			GITHUB_EVENT_NAME: "push",
+			GITHUB_EVENT_PATH: join(EVENTS, "push.json"),
+			GITHUB_SHA: "c".repeat(40),
+		};
 		expect(currentGitSha(dir, env)).toBe("c".repeat(40));
 	});
 

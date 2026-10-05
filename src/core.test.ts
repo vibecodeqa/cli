@@ -1,7 +1,10 @@
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CHECK_META, computeScore, gradeFromScore, scan } from "./core.js";
+import { generatePages } from "./report/html.js";
 
 const TMP = join(import.meta.dirname!, "__test_core__");
 
@@ -356,4 +359,81 @@ describe("auditability", () => {
 		const c = report.checks.find((x) => x.name === "confusion");
 		expect((c?.details as Record<string, unknown>).toolRuns).toBeUndefined();
 	}, 60_000);
+});
+
+describe("scan provenance (meta.git / meta.ci / meta.scan)", () => {
+	let repo: string;
+	let saved: Record<string, string | undefined>;
+	const git = (...args: string[]) =>
+		execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args], {
+			cwd: repo,
+			encoding: "utf-8",
+			stdio: ["pipe", "pipe", "pipe"],
+		}).trim();
+
+	beforeEach(() => {
+		// scan() reads process.env; keep a CI run of this suite from leaking in.
+		saved = {};
+		for (const key of Object.keys(process.env)) {
+			if (key.startsWith("GITHUB_")) {
+				saved[key] = process.env[key];
+				delete process.env[key];
+			}
+		}
+		repo = mkdtempSync(join(tmpdir(), "vcqa-core-provenance-"));
+		writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "prov" }));
+		git("init", "-q", "-b", "trunk");
+		git("add", "package.json");
+		git("commit", "-q", "-m", "init");
+		git("remote", "add", "origin", "https://github.com/octo-org/widgets.git");
+	});
+	afterEach(() => {
+		for (const key of Object.keys(process.env)) if (key.startsWith("GITHUB_")) delete process.env[key];
+		Object.assign(process.env, saved);
+		rmSync(repo, { recursive: true, force: true });
+	});
+
+	it("detached HEAD outside CI: meta.branch is empty, git.sha is HEAD, HTML links use the sha", async () => {
+		git("checkout", "-q", "--detach");
+		const head = git("rev-parse", "HEAD");
+		const report = await scan(repo, { skipTests: true, checks: ["structure"] });
+		const meta = report.meta as typeof report.meta & Record<string, unknown>;
+
+		expect(report.meta.branch).toBe("");
+		expect(meta.source).toBe("cli");
+		expect(meta.ci).toBeNull();
+		expect(meta.git).toMatchObject({ sha: head, headSha: head, branch: null, prNumber: null });
+		expect(meta.scan).toMatchObject({ skipTests: true, diffBase: null });
+		expect((meta.scan as { id: string }).id).toMatch(/^[0-9a-f-]{36}$/);
+
+		report.checks[0]!.issues.push({ severity: "warning", message: "x", file: "src/index.ts", line: 3 });
+		const html = [...generatePages(report).values()].join("\n");
+		expect(html).toContain(`https://github.com/octo-org/widgets/blob/${head}/src/index.ts#L3`);
+		expect(html).not.toContain("/blob//");
+	}, 30_000);
+
+	it("pull_request run: meta.branch is the PR head ref, git.sha the merge commit", async () => {
+		const mergeSha = git("rev-parse", "HEAD");
+		Object.assign(process.env, {
+			GITHUB_ACTIONS: "true",
+			GITHUB_EVENT_NAME: "pull_request",
+			GITHUB_EVENT_PATH: join(import.meta.dirname!, "..", "fixtures", "github-events", "pull_request.json"),
+			GITHUB_REPOSITORY: "octo-org/widgets",
+			GITHUB_SHA: mergeSha,
+			GITHUB_REF: "refs/pull/42/merge",
+			GITHUB_HEAD_REF: "feature/login",
+			GITHUB_RUN_ID: "9",
+		});
+		const report = await scan(repo, { skipTests: true, checks: ["structure"], diffBase: "main" });
+		const meta = report.meta as typeof report.meta & Record<string, unknown>;
+
+		expect(report.meta.branch).toBe("feature/login");
+		expect(meta.git).toMatchObject({ sha: mergeSha, headSha: "a".repeat(40), baseSha: "b".repeat(40), prNumber: 42 });
+		expect(meta.ci).toMatchObject({
+			provider: "github-actions",
+			event: "pull_request",
+			runUrl: "https://github.com/octo-org/widgets/actions/runs/9",
+		});
+		expect(meta.scan).toMatchObject({ diffBase: "main" });
+	}, 30_000);
 });

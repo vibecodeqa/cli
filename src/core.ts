@@ -6,10 +6,12 @@
  *   console.log(report.score, report.grade);
  */
 
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { buildAnalyzerSnapshots } from "./analyzer-snapshot.js";
 import { CHECK_META, type CheckMeta, getCheckMeta } from "./check-meta.js";
+import { detectCiContext, type ReportProvenanceMeta } from "./ci-context.js";
 import { getCheckIgnore, isCheckEnabled, loadConfig, type VcqaConfig } from "./config.js";
 import { detectRepoUrl, detectStack, detectWorkspace } from "./detect.js";
 import { buildFileInventory } from "./file-inventory.js";
@@ -80,6 +82,9 @@ type ScoreMode = "available-scored" | "available-unscored" | "not-applicable" | 
 export interface ScanOptions {
 	/** Skip test execution (faster scan). Default: false */
 	skipTests?: boolean;
+	/** Base ref the caller will filter issues against (`--diff`). Recorded in
+	 *  `meta.scan.diffBase` so the report says it is partial. Default: null */
+	diffBase?: string | null;
 	/** Only run these checks (by name). Default: all checks */
 	checks?: string[];
 	/** Override config (instead of loading from .vcqa.json). */
@@ -293,7 +298,31 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 	).length;
 	const score = computeScore(checks);
 	const grade = gradeFromScore(score);
-	const { repoUrl, branch } = detectRepoUrl(resolvedCwd);
+	const { repoUrl } = detectRepoUrl(resolvedCwd);
+	const { git, ci } = detectCiContext(resolvedCwd);
+
+	// Built as a typed variable rather than inline: the provenance fields
+	// (schema 0.6.0) are not yet on the VibeReport type this CLI compiles against.
+	const meta: VibeReport["meta"] & ReportProvenanceMeta = {
+		cwd: resolvedCwd,
+		node: process.version,
+		duration: Date.now() - start,
+		// What the scan actually looked at — so a reader can sanity-check the
+		// result against the size of their project instead of taking it on faith.
+		filesScanned: inventorySourceCount,
+		stack,
+		workspace,
+		scanPolicy: scanPolicySummary(scanPolicy),
+		fileInventory: fileInventory.summary,
+		analyzerSnapshots: buildAnalyzerSnapshots(checks),
+		repoUrl,
+		// Mirrors git.branch; "" when unknown — never a guessed "main".
+		branch: git.branch ?? "",
+		source: "cli",
+		scan: { id: randomUUID(), skipTests, diffBase: options.diffBase ?? null },
+		git,
+		ci,
+	};
 
 	return {
 		version: VERSION,
@@ -301,21 +330,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		score,
 		grade,
 		checks,
-		meta: {
-			cwd: resolvedCwd,
-			node: process.version,
-			duration: Date.now() - start,
-			// What the scan actually looked at — so a reader can sanity-check the
-			// result against the size of their project instead of taking it on faith.
-			filesScanned: inventorySourceCount,
-			stack,
-			workspace,
-			scanPolicy: scanPolicySummary(scanPolicy),
-			fileInventory: fileInventory.summary,
-			analyzerSnapshots: buildAnalyzerSnapshots(checks),
-			repoUrl,
-			branch,
-		},
+		meta,
 	};
 }
 

@@ -1,7 +1,7 @@
 /** Post scan results as a GitHub PR comment. Upserts to avoid duplicates. */
 
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { detectCiContext } from "./ci-context.js";
 import { computeDelta } from "./delta.js";
 import type { TrendDelta } from "./trend.js";
 import type { VibeReport } from "./types.js";
@@ -33,21 +33,15 @@ export async function postPRComment(report: VibeReport, trend: TrendDelta | null
 	return true;
 }
 
-function detectPR(cwd: string): PRInfo | null {
-	// 1. GitHub Actions: GITHUB_EVENT_PATH contains PR info
-	const eventPath = process.env.GITHUB_EVENT_PATH;
-	if (eventPath && existsSync(eventPath)) {
-		try {
-			const event = JSON.parse(readFileSync(eventPath, "utf-8"));
-			const pr = event.pull_request || event.issue;
-			if (pr?.number && process.env.GITHUB_REPOSITORY) {
-				const parts = process.env.GITHUB_REPOSITORY.split("/");
-				if (parts.length >= 2) {
-					return { owner: parts[0], repo: parts[1], prNumber: pr.number };
-				}
-			}
-		} catch {
-			/* not a PR event */
+export function detectPR(cwd: string, env: NodeJS.ProcessEnv = process.env): PRInfo | null {
+	// 1. GitHub Actions: the event payload names the PR (pull_request*), or the
+	//    issue a comment was left on (issue_comment on a PR).
+	const ctx = detectCiContext(cwd, env);
+	const prNumber = ctx.git.prNumber ?? ctx.event?.pull_request?.number ?? ctx.event?.issue?.number;
+	if (prNumber && ctx.repository) {
+		const parts = ctx.repository.split("/");
+		if (parts.length >= 2) {
+			return { owner: parts[0], repo: parts[1], prNumber };
 		}
 	}
 
