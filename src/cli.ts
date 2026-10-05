@@ -13,6 +13,7 @@ import { loadConfig } from "./config.js";
 import { scan } from "./core.js";
 import { computeDelta } from "./delta.js";
 import { detectStack, detectWorkspace } from "./detect.js";
+import { resolveFailUnder } from "./fail-under.js";
 import { postPRComment } from "./pr-comment.js";
 import { generatePages } from "./report/html.js";
 import { buildReportHistorySnapshot, withFreshAnalyzerSnapshots } from "./report-contract.js";
@@ -122,8 +123,8 @@ function printHelp(): void {
 
   \x1b[1mFlags:\x1b[0m
     --skip-tests      Skip test execution (faster scan)
-    --ci              CI mode (exit 1 if score < 60)
-    --fail-under N    Exit 1 if score below N (e.g. --fail-under 80)
+    --ci              CI mode (exit 1 if score < failUnder from config, else 60)
+    --fail-under N    Exit 1 if score below N; overrides config and --ci (e.g. --fail-under 80)
     --json            Output JSON only (no terminal UI)
     --badge           Generate SVG badge
     --sarif           Generate SARIF for GitHub Code Scanning
@@ -696,10 +697,17 @@ async function main() {
 		}
 	}
 
-	const failUnder = flags.failUnder ?? (ciMode ? 60 : (config.failUnder ?? 0));
-	if (failUnder > 0 && score < failUnder && !watchMode) {
-		if (!quietMode) console.log(`  \x1b[31mFailing: score ${score} < ${failUnder}\x1b[0m\n`);
+	const gate = resolveFailUnder(flags.failUnder, config.failUnder, ciMode);
+	if (gate.threshold > 0 && score < gate.threshold && !watchMode) {
+		if (!quietMode) console.log(`  \x1b[31mFailing: score ${score} < ${gate.threshold} (${gate.source})\x1b[0m\n`);
 		process.exit(1);
+	}
+	if (ciMode && !quietMode && !watchMode) {
+		console.log(
+			gate.threshold > 0
+				? `  \x1b[32mPassing: score ${score} \u2265 ${gate.threshold} (${gate.source})\x1b[0m\n`
+				: `  \x1b[2mNo score gate: failUnder is 0 (${gate.source})\x1b[0m\n`,
+		);
 	}
 
 	if (!quietMode && !ciMode && !watchMode && !process.env.VCQA_NO_UPDATE_CHECK) {

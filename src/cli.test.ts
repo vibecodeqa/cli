@@ -249,6 +249,49 @@ describe("config file", () => {
 	}, 30_000);
 });
 
+describe("--ci honours config failUnder (#108)", () => {
+	function scan(args: string): { status: number; out: string } {
+		try {
+			const out = execSync(`node ${CLI} ${args}`, {
+				encoding: "utf-8",
+				timeout: 30_000,
+				cwd: TMP,
+				env: { ...process.env, VCQA_NO_UPDATE_CHECK: "1" },
+			});
+			return { status: 0, out };
+		} catch (e: any) {
+			return { status: e.status ?? -1, out: `${e.stdout ?? ""}${e.stderr ?? ""}` };
+		}
+	}
+
+	it("fails under --ci when the score is below a config failUnder above 60", () => {
+		writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ failUnder: 100 }));
+		const { status, out } = scan("--ci --skip-tests .");
+		const score = Number(/Failing: score (\d+) < 100 \(config\)/.exec(out)?.[1]);
+		expect(status).toBe(1);
+		expect(score).toBeGreaterThan(60); // the old CI default of 60 would have passed it
+	}, 30_000);
+
+	it("passes under --ci when the score clears a config failUnder below 60", () => {
+		writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ failUnder: 1 }));
+		const { status, out } = scan("--ci --skip-tests .");
+		expect(status).toBe(0);
+		expect(out).toMatch(/Passing: score \d+ \u2265 1 \(config\)/);
+	}, 30_000);
+
+	it("--fail-under overrides config under --ci", () => {
+		writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ failUnder: 100 }));
+		const { status, out } = scan("--ci --skip-tests --fail-under 1 .");
+		expect(status).toBe(0);
+		expect(out).toMatch(/Passing: score \d+ \u2265 1 \(flag\)/);
+	}, 30_000);
+
+	it("uses the CI default of 60 when neither flag nor config sets one", () => {
+		const { out } = scan("--ci --skip-tests .");
+		expect(out).toMatch(/(Passing: score \d+ \u2265 60|Failing: score \d+ < 60) \(ci default\)/);
+	}, 30_000);
+});
+
 describe("init command", () => {
 	it("creates workflow file", () => {
 		const out = run("init .");
