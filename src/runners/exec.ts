@@ -22,8 +22,12 @@ export interface ToolRun {
 	analyzer?: string;
 	projectId?: string;
 	projectPath?: string;
-	status: "success" | "failed";
+	status: "success" | "failed" | "timeout";
 	exitCode: number | null;
+	/** True when the run was killed for exceeding its time limit. */
+	timedOut?: boolean;
+	/** The time limit that was exceeded; set only when `timedOut`. */
+	timeoutMs?: number;
 	ok: boolean;
 	durationMs: number;
 	/** Combined output, trimmed and capped so reports stay a sane size. */
@@ -134,12 +138,14 @@ export function run(cmd: string, cwd: string, timeout = 60_000, context: ToolRun
 		return { stdout, ok: true };
 	} catch (e: any) {
 		const output = outputOf(e);
+		const timedOut = e?.code === "ETIMEDOUT";
 		record({
 			tool: toolNameOf(cmd),
 			command: cmd,
 			cwd,
 			...runContext,
-			status: "failed",
+			status: timedOut ? "timeout" : "failed",
+			...(timedOut ? { timedOut: true, timeoutMs: timeout } : {}),
 			exitCode: typeof e?.status === "number" ? e.status : null,
 			ok: false,
 			durationMs: Date.now() - started,
@@ -148,6 +154,25 @@ export function run(cmd: string, cwd: string, timeout = 60_000, context: ToolRun
 		});
 		return { stdout: output, ok: false };
 	}
+}
+
+/** Record a run executed outside `run()` (e.g. by a runner that must kill a
+ * whole process tree), so it lands in the same provenance log. */
+export function recordToolRun(
+	cmd: string,
+	cwd: string,
+	result: Pick<ToolRun, "status" | "exitCode" | "ok" | "durationMs" | "output" | "timedOut" | "timeoutMs">,
+	context: ToolRunContext = {},
+): void {
+	record({
+		tool: toolNameOf(cmd),
+		command: cmd,
+		cwd,
+		...normalizedContext({ ...defaultContext, ...context }),
+		...result,
+		output: result.output.trim().slice(0, MAX_OUTPUT),
+		notFound: !result.ok && !result.timedOut && /not found|ENOENT|command not found/i.test(result.output),
+	});
 }
 
 export function runJSON<T>(cmd: string, cwd: string, timeout = 60_000, context: ToolRunContext = {}): T | null {

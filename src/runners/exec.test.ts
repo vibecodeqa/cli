@@ -71,6 +71,23 @@ describe("tool run provenance", () => {
 		expect(r.exitCode).toBe(2);
 	});
 
+	it("records a timeout as a timeout, not as a failure (#106)", () => {
+		startToolRecording();
+		const result = run("sleep 5", "/tmp", 200);
+		const [r] = takeToolRuns();
+		expect(result.ok).toBe(false);
+		expect(r).toMatchObject({ status: "timeout", timedOut: true, timeoutMs: 200, ok: false, notFound: false });
+	});
+
+	it("does not mark an ordinary failure as timed out", () => {
+		startToolRecording();
+		run("sh -c 'exit 1'", "/tmp");
+		const [r] = takeToolRuns();
+		expect(r.status).toBe("failed");
+		expect(r.timedOut).toBeUndefined();
+		expect(r.timeoutMs).toBeUndefined();
+	});
+
 	it("names the package rather than npx for delegated tools", () => {
 		startToolRecording();
 		run("npx --yes knip --reporter json", "/tmp", 1);
