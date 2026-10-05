@@ -303,11 +303,11 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 	const score = computeScore(checks);
 	const grade = gradeFromScore(score);
 	const { repoUrl } = detectRepoUrl(resolvedCwd);
-	const { git, ci } = options.ciContext ?? detectCiContext(resolvedCwd);
+	const { git, ci, shaOnRemote } = options.ciContext ?? detectCiContext(resolvedCwd);
 
 	// Built as a typed variable rather than inline: the provenance fields
 	// (schema 0.6.0) are not yet on the VibeReport type this CLI compiles against.
-	const meta: VibeReport["meta"] & ReportProvenanceMeta = {
+	const meta: VibeReport["meta"] & ReportProvenanceMeta & { linkRef: string } = {
 		cwd: resolvedCwd,
 		node: process.version,
 		duration: Date.now() - start,
@@ -326,6 +326,9 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		scan: { id: randomUUID(), skipTests, diffBase: options.diffBase ?? null },
 		git,
 		ci,
+		// File links: the sha is a permalink only once it is pushed; a local
+		// HEAD that is on no remote links to the branch instead.
+		linkRef: (shaOnRemote === false ? git.branch : git.sha || git.branch) ?? "",
 	};
 
 	return {

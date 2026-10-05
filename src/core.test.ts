@@ -394,6 +394,7 @@ describe("scan provenance (meta.git / meta.ci / meta.scan)", () => {
 	});
 
 	it("detached HEAD outside CI: meta.branch is empty, git.sha is HEAD, HTML links use the sha", async () => {
+		git("update-ref", "refs/remotes/origin/trunk", "HEAD"); // HEAD is pushed
 		git("checkout", "-q", "--detach");
 		const head = git("rev-parse", "HEAD");
 		const report = await scan(repo, { skipTests: true, checks: ["structure"] });
@@ -412,6 +413,23 @@ describe("scan provenance (meta.git / meta.ci / meta.scan)", () => {
 		expect(html).not.toContain("/blob//");
 	}, 30_000);
 
+	it("local HEAD not on any remote: links go to the branch, not a sha that would 404", async () => {
+		git("update-ref", "refs/remotes/origin/trunk", "HEAD");
+		writeFileSync(join(repo, "b.txt"), "b\n");
+		git("add", "b.txt");
+		git("commit", "-q", "-m", "local only");
+		const head = git("rev-parse", "HEAD");
+		const report = await scan(repo, { skipTests: true, checks: ["structure"] });
+		const meta = report.meta as typeof report.meta & Record<string, unknown>;
+
+		expect((meta.git as { sha: string }).sha).toBe(head); // provenance still names the real commit
+		expect(meta.linkRef).toBe("trunk");
+		report.checks[0]!.issues.push({ severity: "warning", message: "x", file: "src/index.ts", line: 3 });
+		const html = [...generatePages(report).values()].join("\n");
+		expect(html).toContain("https://github.com/octo-org/widgets/blob/trunk/src/index.ts#L3");
+		expect(html).not.toContain(`/blob/${head}/`);
+	}, 30_000);
+
 	it("uses the caller's ciContext instead of detecting it again", async () => {
 		const git = {
 			sha: "f".repeat(40),
@@ -427,7 +445,7 @@ describe("scan provenance (meta.git / meta.ci / meta.scan)", () => {
 		const report = await scan(repo, {
 			skipTests: true,
 			checks: ["structure"],
-			ciContext: { git, ci, repository: null, event: null, headShaNote: null },
+			ciContext: { git, ci, repository: null, event: null, headShaNote: null, shaOnRemote: null },
 		});
 		const meta = report.meta as typeof report.meta & Record<string, unknown>;
 		expect(meta.git).toEqual(git);

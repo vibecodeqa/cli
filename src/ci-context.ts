@@ -74,6 +74,11 @@ export interface CiContext {
 	event: GitHubEventPayload | null;
 	/** Why `git.headSha` is null although the run is CI, when it is. */
 	headShaNote: string | null;
+	/** Whether `git.sha` is on a remote, so a `blob/<sha>` link resolves.
+	 *  Asked only of local scans, where an unpushed HEAD is the normal state
+	 *  (from local remote-tracking refs — no network); null when not asked or
+	 *  git could not say. A CI checkout is always of a pushed ref. */
+	shaOnRemote: boolean | null;
 }
 
 /** Events whose checkout is `refs/pull/N/merge` and whose payload carries the PR. */
@@ -98,7 +103,7 @@ export function detectCiContext(cwd: string, env: NodeJS.ProcessEnv = process.en
 			commitDate: commitDate(cwd, localHead),
 			defaultBranch: null,
 		};
-		return { git, ci: null, repository, event, headShaNote: null };
+		return { git, ci: null, repository, event, headShaNote: null, shaOnRemote: onRemote(cwd, localHead) };
 	}
 
 	const eventName = env.GITHUB_EVENT_NAME || "";
@@ -121,7 +126,7 @@ export function detectCiContext(cwd: string, env: NodeJS.ProcessEnv = process.en
 	const checkout: Checkout = { cwd, localHead, localBranch, onEventCommit: !localHead || !env.GITHUB_SHA || localHead === env.GITHUB_SHA };
 	const { headShaNote, fallbackDate } = applyEvent(git, eventName, event ?? {}, env, checkout);
 	git.commitDate = commitDate(cwd, git.headSha ?? git.sha) ?? fallbackDate;
-	return { git, ci: githubActionsRun(env, eventName, repository), repository, event, headShaNote };
+	return { git, ci: githubActionsRun(env, eventName, repository), repository, event, headShaNote, shaOnRemote: null };
 }
 
 interface EventEffect {
@@ -313,6 +318,17 @@ function readEvent(env: NodeJS.ProcessEnv): GitHubEventPayload | null {
 function commitDate(cwd: string, sha: string | null): string | null {
 	if (!sha || !/^[0-9a-f]{7,64}$/i.test(sha)) return null;
 	return gitOut(cwd, ["show", "-s", "--format=%cI", `${sha}^{commit}`, "--"]);
+}
+
+/** Whether any remote-tracking branch contains `sha`; null when git fails. */
+function onRemote(cwd: string, sha: string | null): boolean | null {
+	if (!sha) return null;
+	try {
+		const out = execFileSync("git", ["branch", "-r", "--contains", sha], { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+		return out.trim().length > 0;
+	} catch {
+		return null;
+	}
 }
 
 function gitOut(cwd: string, args: string[]): string | null {

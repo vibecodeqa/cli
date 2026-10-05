@@ -95,6 +95,13 @@ describe("detectCiContext — no CI", () => {
 		expect(ctx.git.ref).toBe("refs/heads/feature/x");
 	});
 
+	it("shaOnRemote: false for an unpushed HEAD, true once a remote-tracking ref contains it", () => {
+		const { dir, git } = gitRepo();
+		expect(detectCiContext(dir, {}).shaOnRemote).toBe(false);
+		git("update-ref", "refs/remotes/origin/trunk", "HEAD");
+		expect(detectCiContext(dir, {}).shaOnRemote).toBe(true);
+	});
+
 	it("ignores stray GITHUB_* when not running in Actions", () => {
 		const { dir, head } = gitRepo();
 		const ctx = detectCiContext(dir, { GITHUB_SHA: "1".repeat(40), GITHUB_HEAD_REF: "nope" });
