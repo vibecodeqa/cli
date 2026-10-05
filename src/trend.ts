@@ -8,8 +8,10 @@ import type { VibeReport } from "./types.js";
 
 export interface TrendDelta {
 	scoreDelta: number; // positive = improved
-	/** `delta` is 0 and `transition` is set when either side did not run (#107). */
-	/** `prev`/`curr` are null for a side that did not run or was absent. */
+	/**
+	 * `delta` is 0 and `transition` is set when either side did not run or its
+	 * runner crashed (#107). `prev`/`curr` are null for such a side, or an absent one.
+	 */
 	checkDeltas: { name: string; prev: number | null; curr: number | null; delta: number; transition?: StatusTransition }[];
 	newIssues: number;
 	fixedIssues: number;

@@ -194,15 +194,12 @@ describe("loadHistory", () => {
 			}),
 		);
 		const [entry] = loadHistory(tmp);
-		expect([...entry.checkScores]).toEqual([
-			["types", 0],
-			["structure", 90],
-		]);
+		expect([...entry.checkScores]).toEqual([["structure", 90]]);
 		expect(Object.fromEntries(entry.checkStates)).toEqual({
 			lint: "unavailable",
 			"ai-review": "unavailable",
 			deps: "skipped",
-			types: "ran",
+			types: "runner-error",
 			structure: "ran",
 		});
 	});

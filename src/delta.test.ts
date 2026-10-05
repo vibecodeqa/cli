@@ -177,7 +177,7 @@ describe("not-run checks (#107)", () => {
 		};
 		expect(checkRunState(legacyComingSoon)).toBe("unavailable");
 		expect(checkRunState(legacySkipped)).toBe("skipped");
-		expect(checkRunState(legacyRunnerError)).toBe("ran");
+		expect(checkRunState(legacyRunnerError)).toBe("runner-error");
 		expect(checkRunState(undefined)).toBe("absent");
 
 		const delta = computeDelta(makeReport({ checks: [legacySkipped] }), makeReport({ checks: [lintScored] }));
@@ -221,5 +221,68 @@ describe("not-run checks (#107)", () => {
 		const back = computeDelta(makeReport({ checks: [lintScored] }), makeReport({ checks: [lintUnavailable] }));
 		expect(back.checks[0]).toMatchObject({ before: 72, after: null });
 		expect(JSON.stringify(back)).not.toContain('"after":100');
+	});
+});
+
+describe("crashed runner (#107)", () => {
+	// core.ts's stub for a runner that threw: status failed, a placeholder 0/F.
+	const lintCrashed = {
+		name: "lint",
+		status: "failed",
+		score: 0,
+		grade: "F" as const,
+		details: { skipped: true, status: "failed", reason: "runner error: eslint exited 2" },
+		issues: [],
+		duration: 0,
+	};
+	const lintScored = {
+		name: "lint",
+		status: "failed",
+		score: 72,
+		grade: "C" as const,
+		details: { status: "failed" },
+		issues: [],
+		duration: 1,
+	};
+
+	it("reports 72 → runner error as a transition, with no numeric delta", () => {
+		const delta = computeDelta(makeReport({ checks: [lintScored] }), makeReport({ checks: [lintCrashed] }));
+		const lint = delta.checks.find((c) => c.name === "lint")!;
+		expect(lint).toMatchObject({ before: 72, after: null, delta: 0 });
+		expect(lint.transition).toEqual({ before: { state: "ran", score: 72 }, after: { state: "runner-error" } });
+		expect(formatTransition(lint.transition!)).toBe("72 → failed (runner error)");
+
+		const bullets = formatCheckChangeBullets(delta, 8);
+		expect(bullets).toContain("- lint: 72 → failed (runner error)");
+		expect(bullets).not.toContain("-72");
+		expect(bullets).not.toContain("72 → 0");
+
+		const md = formatDeltaMarkdown(delta);
+		expect(md).toContain("| lint | 72 | failed (runner error) |");
+		expect(md).not.toContain("## Check Changes");
+		expect(md).not.toContain("-72");
+	});
+
+	it("reports runner error → 72 as a transition, not +72", () => {
+		const delta = computeDelta(makeReport({ checks: [lintCrashed] }), makeReport({ checks: [lintScored] }));
+		const lint = delta.checks.find((c) => c.name === "lint")!;
+		expect(lint).toMatchObject({ before: null, after: 72, delta: 0 });
+		expect(formatTransition(lint.transition!)).toBe("failed (runner error) → 72");
+		expect(formatCheckChangeBullets(delta, 8)).not.toContain("+72");
+		expect(formatDeltaMarkdown(delta)).not.toContain("+72");
+
+		// Crashed in both scans: nothing changed, nothing to report.
+		expect(computeDelta(makeReport({ checks: [lintCrashed] }), makeReport({ checks: [lintCrashed] })).checks).toHaveLength(0);
+	});
+
+	it("detects a crash from details alone (history snapshots, older reports)", () => {
+		const { status: _status, ...noTopStatus } = lintCrashed;
+		expect(checkRunState(noTopStatus)).toBe("runner-error");
+		expect(checkRunState({ ...noTopStatus, details: { skipped: true, reason: "runner error: boom" } })).toBe("runner-error");
+		// An explicit skipped/unavailable status still wins over the reason.
+		expect(checkRunState({ ...lintCrashed, status: "unavailable" })).toBe("unavailable");
+		// `status` is an open vocabulary (schema 0.6.0): an unknown value counts as ran.
+		expect(checkRunState({ ...lintScored, status: "timeout" })).toBe("ran");
+		expect(checkRunState({ ...lintScored, status: "timeout", details: { status: "timeout" } })).toBe("ran");
 	});
 });

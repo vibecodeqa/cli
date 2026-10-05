@@ -1,3 +1,4 @@
+import { checkSide } from "./delta.js";
 import type { AnalyzerMetric, AnalyzerSnapshot, CheckResult, Issue } from "./types.js";
 
 const DETAIL_DENYLIST = new Set(["assessment", "containerSvg", "graph", "reason", "skipped", "status", "toolRuns"]);
@@ -5,9 +6,11 @@ const DETAIL_DENYLIST = new Set(["assessment", "containerSvg", "graph", "reason"
 export function buildAnalyzerSnapshots(checks: CheckResult[]): AnalyzerSnapshot[] {
 	return checks.map((check) => {
 		const status = checkStatus(check);
-		// A check that did not run carries a placeholder 100 (core.ts); it is
-		// not a measurement, so the snapshot has no score key at all (#107).
-		const score = !NOT_RUN.has(status) && Number.isFinite(Number(check.score)) ? Number(check.score) : undefined;
+		// A check that did not run carries a placeholder 100 (core.ts), and a
+		// crashed runner a placeholder 0 (its status stays "failed"); neither is
+		// a measurement, so the snapshot has no score key at all (#107).
+		const ran = checkSide(check).score;
+		const score = ran !== undefined && Number.isFinite(Number(ran)) ? Number(ran) : undefined;
 		return {
 			analyzerId: check.name,
 			status,
@@ -19,8 +22,6 @@ export function buildAnalyzerSnapshots(checks: CheckResult[]): AnalyzerSnapshot[
 		};
 	});
 }
-
-const NOT_RUN = new Set<string>(["skipped", "unavailable"]);
 
 function checkStatus(check: CheckResult): AnalyzerSnapshot["status"] {
 	const details = check.details as Record<string, unknown>;

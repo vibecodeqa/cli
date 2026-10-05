@@ -100,3 +100,13 @@ describe("buildAnalyzerSnapshots not-run checks (#107)", () => {
 		expect(JSON.parse(JSON.stringify(snaps[0]))).not.toHaveProperty("score");
 	});
 });
+
+describe("buildAnalyzerSnapshots crashed runner (#107)", () => {
+	it("keeps status failed but omits the placeholder 0", () => {
+		const [snap] = buildAnalyzerSnapshots([
+			check({ name: "lint", score: 0, details: { skipped: true, status: "failed", reason: "runner error: boom" } }),
+		]);
+		expect(snap.status).toBe("failed");
+		expect(snap).not.toHaveProperty("score");
+	});
+});

@@ -9,9 +9,9 @@ import type { AnalyzerSnapshot, VibeReport } from "./types.js";
 export interface HistoryEntry {
 	timestamp: string;
 	score: number;
-	/** Scores of checks that ran. A not-run check's placeholder 100 is left out (#107). */
+	/** Scores of checks that ran. A not-run check's placeholder 100, and a crashed runner's 0, are left out (#107). */
 	checkScores: Map<string, number>;
-	/** Run state of every check in the snapshot (from `status`, else the details flags). */
+	/** Run state of every check in the snapshot (from `status` / `details.status`, the "runner error:" reason, else the details flags). */
 	checkStates: Map<string, Exclude<CheckRunState, "absent">>;
 	issues: IssueSnapshot[];
 	analyzerSnapshots: AnalyzerSnapshot[];

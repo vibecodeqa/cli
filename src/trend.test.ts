@@ -148,6 +148,33 @@ describe("computeTrend not-run checks (#107)", () => {
 	});
 });
 
+describe("computeTrend crashed runner (#107)", () => {
+	const crash = { skipped: true, status: "failed", reason: "runner error: boom" };
+
+	it("72 → runner error is a transition, not -72", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-trend-"));
+		writeFileSync(join(dir, "report.json"), JSON.stringify(makeReport(70, [{ name: "lint", score: 72, issues: 0 }])));
+		const curr = makeReport(60, [{ name: "lint", score: 0, issues: 0 }]);
+		curr.checks[0].details = crash;
+
+		const lint = computeTrend(curr, dir)!.checkDeltas.find((d) => d.name === "lint")!;
+		expect(lint).toMatchObject({ prev: 72, curr: null, delta: 0 });
+		expect(lint.transition).toEqual({ before: { state: "ran", score: 72 }, after: { state: "runner-error" } });
+		expect(formatTransition(lint.transition!)).toBe("72 → failed (runner error)");
+	});
+
+	it("runner error → 72 is a transition, not +72", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-trend-"));
+		const prev = makeReport(60, [{ name: "lint", score: 0, issues: 0 }]);
+		prev.checks[0].details = crash;
+		writeFileSync(join(dir, "report.json"), JSON.stringify(prev));
+
+		const lint = computeTrend(makeReport(70, [{ name: "lint", score: 72, issues: 0 }]), dir)!.checkDeltas[0];
+		expect(lint).toMatchObject({ prev: null, curr: 72, delta: 0 });
+		expect(formatTransition(lint.transition!)).toBe("failed (runner error) → 72");
+	});
+});
+
 describe("formatTrend", () => {
 	it("formats improvement", () => {
 		const out = formatTrend({

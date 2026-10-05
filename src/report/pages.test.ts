@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -322,5 +322,95 @@ describe("trends page with not-run checks (#107)", () => {
 		expect(rows).toContain("lint skipped → 75 status");
 		expect(rows).toContain("structure 80 → not present status");
 		expect(html).not.toContain("-25");
+	});
+});
+
+describe("crashed runner on the actions and trends pages (#107)", () => {
+	// core.ts's stub for a runner that threw: status failed, a placeholder 0/F.
+	const crashed: CheckResult = {
+		name: "lint",
+		score: 0,
+		grade: "F",
+		details: { skipped: true, status: "failed", reason: "runner error: boom" },
+		issues: [],
+		duration: 0,
+	};
+	(crashed as CheckResult & { status: string }).status = "failed";
+	const lint = (score: number): CheckResult => ({
+		name: "lint",
+		score,
+		grade: "C",
+		details: { status: "failed" },
+		issues: [],
+		duration: 1,
+	});
+	const structure = (score: number): CheckResult => ({ name: "structure", score, grade: "B", details: {}, issues: [], duration: 1 });
+	const trendRows = (html: string) =>
+		[...html.matchAll(/<div class="trend-row">(.*?)<\/div>/g)].map((m) =>
+			m[1]
+				.replace(/<[^>]+>/g, " ")
+				.replace(/\s+/g, " ")
+				.trim(),
+		);
+	function writeHistory(dir: string, entries: { timestamp: string; checks: CheckResult[] }[]): string {
+		const historyDir = join(dir, "history");
+		mkdirSync(historyDir, { recursive: true });
+		for (const { timestamp, checks } of entries) {
+			const report = { ...makeReport(dir, checks), timestamp };
+			writeFileSync(join(historyDir, `${timestamp}.json`), JSON.stringify(buildReportHistorySnapshot(report)));
+		}
+		return historyDir;
+	}
+
+	it("actions page: 72 → runner error is a status change, not lint -72", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-report-"));
+		const html = generatePages(makeReport(dir, [crashed]), undefined, makeReport(dir, [lint(72)])).get("actions.html")!;
+		expect(html).toContain("lint: 72 → failed (runner error)");
+		expect(html).not.toContain("lint -72");
+	});
+
+	it("actions page: runner error → 72 is a status change, not lint +72", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-report-"));
+		const html = generatePages(makeReport(dir, [lint(72)]), undefined, makeReport(dir, [crashed])).get("actions.html")!;
+		expect(html).toContain("lint: failed (runner error) → 72");
+		expect(html).not.toContain("lint +72");
+	});
+
+	it("trends page: a crashed scan is a gap in the chart and a transition in the table", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-report-"));
+		const historyDir = writeHistory(dir, [
+			{ timestamp: "2026-10-01T00:00:00.000Z", checks: [lint(64), structure(80)] },
+			{ timestamp: "2026-10-02T00:00:00.000Z", checks: [lint(72), structure(84)] },
+			{ timestamp: "2026-10-03T00:00:00.000Z", checks: [crashed, structure(86)] },
+		]);
+		// The snapshot keeps the crash only in details (no top-level status).
+		const snapshot = JSON.parse(readFileSync(join(historyDir, "2026-10-03T00:00:00.000Z.json"), "utf-8"));
+		expect(snapshot.checks[0]).not.toHaveProperty("status");
+		expect(snapshot.checks[0].details.reason).toBe("runner error: boom");
+
+		const html = generatePages(makeReport(dir, [crashed, structure(86)]), historyDir).get("trends.html")!;
+		const rows = trendRows(html);
+		expect(rows).toContain("lint 64 → failed (runner error) status");
+		expect(rows).toContain("structure 80 → 86 +6");
+		expect(html).not.toContain("-64");
+		expect(html).not.toContain("-72");
+		// The lint card plots only the two scans that produced a score, and labels the crash.
+		expect(html).toMatch(/<span class="trend-name">lint<\/span><span class="trend-status muted">failed \(runner error\)<\/span>/);
+		const lintCard = html.slice(html.indexOf('<span class="trend-name">lint</span>')).split('<div class="trend-card">')[0];
+		expect(lintCard).toContain("<title>2026-10-01 — 64</title>");
+		expect(lintCard).toContain("<title>2026-10-02 — 72</title>");
+		expect(lintCard).not.toContain("2026-10-03");
+	});
+
+	it("trends page: runner error → 72 is a transition, not +72", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-report-"));
+		const historyDir = writeHistory(dir, [
+			{ timestamp: "2026-10-01T00:00:00.000Z", checks: [crashed] },
+			{ timestamp: "2026-10-02T00:00:00.000Z", checks: [lint(70)] },
+			{ timestamp: "2026-10-03T00:00:00.000Z", checks: [lint(72)] },
+		]);
+		const html = generatePages(makeReport(dir, [lint(72)]), historyDir).get("trends.html")!;
+		expect(trendRows(html)).toContain("lint failed (runner error) → 72 status");
+		expect(html).not.toContain("+72");
 	});
 });

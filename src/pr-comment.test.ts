@@ -60,4 +60,30 @@ describe("PR comment body (#107)", () => {
 		expect(body).not.toContain("+36");
 		expect(body).not.toContain("64 → 100");
 	});
+
+	const crashed = {
+		name: "lint",
+		status: "failed",
+		score: 0,
+		grade: "F" as const,
+		details: { skipped: true, status: "failed", reason: "runner error: boom" },
+		issues: [],
+		duration: 0,
+	};
+
+	it("shows 72 → runner error as a status change, not a -72 regression", async () => {
+		const { buildCommentBody } = await import("./pr-comment.js");
+		const body = buildCommentBody({ ...base, checks: [crashed] }, null, { ...base, checks: [scored] });
+		expect(body).toContain("lint: 72 → failed (runner error)");
+		expect(body).not.toContain("72 → 0");
+		expect(body).not.toContain("-72");
+	});
+
+	it("shows runner error → 72 as a status change, not a +72 improvement", async () => {
+		const { buildCommentBody } = await import("./pr-comment.js");
+		const body = buildCommentBody({ ...base, checks: [scored] }, null, { ...base, checks: [crashed] });
+		expect(body).toContain("lint: failed (runner error) → 72");
+		expect(body).not.toContain("0 → 72");
+		expect(body).not.toContain("+72");
+	});
 });

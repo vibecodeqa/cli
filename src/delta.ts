@@ -12,8 +12,12 @@ import type { CheckResult, Issue, VibeReport } from "./types.js";
  * placeholder `score: 100` (core.ts), which must never be subtracted from a
  * real score: "lint: 100 → 72" would read as a regression, and the reverse
  * (a tool uninstalled) as an improvement (#107).
+ *
+ * `runner-error`: the check ran and its runner crashed. It counts as having
+ * run, with status `failed`, but its `score: 0` / grade F is a placeholder
+ * too, so it is compared as a state, never as a number.
  */
-export type CheckRunState = "ran" | "skipped" | "unavailable" | "absent";
+export type CheckRunState = "ran" | "runner-error" | "skipped" | "unavailable" | "absent";
 
 /** One side of a check comparison. `score` is set only when the check ran. */
 export interface CheckSide {
@@ -29,18 +33,24 @@ export interface StatusTransition {
 
 /**
  * Run state of a check. Reads `status` (the CLI writes it; it survives schema
- * 0.5.0 via `.passthrough()`); older reports without it fall back to the
- * details flags, in the order core.ts uses (`unavailable`/`comingSoon`
- * before `skipped`, a "runner error:" reason counting as a run).
+ * 0.5.0 via `.passthrough()`), else `details.status` (what history snapshots
+ * keep). Reports without either fall back to the details flags, in the order
+ * core.ts uses (`unavailable`/`comingSoon` before `skipped`).
+ *
+ * A "runner error:" reason is a crashed runner (core.ts reports it as
+ * `failed`); an explicit `skipped`/`unavailable` status still wins over it.
+ * `status` is an open vocabulary (schema 0.6.0): any other value counts as ran.
  */
 export function checkRunState(check: CheckResult | undefined): CheckRunState {
 	if (!check) return "absent";
-	const status = (check as CheckResult & { status?: unknown }).status;
-	if (status === "skipped" || status === "unavailable") return status;
-	if (typeof status === "string" && status) return "ran";
 	const details = (check.details ?? {}) as Record<string, unknown>;
+	const topStatus: unknown = (check as { status?: unknown }).status;
+	const status: unknown = typeof topStatus === "string" && topStatus ? topStatus : details.status;
+	if (status === "skipped") return "skipped";
+	if (status === "unavailable") return "unavailable";
 	const reason = typeof details.reason === "string" ? details.reason : "";
-	if (reason.startsWith("runner error:")) return "ran";
+	if (reason.startsWith("runner error:")) return "runner-error";
+	if (typeof status === "string" && status) return "ran";
 	if (details.unavailable || details.comingSoon) return "unavailable";
 	if (details.skipped) return "skipped";
 	return "ran";
@@ -61,8 +71,10 @@ export function compareCheckSides(before: CheckSide, after: CheckSide): { delta:
 	return { delta: 0, transition: { before, after } };
 }
 
+/** "72", "failed (runner error)", "unavailable", "skipped" or "not present". */
 export function formatCheckSide(side: CheckSide): string {
 	if (side.state === "ran") return String(side.score);
+	if (side.state === "runner-error") return "failed (runner error)";
 	return side.state === "absent" ? "not present" : side.state;
 }
 
@@ -78,11 +90,11 @@ export interface DeltaIssue {
 export interface CheckDelta {
 	name: string;
 	label: string;
-	/** Score before; null when the check did not run or was absent (see `transition`). */
+	/** Score before; null when the check did not run, its runner crashed, or it was absent (see `transition`). */
 	before: number | null;
-	/** Score after; null when the check did not run or was absent (see `transition`). */
+	/** Score after; null when the check did not run, its runner crashed, or it was absent (see `transition`). */
 	after: number | null;
-	/** Score change; 0 whenever either side did not run (see `transition`). */
+	/** Score change; 0 whenever either side did not run or crashed (see `transition`). */
 	delta: number;
 	/** Set instead of a numeric delta when the check's run state changed. */
 	transition?: StatusTransition;
@@ -196,7 +208,7 @@ export function scoreChanges(delta: ScanDelta): CheckDelta[] {
 	return delta.checks.filter((c) => c.delta !== 0).sort((a, b) => b.delta - a.delta);
 }
 
-/** Checks whose run state changed (ran ↔ skipped/unavailable/absent). */
+/** Checks whose run state changed (ran ↔ runner-error/skipped/unavailable/absent). */
 export function statusTransitions(delta: ScanDelta): (CheckDelta & { transition: StatusTransition })[] {
 	return delta.checks.filter((c): c is CheckDelta & { transition: StatusTransition } => c.transition !== undefined);
 }
