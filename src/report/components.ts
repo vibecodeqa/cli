@@ -15,8 +15,10 @@ export function e(s: string): string {
 
 /** The tree file links should point at: the scanned commit when the report
  *  knows it (a permalink that stays correct after the branch moves), else the
- *  branch, else "" — meaning no link at all. */
-export function linkRef(meta: { branch?: string | null; git?: { sha?: string | null } | null }): string {
+ *  branch, else "" — meaning no link at all. A scan that decided otherwise
+ *  (`meta.linkRef`: a local HEAD not pushed yet, whose sha would 404) wins. */
+export function linkRef(meta: { branch?: string | null; git?: { sha?: string | null } | null; linkRef?: unknown }): string {
+	if (typeof meta.linkRef === "string") return meta.linkRef;
 	return meta.git?.sha || meta.branch || "";
 }
 

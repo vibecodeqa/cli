@@ -1150,7 +1150,7 @@ export function detectRepoUrl(cwd: string): { repoUrl: string | null; branch: st
 }
 
 /** The current local branch, or null on a detached HEAD / outside git. */
-function detectLocalBranch(cwd: string): string | null {
+export function detectLocalBranch(cwd: string): string | null {
 	try {
 		return execSync("git branch --show-current", { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim() || null;
 	} catch {

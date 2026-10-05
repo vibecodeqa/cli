@@ -61,6 +61,11 @@ describe("linkRef", () => {
 		expect(linkRef({ branch: "main", git: { sha: "abc123" } })).toBe("abc123");
 	});
 
+	it("follows the scan's own decision in meta.linkRef (unpushed HEAD → branch)", () => {
+		expect(linkRef({ branch: "main", git: { sha: "abc123" }, linkRef: "main" })).toBe("main");
+		expect(linkRef({ branch: "", git: { sha: "abc123" }, linkRef: "" })).toBe("");
+	});
+
 	it("falls back to the branch, then to no ref", () => {
 		expect(linkRef({ branch: "main", git: { sha: null } })).toBe("main");
 		expect(linkRef({ branch: "" })).toBe("");
