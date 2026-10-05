@@ -134,6 +134,8 @@ describe("CLI flags", () => {
 			const check = report.checks.find((c: { name: string }) => c.name === snapshot.analyzerId);
 			expect(snapshot.findingCount).toBe(check.issues.length);
 		}
+		// The report says it is partial (#98: meta.scan).
+		expect(report.meta.scan.diffBase).toBe("HEAD");
 	}, 30_000);
 });
 

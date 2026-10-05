@@ -634,6 +634,7 @@ async function main() {
 	const report = await scan(cwd, {
 		skipTests,
 		config,
+		diffBase,
 		onProgress: quietMode
 			? undefined
 			: (check, result) => {
