@@ -23,11 +23,16 @@ repeated findings in one file shared one fingerprint (#97).
     only findings that are still identical get an occurrence ordinal. Vue and
     Svelte files are not anchored — their runners report lines relative to
     the extracted `<script>` or to the raw file depending on the check — so
-    their repeats are told apart by line order alone.
+    their repeats are told apart by line order alone, so a new repeat added
+    above existing ones may be reported as the last in line order.
   - limit: findings on textually identical source lines can only be told
     apart by position. Counts of new and fixed stay right, but when one is
     added or removed above the others, the one reported is the last in line
     order rather than the one that changed.
+- **Changed**: `complexity` no longer mistakes top-level `if`/`for`/`while`/
+  `switch` blocks for functions. Their pseudo-function findings ("if: N
+  lines") disappear and `functionCount` drops — by about 5% on a real
+  repository.
 - **Compatibility**: comparing a v1 report (no `fingerprintVersion`) with a v2
   report recomputes v1 fingerprints on both sides, so the first scan after the
   upgrade shows no churn. Anything that stores fingerprints and matches them
