@@ -103,7 +103,11 @@ export function detectCiContext(cwd: string, env: NodeJS.ProcessEnv = process.en
 
 	const eventName = env.GITHUB_EVENT_NAME || "";
 	const ref = env.GITHUB_REF || null;
-	const sha = env.GITHUB_SHA || localHead;
+	// The commit actually checked out. GITHUB_SHA is the commit the *event*
+	// names, which a workflow is free not to check out (`ref:` a PR head sha, a
+	// PR merge ref under pull_request_target, a second repository under `path:`);
+	// it stands in only when there is no local git to ask.
+	const sha = localHead ?? env.GITHUB_SHA ?? null;
 	const git: ReportGitProvenance = {
 		sha,
 		headSha: sha,
@@ -114,7 +118,8 @@ export function detectCiContext(cwd: string, env: NodeJS.ProcessEnv = process.en
 		commitDate: null,
 		defaultBranch: str(event?.repository?.default_branch),
 	};
-	const { headShaNote, fallbackDate } = applyEvent(git, eventName, event ?? {}, env, localHead);
+	const checkout: Checkout = { cwd, localHead, localBranch, onEventCommit: !localHead || !env.GITHUB_SHA || localHead === env.GITHUB_SHA };
+	const { headShaNote, fallbackDate } = applyEvent(git, eventName, event ?? {}, env, checkout);
 	git.commitDate = commitDate(cwd, git.headSha ?? git.sha) ?? fallbackDate;
 	return { git, ci: githubActionsRun(env, eventName, repository), repository, event, headShaNote };
 }
@@ -124,27 +129,32 @@ interface EventEffect {
 	fallbackDate: string | null;
 }
 
+/** What is on disk, as opposed to what the event names. */
+interface Checkout {
+	cwd: string;
+	localHead: string | null;
+	localBranch: string | null;
+	/** The checkout is the event's own commit (`GITHUB_SHA`), or there is no
+	 *  local git to say otherwise — the event payload describes the scan. */
+	onEventCommit: boolean;
+}
+
+const NO_EFFECT: EventEffect = { headShaNote: null, fallbackDate: null };
+
 /** Refine `git` from the event payload. Events not listed keep the defaults:
- *  the scanned commit is its own head, with no base and no PR. */
+ *  the scanned commit is its own head, with no base and no PR. A checkout the
+ *  event does not describe is described from local git alone. */
 function applyEvent(
 	git: ReportGitProvenance,
 	eventName: string,
 	event: GitHubEventPayload,
 	env: NodeJS.ProcessEnv,
-	localHead: string | null,
+	checkout: Checkout,
 ): EventEffect {
-	const none: EventEffect = { headShaNote: null, fallbackDate: null };
 	const pr = event.pull_request;
-	if (PR_MERGE_EVENTS.has(eventName) && pr) {
-		// The checkout is GitHub's merge of head into base: `sha` stays that merge
-		// commit (it is what was scanned); the head is exposed separately.
-		git.headSha = str(pr.head?.sha);
-		git.baseSha = str(pr.base?.sha);
-		git.branch = env.GITHUB_HEAD_REF || str(pr.head?.ref);
-		git.prNumber = num(pr.number);
-		return none;
-	}
-	if (eventName === "pull_request_target" && pr) return applyPullRequestTarget(git, pr, env, localHead);
+	if (PR_MERGE_EVENTS.has(eventName) && pr) return applyPullRequest(git, pr, env, checkout);
+	if (eventName === "pull_request_target" && pr) return applyPullRequestTarget(git, pr, env, checkout);
+	if (!checkout.onEventCommit) return describeLocalCheckout(git, checkout);
 	if (eventName === "merge_group" && event.merge_group) {
 		// The merge queue's temporary branch: head_sha is the queued commit, which
 		// is also what GITHUB_SHA checks out.
@@ -158,33 +168,94 @@ function applyEvent(
 		git.baseSha = before && !ZERO_SHA.test(before) ? before : null;
 		return { headShaNote: null, fallbackDate: str(event.head_commit?.timestamp) };
 	}
-	return none;
+	return NO_EFFECT;
+}
+
+/** pull_request*: the default checkout is GitHub's merge of head into base, so
+ *  `sha` is that merge commit and the head is exposed separately. A workflow
+ *  that checked out the PR head itself scanned the head: `sha` is the head. */
+function applyPullRequest(
+	git: ReportGitProvenance,
+	pr: NonNullable<GitHubEventPayload["pull_request"]>,
+	env: NodeJS.ProcessEnv,
+	checkout: Checkout,
+): EventEffect {
+	const head = str(pr.head?.sha);
+	const headRef = env.GITHUB_HEAD_REF || str(pr.head?.ref);
+	const onHead = (head !== null && checkout.localHead === head) || (headRef !== null && checkout.localBranch === headRef);
+	if (!onHead && !checkout.onEventCommit && !isMergeOf(checkout, head)) return describeLocalCheckout(git, checkout);
+	git.headSha = onHead ? git.sha : head;
+	git.baseSha = str(pr.base?.sha);
+	git.branch = headRef;
+	git.prNumber = num(pr.number);
+	return NO_EFFECT;
 }
 
 /** Runs in the base repository's context: the default checkout is the base
  *  branch, not the PR, and GITHUB_SHA is the base tip either way. Only when the
- *  workflow checked out the PR head itself does the scan describe the head. */
+ *  workflow checked out the PR head — or its merge into base — does the scan
+ *  describe the PR. */
 function applyPullRequestTarget(
 	git: ReportGitProvenance,
 	pr: NonNullable<GitHubEventPayload["pull_request"]>,
 	env: NodeJS.ProcessEnv,
-	localHead: string | null,
+	checkout: Checkout,
 ): EventEffect {
 	const head = str(pr.head?.sha);
+	const onHead = head !== null && checkout.localHead === head;
+	if (onHead || isMergeOf(checkout, head)) {
+		// sha stays the checkout: the head itself, or the merge commit (which
+		// no PR displays — statuses go to headSha).
+		git.headSha = head;
+		git.baseSha = str(pr.base?.sha);
+		git.branch = env.GITHUB_HEAD_REF || str(pr.head?.ref);
+		git.prNumber = num(pr.number);
+		return NO_EFFECT;
+	}
+	if (!checkout.onEventCommit) return describeLocalCheckout(git, checkout);
+	git.headSha = null;
 	git.baseSha = str(pr.base?.sha);
 	git.prNumber = num(pr.number);
-	if (head && localHead === head) {
-		git.sha = head;
-		git.headSha = head;
-		git.branch = env.GITHUB_HEAD_REF || str(pr.head?.ref);
-		return { headShaNote: null, fallbackDate: null };
-	}
-	git.headSha = null;
 	git.branch = env.GITHUB_BASE_REF || str(pr.base?.ref) || git.branch;
 	return {
 		headShaNote: "pull_request_target checks out the base branch, not the PR head; the scan does not describe the PR head",
 		fallbackDate: null,
 	};
+}
+
+/** The workflow checked out something the event does not name — another ref,
+ *  or another repository entirely. Nothing from the payload applies; describe
+ *  what is on disk. */
+function describeLocalCheckout(git: ReportGitProvenance, checkout: Checkout): EventEffect {
+	git.sha = checkout.localHead;
+	git.headSha = checkout.localHead;
+	git.baseSha = null;
+	git.branch = checkout.localBranch;
+	git.ref = checkout.localBranch ? `refs/heads/${checkout.localBranch}` : null;
+	git.prNumber = null;
+	git.defaultBranch = null;
+	return NO_EFFECT;
+}
+
+/** Whether the checkout is a merge commit with `head` among its parents — how
+ *  `refs/pull/N/merge` looks. Reads the raw commit object, so it works in a
+ *  depth-1 clone where the parents themselves are absent. */
+function isMergeOf(checkout: Checkout, head: string | null): boolean {
+	if (!head) return false;
+	const parents = commitParents(checkout.cwd, checkout.localHead);
+	return parents.length >= 2 && parents.includes(head);
+}
+
+function commitParents(cwd: string, sha: string | null): string[] {
+	if (!sha || !/^[0-9a-f]{7,64}$/i.test(sha)) return [];
+	const raw = gitOut(cwd, ["cat-file", "commit", sha]);
+	if (!raw) return [];
+	const parents: string[] = [];
+	for (const line of raw.split("\n")) {
+		if (line === "") break; // end of headers
+		if (line.startsWith("parent ")) parents.push(line.slice("parent ".length).trim());
+	}
+	return parents;
 }
 
 function githubActionsRun(env: NodeJS.ProcessEnv, eventName: string, repository: string | null): ReportCiProvenance {

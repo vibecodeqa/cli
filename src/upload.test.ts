@@ -115,18 +115,30 @@ describe("upload sha", () => {
 	};
 
 	it("uses the PR head sha on pull_request, not the merge sha", () => {
-		const { dir } = repoWithCommit();
+		const { dir, head: mergeSha } = repoWithCommit();
 		const env = {
 			GITHUB_ACTIONS: "true",
 			GITHUB_EVENT_NAME: "pull_request",
 			GITHUB_EVENT_PATH: join(EVENTS, "pull_request.json"),
-			GITHUB_SHA: "1".repeat(40),
+			GITHUB_SHA: mergeSha,
 		};
 		expect(currentGitSha(dir, env)).toBe("a".repeat(40));
 	});
 
-	it("uses GITHUB_SHA on push", () => {
-		const { dir } = repoWithCommit();
+	it("uses the checked-out commit on push", () => {
+		const { dir, head } = repoWithCommit();
+		const env = {
+			GITHUB_ACTIONS: "true",
+			GITHUB_EVENT_NAME: "push",
+			GITHUB_EVENT_PATH: join(EVENTS, "push.json"),
+			GITHUB_SHA: head,
+		};
+		expect(currentGitSha(dir, env)).toBe(head);
+	});
+
+	it("uses GITHUB_SHA on push when there is no local git", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-upload-nogit-"));
+		dirs.push(dir);
 		const env = {
 			GITHUB_ACTIONS: "true",
 			GITHUB_EVENT_NAME: "push",

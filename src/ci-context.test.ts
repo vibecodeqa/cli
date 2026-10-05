@@ -49,6 +49,13 @@ function gitRepo(branch = "trunk"): { dir: string; head: string; git: (...args: 
 	return { dir, head: git("rev-parse", "HEAD"), git };
 }
 
+/** A directory with no git: the scanned commit can only come from GITHUB_SHA. */
+function noGitDir(): string {
+	const dir = mkdtempSync(join(tmpdir(), "vcqa-ci-context-nogit-"));
+	dirs.push(dir);
+	return dir;
+}
+
 function actionsEnv(eventName: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
 	return {
 		GITHUB_ACTIONS: "true",
@@ -133,8 +140,8 @@ describe("detectCiContext — GitHub Actions", () => {
 		expect(ctx.headShaNote).toBeNull();
 	});
 
-	it("push: baseSha = before, branch from GITHUB_REF, commitDate falls back to head_commit", () => {
-		const { dir } = gitRepo();
+	it("push without local git: sha = GITHUB_SHA, baseSha = before, commitDate falls back to head_commit", () => {
+		const dir = noGitDir();
 		const ctx = detectCiContext(dir, actionsEnv("push", { GITHUB_SHA: PUSH_SHA, GITHUB_REF: "refs/heads/main", GITHUB_REF_NAME: "main" }));
 		expect(ctx.git).toEqual({
 			sha: PUSH_SHA,
@@ -150,7 +157,7 @@ describe("detectCiContext — GitHub Actions", () => {
 	});
 
 	it("push of a new branch: all-zero before → baseSha null", () => {
-		const { dir } = gitRepo();
+		const dir = noGitDir();
 		const ctx = detectCiContext(
 			dir,
 			actionsEnv("push", {
@@ -165,12 +172,9 @@ describe("detectCiContext — GitHub Actions", () => {
 	});
 
 	it("push of a tag: no branch", () => {
-		const { dir, git } = gitRepo();
+		const { dir, head, git } = gitRepo();
 		git("checkout", "-q", "--detach");
-		const ctx = detectCiContext(
-			dir,
-			actionsEnv("push", { GITHUB_SHA: PUSH_SHA, GITHUB_REF: "refs/tags/v1.0.0", GITHUB_REF_NAME: "v1.0.0" }),
-		);
+		const ctx = detectCiContext(dir, actionsEnv("push", { GITHUB_SHA: head, GITHUB_REF: "refs/tags/v1.0.0", GITHUB_REF_NAME: "v1.0.0" }));
 		expect(ctx.git.branch).toBeNull();
 		expect(ctx.git.ref).toBe("refs/tags/v1.0.0");
 	});
@@ -187,7 +191,7 @@ describe("detectCiContext — GitHub Actions", () => {
 	});
 
 	it("merge_group: headSha = merge_group.head_sha, baseSha = merge_group.base_sha", () => {
-		const { dir } = gitRepo();
+		const dir = noGitDir();
 		const queueRef = `refs/heads/gh-readonly-queue/main/pr-42-${BASE_SHA}`;
 		const ctx = detectCiContext(
 			dir,
@@ -246,6 +250,133 @@ describe("detectCiContext — GitHub Actions", () => {
 		const { dir } = gitRepo();
 		const ctx = detectCiContext(dir, { GITHUB_ACTIONS: "true", GITHUB_EVENT_NAME: "push" });
 		expect(ctx.ci).toEqual({ provider: "github-actions", runId: "", runAttempt: 1, runUrl: "", event: "push", actor: null });
+	});
+});
+
+/** A repo shaped like a PR: `main` moved on after `feature/login` branched,
+ *  and `merge` is GitHub's refs/pull/N/merge — parents [base tip, head]. */
+function prRepo(): {
+	dir: string;
+	base: string;
+	head: string;
+	merge: string;
+	git: (...args: string[]) => string;
+	eventPath: (number: number, headRef: string) => string;
+} {
+	const { dir, git } = gitRepo("main");
+	git("checkout", "-q", "-b", "feature/login");
+	writeFileSync(join(dir, "b.txt"), "b\n");
+	git("add", "b.txt");
+	git("commit", "-q", "-m", "head");
+	const head = git("rev-parse", "HEAD");
+	git("checkout", "-q", "main");
+	writeFileSync(join(dir, "c.txt"), "c\n");
+	git("add", "c.txt");
+	git("commit", "-q", "-m", "base moved");
+	const base = git("rev-parse", "HEAD");
+	git("checkout", "-q", "--detach", base);
+	git("merge", "-q", "--no-ff", "-m", "Merge head into base", head);
+	const merge = git("rev-parse", "HEAD");
+	const eventPath = (number: number, headRef: string) => {
+		const path = join(dir, `event-${number}.json`);
+		writeFileSync(
+			path,
+			JSON.stringify({
+				number,
+				pull_request: { number, head: { ref: headRef, sha: head }, base: { ref: "main", sha: base } },
+				repository: { default_branch: "main" },
+			}),
+		);
+		return path;
+	};
+	return { dir, base, head, merge, git, eventPath };
+}
+
+describe("detectCiContext — the checkout, not GITHUB_SHA, is the scanned commit", () => {
+	it("pull_request, default merge checkout: sha = merge, headSha = PR head", () => {
+		const { dir, base, head, merge, eventPath } = prRepo();
+		const env = actionsEnv("pull_request", {
+			GITHUB_EVENT_PATH: eventPath(42, "feature/login"),
+			GITHUB_SHA: merge,
+			GITHUB_REF: "refs/pull/42/merge",
+		});
+		const ctx = detectCiContext(dir, env);
+		expect(ctx.git).toMatchObject({ sha: merge, headSha: head, baseSha: base, branch: "feature/login", prNumber: 42 });
+		expect(currentGitSha(dir, env)).toBe(head);
+	});
+
+	it("pull_request with `ref: pull_request.head.sha` checked out: sha = PR head, not the merge sha", () => {
+		const { dir, base, head, merge, git, eventPath } = prRepo();
+		git("checkout", "-q", "--detach", head);
+		const env = actionsEnv("pull_request", {
+			GITHUB_EVENT_PATH: eventPath(42, "feature/login"),
+			GITHUB_SHA: merge,
+			GITHUB_REF: "refs/pull/42/merge",
+		});
+		const ctx = detectCiContext(dir, env);
+		expect(ctx.git).toMatchObject({ sha: head, headSha: head, baseSha: base, branch: "feature/login", prNumber: 42 });
+		expect(currentGitSha(dir, env)).toBe(head);
+	});
+
+	it("pull_request_target with the merge ref checked out: describes the PR, status goes to the head, not the base tip", () => {
+		const { dir, base, head, merge, eventPath } = prRepo();
+		const env = actionsEnv("pull_request_target", {
+			GITHUB_EVENT_PATH: eventPath(43, "patch-1"),
+			GITHUB_SHA: base, // always the base tip on pull_request_target
+			GITHUB_REF: "refs/heads/main",
+			GITHUB_HEAD_REF: "patch-1",
+			GITHUB_BASE_REF: "main",
+		});
+		const ctx = detectCiContext(dir, env);
+		expect(ctx.git).toMatchObject({ sha: merge, headSha: head, baseSha: base, branch: "patch-1", prNumber: 43 });
+		expect(ctx.headShaNote).toBeNull();
+		expect(currentGitSha(dir, env)).toBe(head);
+		expect(currentGitSha(dir, env)).not.toBe(base);
+	});
+
+	it("pull_request_target merge checkout is recognised in a depth-1 clone (parents absent)", () => {
+		const { dir: origin, base, head, merge, git, eventPath } = prRepo();
+		git("branch", "pr-merge", merge);
+		const clone = mkdtempSync(join(tmpdir(), "vcqa-ci-context-shallow-"));
+		dirs.push(clone);
+		execFileSync("git", ["clone", "-q", "--depth", "1", "--branch", "pr-merge", `file://${origin}`, clone], { stdio: "pipe" });
+		const env = actionsEnv("pull_request_target", {
+			GITHUB_EVENT_PATH: eventPath(43, "patch-1"),
+			GITHUB_SHA: base,
+			GITHUB_REF: "refs/heads/main",
+		});
+		const ctx = detectCiContext(clone, env);
+		expect(ctx.git).toMatchObject({ sha: merge, headSha: head, prNumber: 43 });
+		expect(ctx.git.commitDate).toBeNull(); // the head object is not in the clone
+	});
+
+	it("a second repository checked out under `path:` is described from its own git, not the event", () => {
+		const { dir, head } = gitRepo("tooling");
+		const env = actionsEnv("pull_request", {
+			GITHUB_SHA: "1".repeat(40), // the workflow repo's merge commit
+			GITHUB_REF: "refs/pull/42/merge",
+			GITHUB_HEAD_REF: "feature/login",
+		});
+		const ctx = detectCiContext(dir, env);
+		expect(ctx.git).toEqual({
+			sha: head,
+			headSha: head,
+			baseSha: null,
+			branch: "tooling",
+			ref: "refs/heads/tooling",
+			prNumber: null,
+			commitDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+			defaultBranch: null,
+		});
+		expect(ctx.ci?.runId).toBe("123456"); // still the same run
+		expect(currentGitSha(dir, env)).toBe(head);
+	});
+
+	it("a second repository on a push run is described from its own git too", () => {
+		const { dir, head, git } = gitRepo();
+		git("checkout", "-q", "--detach");
+		const ctx = detectCiContext(dir, actionsEnv("push", { GITHUB_SHA: PUSH_SHA, GITHUB_REF: "refs/heads/main" }));
+		expect(ctx.git).toMatchObject({ sha: head, headSha: head, baseSha: null, branch: null, ref: null, defaultBranch: null });
 	});
 });
 
