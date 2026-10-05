@@ -1,7 +1,7 @@
 /** Post scan results as a GitHub PR comment. Upserts to avoid duplicates. */
 
 import { execSync } from "node:child_process";
-import { detectCiContext } from "./ci-context.js";
+import { type CiContext, detectCiContext } from "./ci-context.js";
 import { computeDelta } from "./delta.js";
 import type { TrendDelta } from "./trend.js";
 import type { VibeReport } from "./types.js";
@@ -14,8 +14,14 @@ interface PRInfo {
 	prNumber: number;
 }
 
-export async function postPRComment(report: VibeReport, trend: TrendDelta | null, cwd: string, prevReport?: VibeReport): Promise<boolean> {
-	const pr = detectPR(cwd);
+export async function postPRComment(
+	report: VibeReport,
+	trend: TrendDelta | null,
+	cwd: string,
+	prevReport?: VibeReport,
+	ctx?: CiContext,
+): Promise<boolean> {
+	const pr = detectPR(cwd, ctx);
 	if (!pr) return false;
 
 	const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
@@ -33,10 +39,9 @@ export async function postPRComment(report: VibeReport, trend: TrendDelta | null
 	return true;
 }
 
-export function detectPR(cwd: string, env: NodeJS.ProcessEnv = process.env): PRInfo | null {
+export function detectPR(cwd: string, ctx: CiContext = detectCiContext(cwd)): PRInfo | null {
 	// 1. GitHub Actions: the event payload names the PR (pull_request*), or the
 	//    issue a comment was left on (issue_comment on a PR).
-	const ctx = detectCiContext(cwd, env);
 	const prNumber = ctx.git.prNumber ?? ctx.event?.pull_request?.number ?? ctx.event?.issue?.number;
 	if (prNumber && ctx.repository) {
 		const parts = ctx.repository.split("/");

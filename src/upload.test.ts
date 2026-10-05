@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { detectCiContext } from "./ci-context.js";
 import type { VibeReport } from "./types.js";
 import { buildReportUploadPayload, currentGitSha, repoSlugFromReport } from "./upload.js";
 
@@ -122,7 +123,7 @@ describe("upload sha", () => {
 			GITHUB_EVENT_PATH: join(EVENTS, "pull_request.json"),
 			GITHUB_SHA: mergeSha,
 		};
-		expect(currentGitSha(dir, env)).toBe("a".repeat(40));
+		expect(currentGitSha(dir, detectCiContext(dir, env))).toBe("a".repeat(40));
 	});
 
 	it("uses the checked-out commit on push", () => {
@@ -133,7 +134,7 @@ describe("upload sha", () => {
 			GITHUB_EVENT_PATH: join(EVENTS, "push.json"),
 			GITHUB_SHA: head,
 		};
-		expect(currentGitSha(dir, env)).toBe(head);
+		expect(currentGitSha(dir, detectCiContext(dir, env))).toBe(head);
 	});
 
 	it("uses GITHUB_SHA on push when there is no local git", () => {
@@ -145,11 +146,11 @@ describe("upload sha", () => {
 			GITHUB_EVENT_PATH: join(EVENTS, "push.json"),
 			GITHUB_SHA: "c".repeat(40),
 		};
-		expect(currentGitSha(dir, env)).toBe("c".repeat(40));
+		expect(currentGitSha(dir, detectCiContext(dir, env))).toBe("c".repeat(40));
 	});
 
 	it("falls back to the local HEAD outside CI", () => {
 		const { dir, head } = repoWithCommit();
-		expect(currentGitSha(dir, {})).toBe(head);
+		expect(currentGitSha(dir, detectCiContext(dir, {}))).toBe(head);
 	});
 });

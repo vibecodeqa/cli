@@ -412,6 +412,29 @@ describe("scan provenance (meta.git / meta.ci / meta.scan)", () => {
 		expect(html).not.toContain("/blob//");
 	}, 30_000);
 
+	it("uses the caller's ciContext instead of detecting it again", async () => {
+		const git = {
+			sha: "f".repeat(40),
+			headSha: "f".repeat(40),
+			baseSha: null,
+			branch: "given",
+			ref: null,
+			prNumber: null,
+			commitDate: null,
+			defaultBranch: null,
+		};
+		const ci = { provider: "github-actions", runId: "5", runAttempt: 1, runUrl: "", event: "push", actor: null };
+		const report = await scan(repo, {
+			skipTests: true,
+			checks: ["structure"],
+			ciContext: { git, ci, repository: null, event: null, headShaNote: null },
+		});
+		const meta = report.meta as typeof report.meta & Record<string, unknown>;
+		expect(meta.git).toEqual(git);
+		expect(meta.ci).toEqual(ci);
+		expect(report.meta.branch).toBe("given");
+	}, 30_000);
+
 	it("pull_request run: meta.branch is the PR head ref, git.sha the merge commit", async () => {
 		const mergeSha = git("rev-parse", "HEAD");
 		Object.assign(process.env, {

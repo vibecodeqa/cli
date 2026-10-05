@@ -309,7 +309,7 @@ describe("detectCiContext — the checkout, not GITHUB_SHA, is the scanned commi
 		});
 		const ctx = detectCiContext(dir, env);
 		expect(ctx.git).toMatchObject({ sha: merge, headSha: head, baseSha: base, branch: "feature/login", prNumber: 42 });
-		expect(currentGitSha(dir, env)).toBe(head);
+		expect(currentGitSha(dir, detectCiContext(dir, env))).toBe(head);
 	});
 
 	it("pull_request with `ref: pull_request.head.sha` checked out: sha = PR head, not the merge sha", () => {
@@ -322,7 +322,7 @@ describe("detectCiContext — the checkout, not GITHUB_SHA, is the scanned commi
 		});
 		const ctx = detectCiContext(dir, env);
 		expect(ctx.git).toMatchObject({ sha: head, headSha: head, baseSha: base, branch: "feature/login", prNumber: 42 });
-		expect(currentGitSha(dir, env)).toBe(head);
+		expect(currentGitSha(dir, detectCiContext(dir, env))).toBe(head);
 	});
 
 	it("pull_request_target with the merge ref checked out: describes the PR, status goes to the head, not the base tip", () => {
@@ -337,8 +337,8 @@ describe("detectCiContext — the checkout, not GITHUB_SHA, is the scanned commi
 		const ctx = detectCiContext(dir, env);
 		expect(ctx.git).toMatchObject({ sha: merge, headSha: head, baseSha: base, branch: "patch-1", prNumber: 43 });
 		expect(ctx.headShaNote).toBeNull();
-		expect(currentGitSha(dir, env)).toBe(head);
-		expect(currentGitSha(dir, env)).not.toBe(base);
+		expect(currentGitSha(dir, detectCiContext(dir, env))).toBe(head);
+		expect(currentGitSha(dir, detectCiContext(dir, env))).not.toBe(base);
 	});
 
 	it("pull_request_target merge checkout is recognised in a depth-1 clone (parents absent)", () => {
@@ -376,7 +376,7 @@ describe("detectCiContext — the checkout, not GITHUB_SHA, is the scanned commi
 			defaultBranch: null,
 		});
 		expect(ctx.ci?.runId).toBe("123456"); // still the same run
-		expect(currentGitSha(dir, env)).toBe(head);
+		expect(currentGitSha(dir, detectCiContext(dir, env))).toBe(head);
 	});
 
 	it("a second repository on a push run is described from its own git too", () => {
@@ -400,8 +400,8 @@ describe("detectCiContext — pull_request without a readable event payload", ()
 		const ctx = detectCiContext(dir, env);
 		expect(ctx.event).toBeNull();
 		expect(ctx.git).toMatchObject({ sha: merge, headSha: head, baseSha: base, branch: "feature/login", prNumber: 42 });
-		expect(currentGitSha(dir, env)).toBe(head);
-		expect(detectPR(dir, env)).toEqual({ owner: "octo-org", repo: "widgets", prNumber: 42 });
+		expect(currentGitSha(dir, detectCiContext(dir, env))).toBe(head);
+		expect(detectPR(dir, detectCiContext(dir, env))).toEqual({ owner: "octo-org", repo: "widgets", prNumber: 42 });
 	});
 
 	it("without local git still records the PR number and branch", () => {
@@ -422,15 +422,15 @@ describe("consumers share the context", () => {
 	it("--upload and --pr-comment agree with the report on a pull_request run", () => {
 		const { dir, head: mergeSha } = gitRepo();
 		const env = actionsEnv("pull_request", { GITHUB_SHA: mergeSha, GITHUB_REF: "refs/pull/42/merge", GITHUB_HEAD_REF: "feature/login" });
-		expect(currentGitSha(dir, env)).toBe(HEAD_SHA);
-		expect(detectPR(dir, env)).toEqual({ owner: "octo-org", repo: "widgets", prNumber: 42 });
+		expect(currentGitSha(dir, detectCiContext(dir, env))).toBe(HEAD_SHA);
+		expect(detectPR(dir, detectCiContext(dir, env))).toEqual({ owner: "octo-org", repo: "widgets", prNumber: 42 });
 	});
 
 	it("--pr-comment keeps the issue fallback (issue_comment on a PR)", () => {
 		const { dir } = gitRepo();
 		const eventPath = join(dir, "issue_comment.json");
 		writeFileSync(eventPath, JSON.stringify({ action: "created", issue: { number: 7, pull_request: {} }, comment: { body: "/vcqa" } }));
-		expect(detectPR(dir, actionsEnv("issue_comment", { GITHUB_EVENT_PATH: eventPath }))).toEqual({
+		expect(detectPR(dir, detectCiContext(dir, actionsEnv("issue_comment", { GITHUB_EVENT_PATH: eventPath })))).toEqual({
 			owner: "octo-org",
 			repo: "widgets",
 			prNumber: 7,
@@ -440,6 +440,6 @@ describe("consumers share the context", () => {
 	it("pull_request_target on the base checkout uploads against the scanned base commit", () => {
 		const { dir, head: baseTip } = gitRepo("main");
 		const env = actionsEnv("pull_request_target", { GITHUB_SHA: baseTip, GITHUB_REF: "refs/heads/main" });
-		expect(currentGitSha(dir, env)).toBe(baseTip);
+		expect(currentGitSha(dir, detectCiContext(dir, env))).toBe(baseTip);
 	});
 });

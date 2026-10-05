@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { getCheckMeta } from "./check-meta.js";
+import { type CiContext, detectCiContext } from "./ci-context.js";
 import { runExplain } from "./commands/explain.js";
 import { runFix } from "./commands/fix.js";
 import { runInit } from "./commands/init.js";
@@ -441,7 +442,7 @@ async function writeOutputs(report: VibeReport, outputDir: string, flags: Parsed
 
 // ── Upload ──
 
-async function handleUpload(report: VibeReport, cwd: string, quietMode: boolean): Promise<void> {
+async function handleUpload(report: VibeReport, cwd: string, quietMode: boolean, ciContext: CiContext): Promise<void> {
 	const token = process.env.VCQA_TOKEN || process.env.GITHUB_TOKEN;
 	if (!token) {
 		if (!quietMode) console.log("  \x1b[33m\u26a0 Set VCQA_TOKEN to enable upload\x1b[0m");
@@ -450,7 +451,7 @@ async function handleUpload(report: VibeReport, cwd: string, quietMode: boolean)
 	// buildReportUploadPayload owns the repo-slug rule and returns null when
 	// there is no remote to attribute the report to. Deriving the slug a second
 	// time here, just to explain the refusal, would be a second copy of it.
-	const payload = buildReportUploadPayload(report, currentGitSha(cwd));
+	const payload = buildReportUploadPayload(report, currentGitSha(cwd, ciContext));
 	if (!payload) {
 		if (!quietMode) console.log("  \x1b[33m\u26a0 No git remote — can't upload\x1b[0m");
 		return;
@@ -630,11 +631,16 @@ async function main() {
 	const quietMode = jsonOnly || flags.markdownMode;
 	if (!quietMode) printHeader(cwd, stack, workspace);
 
+	// Where this run is, detected once: the report, --upload and --pr-comment
+	// must describe the same commit, and each detection spawns git.
+	const ciContext = detectCiContext(cwd);
+
 	// Run scan using core API with progress output
 	const report = await scan(cwd, {
 		skipTests,
 		config,
 		diffBase,
+		ciContext,
 		onProgress: quietMode
 			? undefined
 			: (check, result) => {
@@ -687,10 +693,10 @@ async function main() {
 	}
 
 	if (flags.annotations) emitAnnotations(report);
-	if (flags.uploadMode) await handleUpload(report, cwd, quietMode);
+	if (flags.uploadMode) await handleUpload(report, cwd, quietMode, ciContext);
 
 	if (flags.prComment) {
-		const posted = await postPRComment(report, trend, cwd, prevReport);
+		const posted = await postPRComment(report, trend, cwd, prevReport, ciContext);
 		if (!quietMode) {
 			if (posted) console.log("  \x1b[32m\u2713 PR comment posted\x1b[0m");
 			else console.log("  \x1b[2mNo PR detected or no GITHUB_TOKEN — skipping PR comment\x1b[0m");
