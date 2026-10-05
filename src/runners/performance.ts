@@ -167,6 +167,19 @@ export function runPerformance(cwd: string, workspace?: WorkspaceInfo, inventory
 	let unusedFiles = 0;
 	let unusedDeps = 0;
 	const { findings: knipResult, unavailable: knipUnavailable } = tryKnip(cwd, workspace);
+	if (knipUnavailable.length > 0) {
+		// Without this, a fresh checkout scores `performance` with no dead-code
+		// penalty and nothing on the check says why — it reads as "no dead code"
+		// and can outscore the same code installed (#100). Info only: it does not
+		// change the score, which is computed from the penalties below.
+		const folders = knipUnavailable.map((u) => (u.path === "." ? ". (root)" : u.path)).join(", ");
+		const commands = [...new Set(knipUnavailable.map((u) => u.install))].map((c) => `\`${c}\``).join(" or ");
+		issues.push({
+			severity: "info",
+			message: `Dead code not measured in ${folders} — dependencies not installed${commands ? ` (run ${commands})` : ""}; this score does not cover dead code there`,
+			rule: "dead-code-unavailable",
+		});
+	}
 	if (knipResult) {
 		deadExports = knipResult.exports;
 		unusedFiles = knipResult.files;
@@ -495,7 +508,7 @@ export function knipRoots(cwd: string, workspace?: WorkspaceInfo): { dir: string
 interface KnipOutcome {
 	findings: (KnipFindings & { files: number; exports: number; deps: number; configured: boolean; excluded: number }) | null;
 	/** Roots knip was not run in because their dependencies are not installed. */
-	unavailable: Array<{ path: string; reason: string }>;
+	unavailable: Array<{ path: string; reason: string; install: string }>;
 }
 
 function tryKnip(cwd: string, workspace?: WorkspaceInfo): KnipOutcome {
@@ -511,7 +524,11 @@ function tryKnip(cwd: string, workspace?: WorkspaceInfo): KnipOutcome {
 		// missing install, not the code (#100). Do not run it at all.
 		const deps = probeDependencies(root.dir, cwd);
 		if (!deps.installed) {
-			unavailable.push({ path: root.rel || ".", reason: dependenciesMissingReason(deps.packageManager) });
+			unavailable.push({
+				path: root.rel || ".",
+				reason: dependenciesMissingReason(deps.packageManager),
+				install: `${deps.packageManager} install`,
+			});
 			continue;
 		}
 		const { stdout } = run("npx knip --reporter json 2>/dev/null || true", root.dir, 60_000);

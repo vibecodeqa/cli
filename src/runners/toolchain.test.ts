@@ -153,9 +153,16 @@ describe("TypeScript + ESLint fixture without node_modules (#100)", () => {
 		const perf = runPerformance(dir, detectWorkspace(dir));
 		const details = perf.details as Record<string, unknown>;
 		expect(details.deadCodeTool).toBeUndefined();
-		expect(details.deadCodeUnavailable).toEqual([{ path: ".", reason }]);
+		expect(details.deadCodeUnavailable).toEqual([{ path: ".", reason, install: "pnpm install" }]);
 		expect(perf.score).toBe(100);
 		expect(details.unavailable).toBeUndefined();
+		// The skipped part is visible on the check itself, not only in details.
+		expect(perf.issues).toContainEqual({
+			severity: "info",
+			rule: "dead-code-unavailable",
+			message:
+				"Dead code not measured in . (root) — dependencies not installed (run `pnpm install`); this score does not cover dead code there",
+		});
 
 		const deadCode = deadCodeCheckFromPerformance(perf);
 		expect(deadCode.name).toBe("dead-code");
@@ -182,6 +189,7 @@ describe("the same fixture with dependencies installed (#100)", () => {
 		const perf = runPerformance(dir, workspace);
 		expect(perf.details).toMatchObject({ deadCodeTool: "knip", unusedFiles: 1 });
 		expect((perf.details as Record<string, unknown>).deadCodeUnavailable).toBeUndefined();
+		expect(perf.issues.some((i) => i.rule === "dead-code-unavailable")).toBe(false);
 		expect(deadCodeCheckFromPerformance(perf).details.unavailable).toBeUndefined();
 
 		expect(npxCalls().map((c) => c.cmd.split(" ").slice(0, 2).join(" "))).toEqual(["npx tsc", "npx eslint", "npx knip"]);
@@ -343,12 +351,13 @@ describe("the probe stops at the project being scanned (#100, review round 1)", 
 		expect(probeDependencies(web, web).installed).toBe(true);
 	});
 
-	it("bounds knip the same way", () => {
+	it("bounds knip the same way and says so on the performance check", () => {
 		const { child } = nestedUnderInstalledParent();
 		const perf = runPerformance(child, detectWorkspace(child));
 		expect((perf.details as Record<string, unknown>).deadCodeUnavailable).toEqual([
-			{ path: ".", reason: "dependencies not installed — run `npm install`" },
+			{ path: ".", reason: "dependencies not installed — run `npm install`", install: "npm install" },
 		]);
+		expect(perf.issues.filter((i) => i.rule === "dead-code-unavailable")).toHaveLength(1);
 		expect(npxCalls()).toEqual([]);
 	});
 });
