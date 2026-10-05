@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.57.0 — 2026-10-06
+
+### Security
+- Tool output, test-failure text, report metadata and HTML source snippets are now redacted before anything is written, printed, uploaded or posted; gitleaks runs with `--redact`. Upgrade from 0.52.0–0.56.0 and delete old `.vibe-check/` folders. A security advisory with details follows this release.
 
 ### A check that did not run is no longer scored, diffed or counted
 A not-run check carries a placeholder `score: 100` and a crashed runner a
