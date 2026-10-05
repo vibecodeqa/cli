@@ -10,7 +10,7 @@
  */
 
 import { execSync } from "node:child_process";
-import { redactSecrets } from "./redact.js";
+import { redactSecrets, redactToolOutput } from "./redact.js";
 
 export interface ToolRun {
 	/** Best-effort tool name, taken from the command's first word. */
@@ -80,14 +80,12 @@ function toolNameOf(cmd: string): string {
 	return first;
 }
 
-/** Output as recorded: redacted on the FULL text, then capped. Cutting first
- *  could split a value so no pattern matches the half that survives. */
-function recordedOutput(text: string): string {
-	return redactSecrets(text.trim()).slice(0, MAX_OUTPUT);
-}
-
+/** The single place a run enters the log. Callers pass the RAW command and
+ *  output; credential values are redacted here, before the cap, so no recorder
+ *  can store an unredacted log or a value cut in half by truncation. */
 function record(entry: ToolRun): void {
-	if (recording) buffer.push(entry);
+	if (!recording) return;
+	buffer.push({ ...entry, command: redactSecrets(entry.command), output: redactToolOutput(entry.output, MAX_OUTPUT) });
 }
 
 function normalizedContext(context: ToolRunContext): ToolRunContext {
@@ -135,7 +133,7 @@ export function run(cmd: string, cwd: string, timeout = 60_000, context: ToolRun
 			exitCode: 0,
 			ok: true,
 			durationMs: Date.now() - started,
-			output: recordedOutput(stdout),
+			output: stdout,
 			notFound: false,
 		});
 		return { stdout, ok: true };
@@ -150,7 +148,7 @@ export function run(cmd: string, cwd: string, timeout = 60_000, context: ToolRun
 			exitCode: typeof e?.status === "number" ? e.status : null,
 			ok: false,
 			durationMs: Date.now() - started,
-			output: recordedOutput(output),
+			output,
 			notFound: /not found|ENOENT|command not found/i.test(output),
 		});
 		return { stdout: output, ok: false };

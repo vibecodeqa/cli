@@ -44,6 +44,7 @@ import { runLint } from "./runners/lint.js";
 import { runMemorySafety } from "./runners/memory-safety.js";
 import { deadCodeCheckFromPerformance, runPerformance } from "./runners/performance.js";
 import { runReact } from "./runners/react.js";
+import { redactDeep } from "./runners/redact.js";
 import { runSecrets } from "./runners/secrets.js";
 import { runSecurity } from "./runners/security.js";
 import { runSqliteD1 } from "./runners/sqlite-d1.js";
@@ -284,6 +285,11 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 			});
 		}
 
+		// One choke point for credential values: every string a check returns —
+		// details (parsed test failures, tool logs, commands), issue messages,
+		// snippets — is redacted before anything can render, write or upload it.
+		result = redactDeep(result);
+
 		checks.push(result);
 		options.onProgress?.(runner.name, result, i, total);
 	}
@@ -301,7 +307,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		score,
 		grade,
 		checks,
-		meta: {
+		meta: redactDeep({
 			cwd: resolvedCwd,
 			node: process.version,
 			duration: Date.now() - start,
@@ -315,7 +321,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 			analyzerSnapshots: buildAnalyzerSnapshots(checks),
 			repoUrl,
 			branch,
-		},
+		}),
 	};
 }
 

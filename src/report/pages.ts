@@ -15,6 +15,7 @@ import {
 	generateSequenceDiagram,
 } from "../runners/architecture.js";
 import type { FeatureCluster } from "../runners/dead-patterns.js";
+import { redactSecrets } from "../runners/redact.js";
 import type { CheckResult, ProjectContext, ProjectDiscoveryEvidence, VibeReport } from "../types.js";
 import { det, e, gc, pc } from "./components.js";
 import { buildPyramid, buildRadar, buildRing, buildTimeline } from "./svg.js";
@@ -119,22 +120,32 @@ function scopePayload(report: VibeReport): string {
 	);
 }
 
+/** Findings whose source line is a credential: no source block for these. */
+function isCredentialFinding(check: string, rule: string | undefined): boolean {
+	return check === "secrets" || rule === "CWE-598" || rule === "CWE-798" || /secret|credential|password|token/i.test(rule ?? "");
+}
+
 /** Read source lines around an issue for inline display in the report. */
 function readSourceSnippet(cwd: string, file: string, line: number, radius = 4): string | null {
 	try {
 		const fullPath = join(cwd, file);
 		if (!existsSync(fullPath)) return null;
 		const content = readFileSync(fullPath, "utf-8");
-		const lines = content.split("\n");
+		const all = content.split("\n");
 		const target = line - 1;
 		const start = Math.max(0, target - radius);
-		const end = Math.min(lines.length, target + radius + 1);
+		const end = Math.min(all.length, target + radius + 1);
+		// A hardcoded credential near any finding would otherwise be copied into
+		// the report. If redaction folds lines together (a PEM body), show nothing.
+		const window = all.slice(start, end);
+		const redacted = redactSecrets(window.join("\n")).split("\n");
+		if (redacted.length !== window.length) return null;
 		let html = "";
 		for (let i = start; i < end; i++) {
 			const num = String(i + 1).padStart(4);
 			const hl = i === target;
 			const cls = hl ? "src-hl" : "src-ln";
-			html += `<div class="${cls}"><span class="src-num">${num}</span>${e(lines[i])}</div>`;
+			html += `<div class="${cls}"><span class="src-num">${num}</span>${e(redacted[i - start])}</div>`;
 		}
 		return html;
 	} catch {
@@ -483,8 +494,8 @@ export function categoryPage(cs: CatScore, fl: FL, allChecks?: CheckResult[], cw
 						: "";
 					// Source code snippet (collapsible)
 					let srcBlock = "";
-					// Never for `secrets`: the line around a finding is the credential itself.
-					if (cwd && iss.line && typeof iss.file === "string" && c.name !== "secrets") {
+					// Never for credential findings: the line around one is the credential itself.
+					if (cwd && iss.line && typeof iss.file === "string" && !isCredentialFinding(c.name, iss.rule)) {
 						const src = readSourceSnippet(cwd, iss.file, iss.line);
 						if (src) {
 							const fixPrompt = `Fix this ${iss.severity} in ${iss.file}:${iss.line}\n${iss.message}${iss.rule ? ` (${iss.rule})` : ""}\nCheck: ${c.name}\n\nAnalyze the code, explain the issue, and provide the fix.`;

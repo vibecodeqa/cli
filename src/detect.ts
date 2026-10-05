@@ -1151,7 +1151,9 @@ export function detectRepoUrl(cwd: string): { repoUrl: string | null; branch: st
 			.replace(/^git@bitbucket\.org:/, "https://bitbucket.org/")
 			.replace(/^ssh:\/\/git@github\.com\//, "https://github.com/")
 			.replace(/^ssh:\/\/git@gitlab\.com\//, "https://gitlab.com/")
-			.replace(/\.git$/, "");
+			.replace(/\.git$/, "")
+			// CI checkouts put tokens in the remote (https://gitlab-ci-token:<token>@host/…).
+			.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]+@/i, "$1");
 		return { repoUrl: url, branch };
 	} catch {
 		return { repoUrl: null, branch: "main" };

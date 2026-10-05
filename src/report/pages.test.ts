@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { fakeGithubPat, leakedWindows } from "../runners/fake-credentials.test-helper.js";
 import type { CheckResult, VibeReport } from "../types.js";
 
 // We test categoryPage indirectly through generatePages
@@ -152,6 +153,29 @@ describe("report generation", () => {
 		expect(foundationsPage).toContain("src-hl");
 		expect(foundationsPage).toContain("// do stuff");
 		expect(foundationsPage).toContain("Copy fix prompt");
+	});
+
+	it("redacts credentials in any check's source snippet, and shows none for credential findings", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-report-"));
+		mkdirSync(join(dir, "src"), { recursive: true });
+		const t = fakeGithubPat();
+		writeFileSync(join(dir, "src/client.ts"), `const token = "${t.value}";\nconsole.log("hi");\nexport {};\n`);
+		const issueCheck = (name: string, rule: string, line: number): CheckResult => ({
+			name,
+			score: 80,
+			grade: "B",
+			details: {},
+			duration: 10,
+			issues: [{ severity: "warning", message: "finding", file: "src/client.ts", line, rule }],
+		});
+		const report = makeReport(dir, [issueCheck("standards", "no-console", 2), issueCheck("security", "CWE-598", 1)]);
+		const pages = generatePages(report);
+		const foundations = pages.get("foundations.html") || "";
+		expect(foundations).toContain("src-block"); // still shown, redacted
+		expect(foundations).toContain("console.log");
+		expect(foundations).toContain("[REDACTED]");
+		expect(pages.get("security.html") || "").not.toContain('<div class="src-block">');
+		for (const html of pages.values()) expect(leakedWindows(t.body, html)).toEqual([]);
 	});
 
 	it("handles missing source files gracefully", () => {

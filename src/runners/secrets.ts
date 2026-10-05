@@ -4,7 +4,7 @@
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { lintSource } from "@secretlint/core";
 import { creator as secretlintPreset } from "@secretlint/secretlint-rule-preset-recommend";
 import { type FileInventory, inventoryAllFiles } from "../file-inventory.js";
@@ -95,12 +95,32 @@ function secretlintKind(msg: { messageId?: string; ruleId?: string }): string {
 	return (msg.ruleId ?? "secret").replace(/.*secretlint-rule-/, "");
 }
 
-/** gitleaks config for one run: the project's own `.gitleaks.toml` (or gitleaks'
- *  defaults) extended with an allowlist for our own output directory. Without
- *  it, `--no-git` re-scans `.vibe-check/` and every report re-embeds the last. */
-function writeGitleaksConfig(cwd: string, dir: string): string {
-	// Same precedence gitleaks applies when no --config is given.
-	const own = [process.env.GITLEAKS_CONFIG, join(cwd, ".gitleaks.toml")].find((p): p is string => !!p && existsSync(p));
+/** The project's own gitleaks config, in the precedence gitleaks itself uses
+ *  when no --config is given: GITLEAKS_CONFIG (relative to the scanned dir),
+ *  GITLEAKS_CONFIG_TOML, then `.gitleaks.toml` in the scanned dir. */
+function projectGitleaksConfig(cwd: string, dir: string): string | null {
+	const fromEnv = process.env.GITLEAKS_CONFIG ? resolve(cwd, process.env.GITLEAKS_CONFIG) : null;
+	if (fromEnv && existsSync(fromEnv)) return fromEnv;
+	if (process.env.GITLEAKS_CONFIG_TOML) {
+		const path = join(dir, "project.toml");
+		writeFileSync(path, process.env.GITLEAKS_CONFIG_TOML);
+		return path;
+	}
+	const own = join(cwd, ".gitleaks.toml");
+	return existsSync(own) ? own : null;
+}
+
+/** gitleaks config for one run: the project's config (or gitleaks' defaults)
+ *  extended with an allowlist for our own output directory. Without it,
+ *  `--no-git` re-scans `.vibe-check/` and every report re-embeds the last.
+ *
+ *  A project config that already has an [extend] is passed as-is: wrapping it
+ *  adds an extend level, and past gitleaks' depth limit the default ruleset is
+ *  silently dropped. `.vibe-check/` findings are then filtered by
+ *  `isIgnoredPath`, and the recorded log is redacted either way. */
+function gitleaksConfigFor(cwd: string, dir: string): string {
+	const own = projectGitleaksConfig(cwd, dir);
+	if (own && /^\s*\[extend\]/m.test(readFileSync(own, "utf-8"))) return own;
 	const path = join(dir, "gitleaks.toml");
 	const toml = [
 		"[extend]",
@@ -121,7 +141,7 @@ function writeGitleaksConfig(cwd: string, dir: string): string {
 function tryGitleaks(cwd: string, issues: Issue[]): boolean {
 	const dir = mkdtempSync(join(tmpdir(), "vcqa-gitleaks-"));
 	try {
-		const config = writeGitleaksConfig(cwd, dir);
+		const config = gitleaksConfigFor(cwd, dir);
 		const { stdout, ok } = run(
 			`gitleaks detect --no-git --redact --config ${JSON.stringify(config)} --report-format json --report-path /dev/stdout 2>/dev/null`,
 			cwd,

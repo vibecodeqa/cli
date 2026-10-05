@@ -263,6 +263,32 @@ describe("runSecrets output hygiene", () => {
 		expect(leakedWindows(pat.body, JSON.stringify(runs))).toEqual([]);
 	});
 
+	it.skipIf(!gitleaksInstalled())("keeps the default ruleset for a project config that already extends another", async () => {
+		const pat = fakeGithubPat();
+		setup({
+			"base.toml": "[extend]\nuseDefault = true\n",
+			"src/a.ts": `export const m = "VCQAMARK_${fakeBody(8)}";\n`,
+			"src/b.ts": `export const t = "${pat.value}";\n`,
+		});
+		writeFileSync(
+			join(TMP, "project.toml"),
+			`[extend]\npath = ${JSON.stringify(join(TMP, "base.toml"))}\n\n[[rules]]\nid = "custom-marker"\nregex = "VCQAMARK_[A-Z0-9]{8}"\n`,
+		);
+		// Relative GITLEAKS_CONFIG resolves against the scanned dir, as gitleaks would.
+		process.env.GITLEAKS_CONFIG = "project.toml";
+		try {
+			startToolRecording({ analyzerId: "secrets" });
+			const result = await runSecrets(TMP);
+			takeToolRuns();
+			const rules = new Set(result.issues.map((i) => i.rule));
+			expect((result.details as Record<string, unknown>).tool).toBe("gitleaks");
+			expect(rules.has("custom-marker")).toBe(true);
+			expect(rules.has("github-pat")).toBe(true); // default ruleset still active
+		} finally {
+			delete process.env.GITLEAKS_CONFIG;
+		}
+	});
+
 	it("built-in path (gitleaks unavailable) reports without values", async () => {
 		// Shadow any installed gitleaks with one that is "not found".
 		stubDir = mkdtempSync(join(tmpdir(), "vcqa-nogitleaks-"));

@@ -1,7 +1,10 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { detectStack, detectWorkspace, parseYamlList } from "./detect.js";
+import { detectRepoUrl, detectStack, detectWorkspace, parseYamlList } from "./detect.js";
+import { fakeBody } from "./runners/fake-credentials.test-helper.js";
 
 const TMP = join(import.meta.dirname!, "__test_fixture__");
 
@@ -574,5 +577,23 @@ describe("parseYamlList", () => {
 	it("handles inline comments on list items", () => {
 		const yaml = "packages:\n  - packages/* # core packages\n  - apps/* # applications\n";
 		expect(parseYamlList(yaml, "packages")).toEqual(["packages/*", "apps/*"]);
+	});
+});
+
+describe("detectRepoUrl", () => {
+	it("drops credentials a CI checkout put into the remote URL", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-remote-"));
+		try {
+			const token = fakeBody(24);
+			execFileSync("git", ["init", "-q"], { cwd: dir });
+			execFileSync("git", ["remote", "add", "origin", `https://gitlab-ci-token:${token}@gitlab.example.com/group/app.git`], { cwd: dir });
+			expect(detectRepoUrl(dir).repoUrl).toBe("https://gitlab.example.com/group/app");
+			execFileSync("git", ["remote", "set-url", "origin", `https://${token}@github.com/owner/repo.git`], { cwd: dir });
+			expect(detectRepoUrl(dir).repoUrl).toBe("https://github.com/owner/repo");
+			execFileSync("git", ["remote", "set-url", "origin", "git@github.com:owner/repo.git"], { cwd: dir });
+			expect(detectRepoUrl(dir).repoUrl).toBe("https://github.com/owner/repo");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
