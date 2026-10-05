@@ -15,6 +15,7 @@ import { getProductionFiles, isIgnoredPath, normalizeToolPath, readDeps } from "
 import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
+import { dependenciesMissingReason, probeDependencies, unavailableResult } from "./toolchain.js";
 
 // Packages known to be heavy (bundled KB, approx)
 const HEAVY_DEPS: Record<string, { kb: number; alt: string }> = {
@@ -165,7 +166,20 @@ export function runPerformance(cwd: string, workspace?: WorkspaceInfo, inventory
 	let deadExports = 0;
 	let unusedFiles = 0;
 	let unusedDeps = 0;
-	const knipResult = tryKnip(cwd, workspace);
+	const { findings: knipResult, unavailable: knipUnavailable } = tryKnip(cwd, workspace);
+	if (knipUnavailable.length > 0) {
+		// Without this, a fresh checkout scores `performance` with no dead-code
+		// penalty and nothing on the check says why — it reads as "no dead code"
+		// and can outscore the same code installed (#100). Info only: it does not
+		// change the score, which is computed from the penalties below.
+		const folders = knipUnavailable.map((u) => (u.path === "." ? ". (root)" : u.path)).join(", ");
+		const commands = [...new Set(knipUnavailable.map((u) => u.install))].map((c) => `\`${c}\``).join(" or ");
+		issues.push({
+			severity: "info",
+			message: `Dead code not measured in ${folders} — dependencies not installed${commands ? ` (run ${commands})` : ""}; this score does not cover dead code there`,
+			rule: "dead-code-unavailable",
+		});
+	}
 	if (knipResult) {
 		deadExports = knipResult.exports;
 		unusedFiles = knipResult.files;
@@ -286,6 +300,11 @@ export function runPerformance(cwd: string, workspace?: WorkspaceInfo, inventory
 						},
 					}
 				: {}),
+			// Knip roots that were never run because their dependencies are not
+			// installed (#100). With no knip result at all, the dead-code part is
+			// simply absent from this score — the same as when knip produces no
+			// parseable report — and the dead-code check reports `unavailable`.
+			...(knipUnavailable.length > 0 ? { deadCodeUnavailable: knipUnavailable } : {}),
 			...(bundleSizeKB > 0 ? { bundleSizeKB } : {}),
 		},
 		issues,
@@ -353,6 +372,16 @@ export function deadCodeCheckFromPerformance(performance: CheckResult): CheckRes
 	const deadExports = Number(details.deadExports) || 0;
 	const total = unusedFiles + unusedDeps + deadExports;
 	const issues = performance.issues.filter((i) => ["dead-files", "dead-exports", "unused-deps"].includes(i.rule ?? ""));
+
+	const knipUnavailable = details.deadCodeUnavailable as Array<{ path: string; reason: string }> | undefined;
+	if (details.deadCodeTool !== "knip" && knipUnavailable && knipUnavailable.length > 0) {
+		return unavailableResult(
+			"dead-code",
+			knipUnavailable[0]!.reason,
+			{ synthetic: true, sourceCheck: "performance", deadCodeTool: "knip", roots: knipUnavailable },
+			Date.now(),
+		);
+	}
 
 	if (details.deadCodeTool !== "knip") {
 		return {
@@ -476,16 +505,32 @@ export function knipRoots(cwd: string, workspace?: WorkspaceInfo): { dir: string
 	return [{ dir: cwd, rel: "", configured: false }];
 }
 
-function tryKnip(
-	cwd: string,
-	workspace?: WorkspaceInfo,
-): (KnipFindings & { files: number; exports: number; deps: number; configured: boolean; excluded: number }) | null {
+interface KnipOutcome {
+	findings: (KnipFindings & { files: number; exports: number; deps: number; configured: boolean; excluded: number }) | null;
+	/** Roots knip was not run in because their dependencies are not installed. */
+	unavailable: Array<{ path: string; reason: string; install: string }>;
+}
+
+function tryKnip(cwd: string, workspace?: WorkspaceInfo): KnipOutcome {
 	const roots = knipRoots(cwd, workspace);
 	const merged: KnipFindings = { unusedFiles: [], unusedExports: [], unusedTypes: [], unusedDeps: [] };
+	const unavailable: KnipOutcome["unavailable"] = [];
 	let any = false;
 	let configured = true;
 	let excluded = 0;
 	for (const root of roots) {
+		// Knip resolves the project's imports and enables plugins from its
+		// installed packages; without them its "unused" lists describe the
+		// missing install, not the code (#100). Do not run it at all.
+		const deps = probeDependencies(root.dir, cwd);
+		if (!deps.installed) {
+			unavailable.push({
+				path: root.rel || ".",
+				reason: dependenciesMissingReason(deps.packageManager),
+				install: `${deps.packageManager} install`,
+			});
+			continue;
+		}
 		const { stdout } = run("npx knip --reporter json 2>/dev/null || true", root.dir, 60_000);
 		const parsed = parseKnipJson(stdout);
 		if (!parsed) continue;
@@ -502,14 +547,17 @@ function tryKnip(
 			}
 		}
 	}
-	if (!any) return null;
+	if (!any) return { findings: null, unavailable };
 	return {
-		...merged,
-		configured,
-		files: merged.unusedFiles.length,
-		exports: merged.unusedExports.length + merged.unusedTypes.length,
-		deps: merged.unusedDeps.length,
-		excluded,
+		findings: {
+			...merged,
+			configured,
+			files: merged.unusedFiles.length,
+			exports: merged.unusedExports.length + merged.unusedTypes.length,
+			deps: merged.unusedDeps.length,
+			excluded,
+		},
+		unavailable,
 	};
 }
 

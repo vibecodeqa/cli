@@ -310,6 +310,10 @@ describe("auditability", () => {
 		writeFileSync(join(TMP, "packages/web/package.json"), JSON.stringify({ name: "web", devDependencies: { typescript: "^5" } }));
 		writeFileSync(join(TMP, "packages/web/tsconfig.json"), JSON.stringify({ include: ["src/**/*.ts"] }));
 		writeFileSync(join(TMP, "packages/web/src/index.ts"), "export const web = 1;\n");
+		// The packages' TypeScript, hoisted to the workspace root. Without it the
+		// targets are unavailable (#100) — the cli checkout's own install, above
+		// this fixture, does not count for it.
+		mkdirSync(join(TMP, "node_modules/typescript"), { recursive: true });
 		const fakeNpx = join(TMP, "bin", "npx");
 		writeFileSync(fakeNpx, '#!/bin/sh\necho "fake-npx:$PWD:$*"\nexit 0\n');
 		chmodSync(fakeNpx, 0o755);

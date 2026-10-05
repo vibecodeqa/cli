@@ -1,5 +1,6 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { detectWorkspace } from "../detect.js";
 import type { Issue } from "../types.js";
@@ -15,6 +16,18 @@ function setup(files: Record<string, string>) {
 		mkdirSync(join(full, ".."), { recursive: true });
 		writeFileSync(full, content);
 	}
+}
+
+/** Install this repo's own TypeScript into a fixture, as `<pm> install` would.
+ *
+ * These fixtures live inside the cli checkout and run the real `tsc`. They used
+ * to pass by resolving the checkout's node_modules from above — exactly the
+ * borrowed install #100 no longer counts — so each one now gets its own link. */
+function installTypeScript(dir: string) {
+	const tsDir = dirname(createRequire(import.meta.url).resolve("typescript/package.json"));
+	mkdirSync(join(dir, "node_modules/.bin"), { recursive: true });
+	symlinkSync(tsDir, join(dir, "node_modules/typescript"), "dir");
+	symlinkSync(join(tsDir, "bin/tsc"), join(dir, "node_modules/.bin/tsc"));
 }
 
 afterEach(() => {
@@ -128,6 +141,7 @@ describe("typeCheckTargets", () => {
 			}),
 			"packages/web/src/App.tsx": "declare namespace JSX { interface IntrinsicElements { div: any } }\nexport const App = <div />;\n",
 		});
+		installTypeScript(TMP);
 		const workspace = detectWorkspace(TMP);
 		const result = runTypeCheck(TMP, false, workspace);
 
@@ -148,6 +162,7 @@ describe("typeCheckTargets", () => {
 			"tsconfig.json": JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.tsx"] }),
 			"src/App.tsx": "declare namespace JSX { interface IntrinsicElements { div: any } }\nexport const App = <div />;\n",
 		});
+		installTypeScript(TMP);
 		const workspace = detectWorkspace(TMP);
 		const result = runTypeCheck(TMP, false, workspace);
 
