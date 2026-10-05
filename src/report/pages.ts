@@ -483,7 +483,8 @@ export function categoryPage(cs: CatScore, fl: FL, allChecks?: CheckResult[], cw
 						: "";
 					// Source code snippet (collapsible)
 					let srcBlock = "";
-					if (cwd && iss.line && typeof iss.file === "string") {
+					// Never for `secrets`: the line around a finding is the credential itself.
+					if (cwd && iss.line && typeof iss.file === "string" && c.name !== "secrets") {
 						const src = readSourceSnippet(cwd, iss.file, iss.line);
 						if (src) {
 							const fixPrompt = `Fix this ${iss.severity} in ${iss.file}:${iss.line}\n${iss.message}${iss.rule ? ` (${iss.rule})` : ""}\nCheck: ${c.name}\n\nAnalyze the code, explain the issue, and provide the fix.`;

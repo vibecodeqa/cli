@@ -10,6 +10,7 @@
  */
 
 import { execSync } from "node:child_process";
+import { redactSecrets } from "./redact.js";
 
 export interface ToolRun {
 	/** Best-effort tool name, taken from the command's first word. */
@@ -26,7 +27,7 @@ export interface ToolRun {
 	exitCode: number | null;
 	ok: boolean;
 	durationMs: number;
-	/** Combined output, trimmed and capped so reports stay a sane size. */
+	/** Combined output, credential values redacted, trimmed and capped so reports stay a sane size. */
 	output: string;
 	/** True when the binary was not found (as opposed to running and failing). */
 	notFound: boolean;
@@ -79,6 +80,12 @@ function toolNameOf(cmd: string): string {
 	return first;
 }
 
+/** Output as recorded: redacted on the FULL text, then capped. Cutting first
+ *  could split a value so no pattern matches the half that survives. */
+function recordedOutput(text: string): string {
+	return redactSecrets(text.trim()).slice(0, MAX_OUTPUT);
+}
+
 function record(entry: ToolRun): void {
 	if (recording) buffer.push(entry);
 }
@@ -128,7 +135,7 @@ export function run(cmd: string, cwd: string, timeout = 60_000, context: ToolRun
 			exitCode: 0,
 			ok: true,
 			durationMs: Date.now() - started,
-			output: stdout.trim().slice(0, MAX_OUTPUT),
+			output: recordedOutput(stdout),
 			notFound: false,
 		});
 		return { stdout, ok: true };
@@ -143,7 +150,7 @@ export function run(cmd: string, cwd: string, timeout = 60_000, context: ToolRun
 			exitCode: typeof e?.status === "number" ? e.status : null,
 			ok: false,
 			durationMs: Date.now() - started,
-			output: output.trim().slice(0, MAX_OUTPUT),
+			output: recordedOutput(output),
 			notFound: /not found|ENOENT|command not found/i.test(output),
 		});
 		return { stdout: output, ok: false };

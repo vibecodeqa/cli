@@ -74,7 +74,7 @@ function detectPR(cwd: string): PRInfo | null {
 	return null;
 }
 
-function buildCommentBody(report: VibeReport, trend: TrendDelta | null, prevReport?: VibeReport): string {
+export function buildCommentBody(report: VibeReport, trend: TrendDelta | null, prevReport?: VibeReport): string {
 	const grade = report.grade;
 	const score = report.score;
 	const gradeEmoji = grade === "A" ? "🟢" : grade === "B" ? "🟡" : grade === "C" ? "🟠" : "🔴";
