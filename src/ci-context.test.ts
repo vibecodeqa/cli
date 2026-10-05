@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { detectCiContext } from "./ci-context.js";
+import { detectCiContext, type GitRunner, isShaOnRemote } from "./ci-context.js";
 import { detectPR } from "./pr-comment.js";
 import { currentGitSha } from "./upload.js";
 
@@ -15,13 +15,13 @@ const BEFORE_SHA = "d".repeat(40);
 const QUEUE_SHA = "e".repeat(40);
 
 // This suite may itself run under GitHub Actions. Every case passes an explicit
-// env, and process.env's GITHUB_* are stripped for the duration so nothing that
-// falls back to process.env can see the real run.
+// env, and process.env's GITHUB_* and CI are stripped for the duration so
+// nothing that falls back to process.env can see the real run.
 let savedEnv: Record<string, string | undefined> = {};
 beforeEach(() => {
 	savedEnv = {};
 	for (const key of Object.keys(process.env)) {
-		if (key.startsWith("GITHUB_")) {
+		if (key.startsWith("GITHUB_") || key === "CI") {
 			savedEnv[key] = process.env[key];
 			delete process.env[key];
 		}
@@ -102,12 +102,98 @@ describe("detectCiContext — no CI", () => {
 		expect(detectCiContext(dir, {}).shaOnRemote).toBe(true);
 	});
 
+	it("another CI provider (CI set): the pushed check is skipped, so links keep the sha", () => {
+		const { dir, git } = gitRepo();
+		git("checkout", "-q", "--detach"); // a pipeline ref no remote-tracking branch contains
+		expect(detectCiContext(dir, {}).shaOnRemote).toBe(false);
+		expect(detectCiContext(dir, { CI: "true" }).shaOnRemote).toBeNull();
+		expect(detectCiContext(dir, { CI: "1" }).shaOnRemote).toBeNull();
+		expect(detectCiContext(dir, { CI: "false" }).shaOnRemote).toBe(false);
+		expect(detectCiContext(dir, { CI: "0" }).shaOnRemote).toBe(false);
+	});
+
 	it("ignores stray GITHUB_* when not running in Actions", () => {
 		const { dir, head } = gitRepo();
 		const ctx = detectCiContext(dir, { GITHUB_SHA: "1".repeat(40), GITHUB_HEAD_REF: "nope" });
 		expect(ctx.git.sha).toBe(head);
 		expect(ctx.git.branch).toBe("trunk");
 		expect(ctx.ci).toBeNull();
+	});
+});
+
+describe("isShaOnRemote", () => {
+	/** The real git, recording every call. */
+	function recordingRunner(): { run: GitRunner; calls: string[][] } {
+		const calls: string[][] = [];
+		const run: GitRunner = (cwd, args, timeoutMs) => {
+			calls.push(args);
+			return execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: timeoutMs });
+		};
+		return { run, calls };
+	}
+	const usedContains = (calls: string[][]) => calls.some((args) => args.includes("--contains"));
+
+	function trackingRepo() {
+		const repo = gitRepo();
+		repo.git("remote", "add", "origin", "https://github.com/octo-org/widgets.git");
+		repo.git("update-ref", "refs/remotes/origin/trunk", "HEAD");
+		repo.git("config", "branch.trunk.remote", "origin");
+		repo.git("config", "branch.trunk.merge", "refs/heads/trunk");
+		return repo;
+	}
+
+	it("upstream contains HEAD: true from merge-base, without scanning every remote branch", () => {
+		const { dir, head } = trackingRepo();
+		const { run, calls } = recordingRunner();
+		expect(isShaOnRemote(dir, head, "trunk", { run })).toBe(true);
+		expect(calls[0]).toEqual(["merge-base", "--is-ancestor", head, "@{upstream}"]);
+		expect(usedContains(calls)).toBe(false);
+	});
+
+	it("upstream behind HEAD (local commits): false, without scanning every remote branch", () => {
+		const { dir, git } = trackingRepo();
+		writeFileSync(join(dir, "b.txt"), "b\n");
+		git("add", "b.txt");
+		git("commit", "-q", "-m", "local only");
+		const { run, calls } = recordingRunner();
+		expect(isShaOnRemote(dir, git("rev-parse", "HEAD"), "trunk", { run })).toBe(false);
+		expect(usedContains(calls)).toBe(false);
+	});
+
+	it("no upstream: falls back to `branch -r --contains`, under a timeout", () => {
+		const { dir, head, git } = gitRepo();
+		const { run, calls } = recordingRunner();
+		expect(isShaOnRemote(dir, head, "trunk", { run })).toBe(false);
+		expect(usedContains(calls)).toBe(true);
+		git("update-ref", "refs/remotes/origin/other", "HEAD"); // pushed, but not tracked
+		expect(isShaOnRemote(dir, head, "trunk", { run })).toBe(true);
+		let timeout: number | undefined;
+		isShaOnRemote(dir, head, "trunk", {
+			run: (cwd, args, timeoutMs) => {
+				if (args.includes("--contains")) timeout = timeoutMs;
+				return run(cwd, args, timeoutMs);
+			},
+		});
+		expect(timeout).toBeGreaterThan(0);
+	});
+
+	it("the fallback timing out: false (branch link) on a branch, null (sha link) when detached", () => {
+		const { dir, head } = gitRepo();
+		const timingOut: GitRunner = (_cwd, args, timeoutMs) => {
+			if (args[0] === "merge-base") throw Object.assign(new Error("no upstream"), { status: 128 });
+			expect(timeoutMs).toBe(50);
+			throw Object.assign(new Error("spawnSync git ETIMEDOUT"), { code: "ETIMEDOUT", signal: "SIGTERM", status: null });
+		};
+		expect(isShaOnRemote(dir, head, "trunk", { run: timingOut, timeoutMs: 50 })).toBe(false);
+		expect(isShaOnRemote(dir, head, null, { run: timingOut, timeoutMs: 50 })).toBeNull();
+	});
+
+	it("git failing outright: null", () => {
+		const failing: GitRunner = () => {
+			throw Object.assign(new Error("not a git repository"), { status: 128 });
+		};
+		expect(isShaOnRemote(noGitDir(), HEAD_SHA, "trunk", { run: failing })).toBeNull();
+		expect(isShaOnRemote(noGitDir(), null, "trunk")).toBeNull();
 	});
 });
 

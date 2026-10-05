@@ -79,9 +79,9 @@ export interface CiContext {
 	/** Why `git.headSha` is null although the run is CI, when it is. */
 	headShaNote: string | null;
 	/** Whether `git.sha` is on a remote, so a `blob/<sha>` link resolves.
-	 *  Asked only of local scans, where an unpushed HEAD is the normal state
-	 *  (from local remote-tracking refs — no network); null when not asked or
-	 *  git could not say. A CI checkout is always of a pushed ref. */
+	 *  Asked only of local scans (no `CI` flag), where an unpushed HEAD is the
+	 *  normal state (from local remote-tracking refs — no network); null when
+	 *  not asked or git could not say. A CI checkout is of a server-side commit. */
 	shaOnRemote: boolean | null;
 }
 
@@ -107,7 +107,12 @@ export function detectCiContext(cwd: string, env: NodeJS.ProcessEnv = process.en
 			commitDate: commitDate(cwd, localHead),
 			defaultBranch: null,
 		};
-		return { git, ci: null, repository, event, headShaNote: null, shaOnRemote: onRemote(cwd, localHead) };
+		// Another CI provider (GitLab, Buildkite, ...) checks out a commit the
+		// server already has, even when no remote-tracking branch contains it
+		// (a merged-results ref, a detached pipeline ref): its sha link resolves.
+		// Only a developer's own checkout can be ahead of the remote.
+		const shaOnRemote = isCi(env) ? null : isShaOnRemote(cwd, localHead, localBranch);
+		return { git, ci: null, repository, event, headShaNote: null, shaOnRemote };
 	}
 
 	const eventName = env.GITHUB_EVENT_NAME || "";
@@ -344,15 +349,68 @@ function commitDate(cwd: string, sha: string | null): string | null {
 	return gitOut(cwd, ["show", "-s", "--format=%cI", `${sha}^{commit}`, "--"]);
 }
 
-/** Whether any remote-tracking branch contains `sha`; null when git fails. */
-function onRemote(cwd: string, sha: string | null): boolean | null {
-	if (!sha) return null;
+/** The conventional `CI` flag most CI providers set ("true", "1", ...). */
+function isCi(env: NodeJS.ProcessEnv): boolean {
+	const value = (env.CI ?? "").trim().toLowerCase();
+	return value !== "" && value !== "false" && value !== "0";
+}
+
+/** Runs `git <args>` in `cwd` and returns stdout. Throws on a non-zero exit
+ *  (with `status`) or when `timeoutMs` elapses (with `code: "ETIMEDOUT"`),
+ *  as `execFileSync` does. Injectable for tests. */
+export type GitRunner = (cwd: string, args: string[], timeoutMs?: number) => string;
+
+const runGit: GitRunner = (cwd, args, timeoutMs) =>
+	execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], timeout: timeoutMs });
+
+/** Budget for the `branch -r --contains` fallback. It walks history once per
+ *  remote branch without a commit-graph: seconds on a large repo with many
+ *  remotes, and it runs on every `--watch` scan. */
+export const REMOTE_CONTAINS_TIMEOUT_MS = 3000;
+
+/** Whether `sha` is on a remote, so a `blob/<sha>` link resolves; null when
+ *  git cannot say. From local remote-tracking refs only — no network.
+ *
+ *  Asks the branch's upstream first (`merge-base --is-ancestor`, which costs
+ *  the distance between the two, not the size of the history). Only without an
+ *  upstream — a detached HEAD, a branch never pushed with `-u` — does it scan
+ *  every remote-tracking branch, under a timeout. */
+export function isShaOnRemote(
+	cwd: string,
+	sha: string | null,
+	branch: string | null,
+	options: { run?: GitRunner; timeoutMs?: number } = {},
+): boolean | null {
+	if (!sha || !/^[0-9a-f]{7,64}$/i.test(sha)) return null;
+	const run = options.run ?? runGit;
 	try {
-		const out = execFileSync("git", ["branch", "-r", "--contains", sha], { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+		run(cwd, ["merge-base", "--is-ancestor", sha, "@{upstream}"]);
+		return true;
+	} catch (err) {
+		// 1 = the upstream exists and does not contain sha: commits not pushed
+		// yet. Anything else (128: no upstream configured) falls through.
+		if (exitStatus(err) === 1) return false;
+	}
+	try {
+		const out = run(cwd, ["branch", "-r", "--contains", sha], options.timeoutMs ?? REMOTE_CONTAINS_TIMEOUT_MS);
 		return out.trim().length > 0;
-	} catch {
+	} catch (err) {
+		// Too slow to tell. Prefer the branch link: a branch URL resolves as soon
+		// as the branch is pushed (at worst it shows a newer revision), while a
+		// sha URL for an unpushed commit is a 404. With no branch to link to,
+		// say "unknown" so the report keeps its sha links rather than none.
+		if (isTimeout(err)) return branch ? false : null;
 		return null;
 	}
+}
+
+function exitStatus(err: unknown): number | null {
+	const status = (err as { status?: unknown } | null)?.status;
+	return typeof status === "number" ? status : null;
+}
+
+function isTimeout(err: unknown): boolean {
+	return (err as { code?: unknown } | null)?.code === "ETIMEDOUT";
 }
 
 /** Whether a git command exits 0 (a yes/no question such as `--is-ancestor`). */

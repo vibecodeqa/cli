@@ -375,7 +375,7 @@ describe("scan provenance (meta.git / meta.ci / meta.scan)", () => {
 		// scan() reads process.env; keep a CI run of this suite from leaking in.
 		saved = {};
 		for (const key of Object.keys(process.env)) {
-			if (key.startsWith("GITHUB_")) {
+			if (key.startsWith("GITHUB_") || key === "CI") {
 				saved[key] = process.env[key];
 				delete process.env[key];
 			}
@@ -388,7 +388,7 @@ describe("scan provenance (meta.git / meta.ci / meta.scan)", () => {
 		git("remote", "add", "origin", "https://github.com/octo-org/widgets.git");
 	});
 	afterEach(() => {
-		for (const key of Object.keys(process.env)) if (key.startsWith("GITHUB_")) delete process.env[key];
+		for (const key of Object.keys(process.env)) if (key.startsWith("GITHUB_") || key === "CI") delete process.env[key];
 		Object.assign(process.env, saved);
 		rmSync(repo, { recursive: true, force: true });
 	});
