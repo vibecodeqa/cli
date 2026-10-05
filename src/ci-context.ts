@@ -58,7 +58,11 @@ export interface ReportProvenanceMeta {
 export interface GitHubEventPayload {
 	before?: string;
 	head_commit?: { timestamp?: string } | null;
-	pull_request?: { number?: number; head?: { ref?: string; sha?: string }; base?: { ref?: string; sha?: string } };
+	pull_request?: {
+		number?: number;
+		head?: { ref?: string; sha?: string; repo?: { full_name?: string } | null };
+		base?: { ref?: string; sha?: string; repo?: { full_name?: string } | null };
+	};
 	issue?: { number?: number };
 	merge_group?: { head_sha?: string; base_sha?: string; head_commit?: { timestamp?: string } | null };
 	repository?: { default_branch?: string };
@@ -190,13 +194,33 @@ function applyPullRequest(
 ): EventEffect {
 	const head = str(pr.head?.sha);
 	const headRef = env.GITHUB_HEAD_REF || str(pr.head?.ref);
-	const onHead = (head !== null && checkout.localHead === head) || (headRef !== null && checkout.localBranch === headRef);
+	const onHead = (head !== null && checkout.localHead === head) || isHeadBranchCheckout(pr, headRef, env, checkout);
 	if (!onHead && !checkout.onEventCommit && !isMergeOf(checkout, head)) return describeLocalCheckout(git, checkout);
 	git.headSha = onHead ? git.sha : head;
 	git.baseSha = str(pr.base?.sha);
 	git.branch = headRef;
 	git.prNumber = num(pr.number);
 	return NO_EFFECT;
+}
+
+/** `ref: ${{ github.head_ref }}` checked out after a re-push: the local branch
+ *  is the PR's head branch, now ahead of the payload's head sha. A branch name
+ *  alone proves nothing — a fork PR from the fork's `main` with the base repo's
+ *  `main` checked out matches by name but is the base tip — so the branch only
+ *  counts when the PR comes from this same repository and the payload's head
+ *  is an ancestor of HEAD. */
+function isHeadBranchCheckout(
+	pr: NonNullable<GitHubEventPayload["pull_request"]>,
+	headRef: string | null,
+	env: NodeJS.ProcessEnv,
+	checkout: Checkout,
+): boolean {
+	const head = str(pr.head?.sha);
+	if (!head || !/^[0-9a-f]{7,64}$/i.test(head) || !headRef || !checkout.localHead || checkout.localBranch !== headRef) return false;
+	const headRepo = str(pr.head?.repo?.full_name);
+	const baseRepo = str(pr.base?.repo?.full_name) ?? (env.GITHUB_REPOSITORY || null);
+	if (!headRepo || !baseRepo || headRepo !== baseRepo) return false;
+	return gitOk(checkout.cwd, ["merge-base", "--is-ancestor", head, checkout.localHead]);
 }
 
 /** The PR as far as the environment alone can say, for a run whose event
@@ -328,6 +352,16 @@ function onRemote(cwd: string, sha: string | null): boolean | null {
 		return out.trim().length > 0;
 	} catch {
 		return null;
+	}
+}
+
+/** Whether a git command exits 0 (a yes/no question such as `--is-ancestor`). */
+function gitOk(cwd: string, args: string[]): boolean {
+	try {
+		execFileSync("git", args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+		return true;
+	} catch {
+		return false;
 	}
 }
 

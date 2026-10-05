@@ -394,6 +394,87 @@ describe("detectCiContext — the checkout, not GITHUB_SHA, is the scanned commi
 	});
 });
 
+describe("detectCiContext — a local branch named like the PR head", () => {
+	/** A pull_request payload whose head and base live in the given repositories. */
+	function prEvent(dir: string, pr: { headRef: string; headSha: string; baseSha: string; headRepo: string }): string {
+		const path = join(dir, "event-branch.json");
+		writeFileSync(
+			path,
+			JSON.stringify({
+				number: 7,
+				pull_request: {
+					number: 7,
+					head: { ref: pr.headRef, sha: pr.headSha, repo: { full_name: pr.headRepo } },
+					base: { ref: "main", sha: pr.baseSha, repo: { full_name: "octo-org/widgets" } },
+				},
+				repository: { default_branch: "main" },
+			}),
+		);
+		return path;
+	}
+
+	it("fork PR from the fork's main, with the base repo's `main` checked out: not the PR, not attributed to it", () => {
+		const { dir, base, head, merge, git } = prRepo();
+		git("checkout", "-q", "main"); // `ref: main` — local branch "main", at the base tip
+		const env = actionsEnv("pull_request", {
+			GITHUB_EVENT_PATH: prEvent(dir, { headRef: "main", headSha: head, baseSha: base, headRepo: "forker/widgets" }),
+			GITHUB_SHA: merge,
+			GITHUB_REF: "refs/pull/7/merge",
+			GITHUB_HEAD_REF: "main",
+		});
+		const ctx = detectCiContext(dir, env);
+		expect(ctx.git).toMatchObject({ sha: base, headSha: base, branch: "main", prNumber: null });
+		// The status is for the commit actually scanned, and no PR claims it.
+		expect(currentGitSha(dir, ctx)).toBe(base);
+		expect(ctx.git.prNumber).not.toBe(7);
+	});
+
+	it("fork PR whose head is an ancestor of the local branch is still not matched by name", () => {
+		const { dir, head, merge, git } = prRepo();
+		git("checkout", "-q", "feature/login");
+		const env = actionsEnv("pull_request", {
+			GITHUB_EVENT_PATH: prEvent(dir, { headRef: "feature/login", headSha: head, baseSha: "b".repeat(40), headRepo: "forker/widgets" }),
+			GITHUB_SHA: merge,
+			GITHUB_REF: "refs/pull/7/merge",
+		});
+		// localHead === payload head, so it is the head by sha — the fork guard only gates the name match.
+		expect(detectCiContext(dir, env).git).toMatchObject({ sha: head, headSha: head, prNumber: 7 });
+		writeFileSync(join(dir, "d.txt"), "d\n");
+		git("add", "d.txt");
+		git("commit", "-q", "-m", "local on top");
+		expect(detectCiContext(dir, env).git).toMatchObject({ branch: "feature/login", prNumber: null });
+	});
+
+	it("same-repo PR, `ref: head_ref` checked out after a re-push: the scan is the PR head branch", () => {
+		const { dir, base, head, merge, git } = prRepo();
+		git("checkout", "-q", "feature/login");
+		writeFileSync(join(dir, "d.txt"), "d\n");
+		git("add", "d.txt");
+		git("commit", "-q", "-m", "pushed after the event");
+		const tip = git("rev-parse", "HEAD");
+		const env = actionsEnv("pull_request", {
+			GITHUB_EVENT_PATH: prEvent(dir, { headRef: "feature/login", headSha: head, baseSha: base, headRepo: "octo-org/widgets" }),
+			GITHUB_SHA: merge,
+			GITHUB_REF: "refs/pull/7/merge",
+			GITHUB_HEAD_REF: "feature/login",
+		});
+		const ctx = detectCiContext(dir, env);
+		expect(ctx.git).toMatchObject({ sha: tip, headSha: tip, baseSha: base, branch: "feature/login", prNumber: 7 });
+		expect(currentGitSha(dir, ctx)).toBe(tip);
+	});
+
+	it("same-repo PR, branch name matches but the payload head is not an ancestor: described locally", () => {
+		const { dir, base, head, merge, git } = prRepo();
+		git("checkout", "-q", "-B", "feature/login", "main"); // same name, unrelated history
+		const env = actionsEnv("pull_request", {
+			GITHUB_EVENT_PATH: prEvent(dir, { headRef: "feature/login", headSha: head, baseSha: base, headRepo: "octo-org/widgets" }),
+			GITHUB_SHA: merge,
+			GITHUB_REF: "refs/pull/7/merge",
+		});
+		expect(detectCiContext(dir, env).git).toMatchObject({ sha: base, headSha: base, prNumber: null });
+	});
+});
+
 describe("detectCiContext — pull_request without a readable event payload", () => {
 	it("takes the PR number from GITHUB_REF, the branch from GITHUB_HEAD_REF, head/base from the merge parents", () => {
 		const { dir, base, head, merge } = prRepo();
