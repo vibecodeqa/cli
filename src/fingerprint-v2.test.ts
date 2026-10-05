@@ -3,7 +3,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { scan } from "./core.js";
 import { computeDelta } from "./delta.js";
 import { setGlobalSrcRoots } from "./fs-utils.js";
@@ -22,6 +22,16 @@ import { runPerformance } from "./runners/performance.js";
 import { runStandards } from "./runners/standards.js";
 import { computeTrend } from "./trend.js";
 import type { CheckResult, Issue, StackInfo, VibeReport } from "./types.js";
+
+// runPerformance shells out to `npx knip` once per root, which dominates its
+// runtime and plays no part in barrel detection. Stub only that command.
+vi.mock("./runners/exec.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("./runners/exec.js")>();
+	return {
+		...actual,
+		run: (...args: Parameters<typeof actual.run>) => (args[0].includes("knip") ? { stdout: "", ok: true } : actual.run(...args)),
+	};
+});
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -80,7 +90,8 @@ async function measuredRuleKeepsIdentity(
 
 const lines = (n: number, f: (i: number) => string) => Array.from({ length: n }, (_, i) => f(i)).join("\n");
 
-describe("v2 subjects: a changed measurement keeps the fingerprint", () => {
+// These run real checks over temp projects; give a slow CI runner headroom.
+describe("v2 subjects: a changed measurement keeps the fingerprint", { timeout: 30_000 }, () => {
 	it("standards large-file", async () => {
 		await measuredRuleKeepsIdentity(
 			"large-file",
