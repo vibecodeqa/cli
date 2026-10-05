@@ -1,0 +1,26 @@
+{
+	"action": "checks_requested",
+	"merge_group": {
+		"head_sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		"head_ref": "refs/heads/gh-readonly-queue/main/pr-42-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"base_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"base_ref": "refs/heads/main",
+		"head_commit": {
+			"id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+			"timestamp": "2026-10-01T10:00:00Z",
+			"message": "Merge pull request #42"
+		}
+	},
+	"repository": {
+		"full_name": "octo-org/widgets",
+		"name": "widgets",
+		"owner": {
+			"login": "octo-org"
+		},
+		"default_branch": "main",
+		"html_url": "https://github.com/octo-org/widgets"
+	},
+	"sender": {
+		"login": "octocat"
+	}
+}
