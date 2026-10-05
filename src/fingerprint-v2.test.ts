@@ -215,6 +215,51 @@ describe("v2 content anchors for repeated findings", () => {
 		expect(a).toBe(solo);
 	});
 
+	// Identical source lines (not just identical messages) can only be told apart
+	// by position. A report-local fingerprint cannot know which of two identical
+	// lines was there before: {L1, L3} is the same report whether L1 or L3 is the
+	// newcomer, and each history needs the other one to keep the old fingerprint.
+	// Ordinals keep every count right; the one *named* new or fixed is the last in
+	// line order, which is the wrong one when the change is above. (Hashing the
+	// neighbouring lines would name it right but re-identify every anchored
+	// finding whenever an adjacent line is edited, and turn 1 -> 2 identical
+	// findings into 2 new + 1 fixed.) These tests pin that limit.
+	describe("identical source lines: counts are right, naming is by line order", () => {
+		const same = "const a = x as any;";
+		const findingsAt = (src: string) =>
+			v2Report([check("type-safety", withIssueFingerprints("type-safety", anyFindings(src), readerFor({ "src/a.ts": src })))]);
+
+		it("a third identical line inserted above two reports exactly one new, but shifts which finding holds each old fingerprint", () => {
+			const before = findingsAt(`let p = 1;\n${same}\nlet q = 2;\n${same}\nlet r = 3;`);
+			const after = findingsAt(`${same}\nlet p = 1;\n${same}\nlet q = 2;\n${same}\nlet r = 3;`);
+			const fpsOf = (r: VibeReport) => r.checks[0].issues.map((i) => (i as FingerprintedIssue).fingerprint);
+			expect(new Set(fpsOf(after)).size).toBe(3);
+			for (const fp of fpsOf(before)) expect(fpsOf(after)).toContain(fp);
+			expect(fpsOf(after)[0]).toBe(fpsOf(before)[0]); // the newcomer took the old first line's fingerprint
+
+			const delta = computeDelta(before, after);
+			expect(delta.introduced).toHaveLength(1);
+			expect(delta.fixed).toHaveLength(0);
+			// The limit: the newcomer is line 1, but line order names the last one.
+			expect(delta.introduced[0]).toMatchObject({ line: 5 });
+
+			const trend = trendBetween(before, after);
+			expect(trend.newIssues).toBe(1);
+			expect(trend.fixedIssues).toBe(0);
+		});
+
+		it("fixing one of two identical lines reports exactly one fixed", () => {
+			const before = findingsAt(`${same}\nlet q = 2;\n${same}`);
+			const after = findingsAt(`const a = x as unknown;\nlet q = 2;\n${same}`);
+			const delta = computeDelta(before, after);
+			expect(delta.fixed).toHaveLength(1);
+			expect(delta.introduced).toHaveLength(0);
+			const trend = trendBetween(before, after);
+			expect(trend.fixedIssues).toBe(1);
+			expect(trend.newIssues).toBe(0);
+		});
+	});
+
 	it("issues without a line get an ordinal by emission order", () => {
 		const iss = { severity: "warning" as const, rule: "r", message: "same" };
 		const out = withIssueFingerprints("c", [iss, iss, iss]).map((i) => i.fingerprint);
