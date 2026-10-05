@@ -93,6 +93,17 @@ export function resolveTestTimeout(options: TestingOptions = {}): EffectiveTestT
 	return { ms: DEFAULT_TEST_TIMEOUT_MS, source: "default", ...invalid };
 }
 
+/** Base allowance for a whole scan, test runs aside. */
+export const SCAN_BASE_TIMEOUT_MS = 120_000;
+
+/** Time limit for a whole scan that runs tests (e.g. the monitor's scan
+ * subprocess): the base allowance plus one full test limit per test project,
+ * capped at what a timer can hold. A tighter limit would kill the scan before
+ * a configured test timeout could take effect. */
+export function scanTimeoutWithTests(testTimeoutMs: number, testProjects: number): number {
+	return Math.min(SCAN_BASE_TIMEOUT_MS + testTimeoutMs * Math.max(1, testProjects), MAX_TIMER_MS);
+}
+
 function formatSeconds(ms: number): string {
 	return `${Number((ms / 1000).toFixed(1))} s`;
 }

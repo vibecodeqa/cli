@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { scan } from "../core.js";
 import { detectStack } from "../detect.js";
 import type { ToolRun } from "./exec.js";
-import { resolveTestTimeout, runTesting, testExecutionPoints } from "./testing.js";
+import { resolveTestTimeout, runTesting, scanTimeoutWithTests, testExecutionPoints } from "./testing.js";
 
 const FAKE_VITEST = `#!/usr/bin/env node
 const { spawn } = require("node:child_process");
@@ -222,4 +222,16 @@ describe("timeout scoring across projects (#106)", () => {
 		},
 		30_000,
 	);
+});
+
+describe("scanTimeoutWithTests (monitor scan limit)", () => {
+	it("leaves room for the full test limit of every project", () => {
+		expect(scanTimeoutWithTests(120_000, 1)).toBe(240_000);
+		expect(scanTimeoutWithTests(600_000, 3)).toBe(120_000 + 1_800_000);
+		expect(scanTimeoutWithTests(600_000, 0)).toBe(720_000);
+	});
+
+	it("never exceeds what a timer can hold", () => {
+		expect(scanTimeoutWithTests(2 ** 31 - 1, 2)).toBe(2 ** 31 - 1);
+	});
 });

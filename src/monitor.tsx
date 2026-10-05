@@ -13,8 +13,10 @@ import { watch, existsSync, mkdirSync, writeFileSync, readFileSync } from "node:
 import { execFile, execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { getCheckSettings, loadConfig } from "./config.js";
 import { detectStack, detectWorkspace } from "./detect.js";
 import { loadHistory } from "./history.js";
+import { resolveTestTimeout, SCAN_BASE_TIMEOUT_MS, scanTimeoutWithTests, testRunTargets } from "./runners/testing.js";
 import type { CheckResult } from "./types.js";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8")).version;
@@ -163,6 +165,19 @@ function getGitChanges(cwd: string): GitChange[] {
 
 // ── Scan via child process — UI never freezes ──
 
+/** The scan subprocess's limit: it must outlast the configured test timeout
+ * (checks.testing.settings.timeoutMs) for every test project, or the scan is
+ * killed before that setting can take effect. */
+function scanTimeoutMs(cwd: string, skipTests: boolean): number {
+	if (skipTests) return SCAN_BASE_TIMEOUT_MS;
+	try {
+		const { ms } = resolveTestTimeout({ settings: getCheckSettings(loadConfig(cwd), "testing") });
+		return scanTimeoutWithTests(ms, testRunTargets(cwd, undefined, detectWorkspace(cwd)).length);
+	} catch {
+		return scanTimeoutWithTests(resolveTestTimeout().ms, 1);
+	}
+}
+
 function runScanProcess(
 	cwd: string,
 	skipTests: boolean,
@@ -172,7 +187,7 @@ function runScanProcess(
 		if (skipTests) args.unshift("--skip-tests");
 
 		execFile(process.execPath, [CLI_PATH, ...args], {
-			timeout: 120_000,
+			timeout: scanTimeoutMs(cwd, skipTests),
 			maxBuffer: 10 * 1024 * 1024,
 			env: { ...process.env, VCQA_NO_UPDATE_CHECK: "1" },
 		}, (err, stdout) => {
