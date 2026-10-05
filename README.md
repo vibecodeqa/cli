@@ -254,8 +254,8 @@ Auto-detects: TypeScript/JavaScript/Dart, React/Vue/Svelte/Flutter, Vite/Webpack
 | Flag | Description |
 |------|-------------|
 | `--skip-tests` | Skip test execution (fast mode) |
-| `--ci` | CI mode (exit 1 if score < 60) |
-| `--fail-under N` | Exit 1 if score < N |
+| `--ci` | CI mode (exit 1 if score < `failUnder` from config, else 60) |
+| `--fail-under N` | Exit 1 if score < N; overrides config and `--ci` |
 | `--json` | JSON output |
 | `--badge` | Generate SVG badge |
 | `--sarif` | SARIF for GitHub Code Scanning |
