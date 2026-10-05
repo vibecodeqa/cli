@@ -11,9 +11,11 @@ import {
 	FINGERPRINT_VERSION,
 	type FingerprintedIssue,
 	fingerprintIssue,
+	reportFingerprintVersion,
 	type SourceLineReader,
 	withIssueFingerprints,
 } from "./issue-fingerprint.js";
+import { buildReportHistorySnapshot } from "./report-contract.js";
 import { runArchitecture } from "./runners/architecture.js";
 import { runComplexity } from "./runners/complexity.js";
 import { runContext } from "./runners/context.js";
@@ -314,6 +316,19 @@ describe("v1/v2 boundary", () => {
 		const trend = trendBetween(v1(), v2());
 		expect(trend.newIssues).toBe(0);
 		expect(trend.fixedIssues).toBe(0);
+	});
+});
+
+describe("history snapshots", () => {
+	it("record the fingerprint version, so a consumer comparing them can detect the boundary", () => {
+		const issues = withIssueFingerprints("type-safety", [{ severity: "warning", rule: "as-any", message: "Avoid `as any`" }]);
+		const v2Snap = buildReportHistorySnapshot(v2Report([check("type-safety", issues)]));
+		expect(v2Snap.meta.fingerprintVersion).toBe(FINGERPRINT_VERSION);
+		expect(reportFingerprintVersion(v2Snap)).toBe(FINGERPRINT_VERSION);
+
+		const v1Snap = buildReportHistorySnapshot(report([check("type-safety", issues)]));
+		expect(v1Snap.meta).not.toHaveProperty("fingerprintVersion");
+		expect(reportFingerprintVersion(v1Snap)).toBe(1);
 	});
 });
 

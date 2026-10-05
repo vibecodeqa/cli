@@ -19,6 +19,8 @@ export interface ReportHistorySnapshot {
 	meta: {
 		duration: number;
 		analyzerSnapshots: AnalyzerSnapshot[];
+		/** Which fingerprint scheme the issue snapshots use; absent = v1 (#97). */
+		fingerprintVersion?: number;
 	};
 	checks: Array<{
 		name: string;
@@ -39,6 +41,7 @@ export function buildReportHistorySnapshot(report: VibeReport): ReportHistorySna
 		meta: {
 			duration: normalized.meta.duration,
 			analyzerSnapshots: normalized.meta.analyzerSnapshots ?? [],
+			...(normalized.meta.fingerprintVersion === undefined ? {} : { fingerprintVersion: normalized.meta.fingerprintVersion }),
 		},
 		checks: normalized.checks.map((check) => ({
 			name: check.name,
