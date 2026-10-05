@@ -6,15 +6,17 @@
  *   console.log(report.score, report.grade);
  */
 
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { buildAnalyzerSnapshots } from "./analyzer-snapshot.js";
 import { CHECK_META, type CheckMeta, getCheckMeta } from "./check-meta.js";
+import { type CiContext, detectCiContext, type ReportProvenanceMeta } from "./ci-context.js";
 import { getCheckIgnore, isCheckEnabled, loadConfig, type VcqaConfig } from "./config.js";
 import { detectRepoUrl, detectStack, detectWorkspace } from "./detect.js";
 import { buildFileInventory } from "./file-inventory.js";
 import { setGlobalIgnore, setGlobalIgnoreNames, setGlobalScanPolicy, setGlobalSrcRoots } from "./fs-utils.js";
-import { withIssueFingerprints } from "./issue-fingerprint.js";
+import { FINGERPRINT_VERSION, inventoryLineReader, type SourceLineReader, withIssueFingerprints } from "./issue-fingerprint.js";
 import { runAccessibility } from "./runners/accessibility.js";
 import { runArchitecture } from "./runners/architecture.js";
 import { runBestPractices } from "./runners/best-practices.js";
@@ -44,7 +46,7 @@ import { runLint } from "./runners/lint.js";
 import { runMemorySafety } from "./runners/memory-safety.js";
 import { deadCodeCheckFromPerformance, runPerformance } from "./runners/performance.js";
 import { runReact } from "./runners/react.js";
-import { redactDeep } from "./runners/redact.js";
+import { redactDeep, redactSecrets } from "./runners/redact.js";
 import { runSecrets } from "./runners/secrets.js";
 import { runSecurity } from "./runners/security.js";
 import { runSqliteD1 } from "./runners/sqlite-d1.js";
@@ -81,6 +83,13 @@ type ScoreMode = "available-scored" | "available-unscored" | "not-applicable" | 
 export interface ScanOptions {
 	/** Skip test execution (faster scan). Default: false */
 	skipTests?: boolean;
+	/** Base ref the caller will filter issues against (`--diff`). Recorded in
+	 *  `meta.scan.diffBase` so the report says it is partial. Default: null */
+	diffBase?: string | null;
+	/** Where the scan ran, when the caller already detected it (the CLI does,
+	 *  once, and hands the same context to --upload and --pr-comment).
+	 *  Default: detected from `cwd` and process.env. */
+	ciContext?: CiContext;
 	/** Only run these checks (by name). Default: all checks */
 	checks?: string[];
 	/** Override config (instead of loading from .vcqa.json). */
@@ -118,6 +127,14 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		envIgnore: process.env.VCQA_IGNORE,
 	});
 	const fileInventory = buildFileInventory(resolvedCwd, workspace, scanPolicy);
+	// Content anchors hash the redacted line: a fingerprint must not be a hash
+	// of a credential (a short one could be brute-forced from it). For lines
+	// with nothing to redact this is the raw line, so those fingerprints hold.
+	const rawSourceLine = inventoryLineReader(fileInventory);
+	const readSourceLine: SourceLineReader = (file, line) => {
+		const text = rawSourceLine(file, line);
+		return text === undefined ? text : redactSecrets(text);
+	};
 
 	setGlobalSrcRoots(workspace.isMonorepo ? workspace.srcRoots : undefined);
 	setGlobalIgnore(config.ignore);
@@ -269,7 +286,13 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 			result.details = { ...result.details, toolRuns };
 		}
 
-		result = normalizeCheckResult(result);
+		// One choke point for credential values: every string a check returns —
+		// details (parsed test failures, tool logs, commands), issue messages,
+		// snippets — is redacted before anything can render, write or upload it.
+		// Before normalising, so fingerprints are hashed over what is stored.
+		result = redactDeep(result);
+
+		result = normalizeCheckResult(result, readSourceLine);
 
 		// Apply per-check ignore patterns
 		const patterns = getCheckIgnore(config, result.name);
@@ -285,11 +308,6 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 			});
 		}
 
-		// One choke point for credential values: every string a check returns —
-		// details (parsed test failures, tool logs, commands), issue messages,
-		// snippets — is redacted before anything can render, write or upload it.
-		result = redactDeep(result);
-
 		checks.push(result);
 		options.onProgress?.(runner.name, result, i, total);
 	}
@@ -299,7 +317,35 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 	).length;
 	const score = computeScore(checks);
 	const grade = gradeFromScore(score);
-	const { repoUrl, branch } = detectRepoUrl(resolvedCwd);
+	const { repoUrl } = detectRepoUrl(resolvedCwd);
+	const { git, ci, shaOnRemote } = options.ciContext ?? detectCiContext(resolvedCwd);
+
+	// Built as a typed variable rather than inline: the provenance fields
+	// (schema 0.6.0) are not yet on the VibeReport type this CLI compiles against.
+	const meta: VibeReport["meta"] & ReportProvenanceMeta & { linkRef: string } = {
+		cwd: resolvedCwd,
+		node: process.version,
+		duration: Date.now() - start,
+		// What the scan actually looked at — so a reader can sanity-check the
+		// result against the size of their project instead of taking it on faith.
+		filesScanned: inventorySourceCount,
+		stack,
+		workspace,
+		scanPolicy: scanPolicySummary(scanPolicy),
+		fileInventory: fileInventory.summary,
+		analyzerSnapshots: buildAnalyzerSnapshots(checks),
+		fingerprintVersion: FINGERPRINT_VERSION,
+		repoUrl,
+		// Mirrors git.branch; "" when unknown — never a guessed "main".
+		branch: git.branch ?? "",
+		source: "cli",
+		scan: { id: randomUUID(), skipTests, diffBase: options.diffBase ?? null },
+		git,
+		ci,
+		// File links: the sha is a permalink only once it is pushed; a local
+		// HEAD that is on no remote links to the branch instead.
+		linkRef: (shaOnRemote === false ? git.branch : git.sha || git.branch) ?? "",
+	};
 
 	return {
 		version: VERSION,
@@ -307,25 +353,12 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		score,
 		grade,
 		checks,
-		meta: redactDeep({
-			cwd: resolvedCwd,
-			node: process.version,
-			duration: Date.now() - start,
-			// What the scan actually looked at — so a reader can sanity-check the
-			// result against the size of their project instead of taking it on faith.
-			filesScanned: inventorySourceCount,
-			stack,
-			workspace,
-			scanPolicy: scanPolicySummary(scanPolicy),
-			fileInventory: fileInventory.summary,
-			analyzerSnapshots: buildAnalyzerSnapshots(checks),
-			repoUrl,
-			branch,
-		}),
+		// Last pass over meta: provenance strings (remote URL, CI refs) can carry tokens.
+		meta: redactDeep(meta),
 	};
 }
 
-function normalizeCheckResult(result: CheckResult): NormalizedCheckResult {
+function normalizeCheckResult(result: CheckResult, readSourceLine?: SourceLineReader): NormalizedCheckResult {
 	const originalScore = result.score;
 	const issues = [...(Array.isArray(result.issues) ? result.issues : [])];
 	const details = { ...(result.details ?? {}) };
@@ -353,7 +386,7 @@ function normalizeCheckResult(result: CheckResult): NormalizedCheckResult {
 		score,
 		grade: gradeFromScore(score),
 		details: normalizedDetails,
-		issues: withIssueFingerprints(result.name, issues),
+		issues: withIssueFingerprints(result.name, issues, readSourceLine),
 	};
 }
 

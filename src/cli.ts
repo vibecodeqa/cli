@@ -5,14 +5,17 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { getCheckMeta } from "./check-meta.js";
+import { type CiContext, detectCiContext } from "./ci-context.js";
 import { runExplain } from "./commands/explain.js";
 import { runFix } from "./commands/fix.js";
 import { runInit } from "./commands/init.js";
 import { validateCwd } from "./commands/shared.js";
 import { loadConfig } from "./config.js";
 import { scan } from "./core.js";
-import { computeDelta } from "./delta.js";
+import { computeDelta, formatCheckChangeBullets } from "./delta.js";
 import { detectStack, detectWorkspace } from "./detect.js";
+import { resolveFailUnder } from "./fail-under.js";
+import { isPartialScan } from "./history.js";
 import { postPRComment } from "./pr-comment.js";
 import { generatePages } from "./report/html.js";
 import { buildReportHistorySnapshot, withFreshAnalyzerSnapshots } from "./report-contract.js";
@@ -122,8 +125,8 @@ function printHelp(): void {
 
   \x1b[1mFlags:\x1b[0m
     --skip-tests      Skip test execution (faster scan)
-    --ci              CI mode (exit 1 if score < 60)
-    --fail-under N    Exit 1 if score below N (e.g. --fail-under 80)
+    --ci              CI mode (exit 1 if score < failUnder from config, else 60)
+    --fail-under N    Exit 1 if score below N; overrides config and --ci (e.g. --fail-under 80)
     --json            Output JSON only (no terminal UI)
     --badge           Generate SVG badge
     --sarif           Generate SARIF for GitHub Code Scanning
@@ -184,14 +187,7 @@ function generateMarkdown(report: VibeReport, trend: TrendDelta | null, prevRepo
 		md += "\n\n";
 
 		// Per-check changes
-		const changed = delta.checks.filter((c) => c.delta !== 0).sort((a, b) => b.delta - a.delta);
-		if (changed.length > 0) {
-			for (const c of changed.slice(0, 8)) {
-				const a = c.delta > 0 ? "+" : "";
-				md += `- ${c.delta > 0 ? "✅" : "⚠️"} ${c.name}: ${c.before} → ${c.after} (${a}${c.delta})\n`;
-			}
-			md += "\n";
-		}
+		md += formatCheckChangeBullets(delta, 8);
 	} else if (trend) {
 		const arrow = trend.scoreDelta > 0 ? "📈" : trend.scoreDelta < 0 ? "📉" : "➡️";
 		md += `${arrow} **${trend.scoreDelta > 0 ? "+" : ""}${trend.scoreDelta}** vs previous`;
@@ -441,7 +437,7 @@ async function writeOutputs(report: VibeReport, outputDir: string, flags: Parsed
 
 // ── Upload ──
 
-async function handleUpload(report: VibeReport, cwd: string, quietMode: boolean): Promise<void> {
+async function handleUpload(report: VibeReport, cwd: string, quietMode: boolean, ciContext: CiContext): Promise<void> {
 	const token = process.env.VCQA_TOKEN || process.env.GITHUB_TOKEN;
 	if (!token) {
 		if (!quietMode) console.log("  \x1b[33m\u26a0 Set VCQA_TOKEN to enable upload\x1b[0m");
@@ -450,7 +446,7 @@ async function handleUpload(report: VibeReport, cwd: string, quietMode: boolean)
 	// buildReportUploadPayload owns the repo-slug rule and returns null when
 	// there is no remote to attribute the report to. Deriving the slug a second
 	// time here, just to explain the refusal, would be a second copy of it.
-	const payload = buildReportUploadPayload(report, currentGitSha(cwd));
+	const payload = buildReportUploadPayload(report, currentGitSha(cwd, ciContext));
 	if (!payload) {
 		if (!quietMode) console.log("  \x1b[33m\u26a0 No git remote — can't upload\x1b[0m");
 		return;
@@ -630,10 +626,16 @@ async function main() {
 	const quietMode = jsonOnly || flags.markdownMode;
 	if (!quietMode) printHeader(cwd, stack, workspace);
 
+	// Where this run is, detected once: the report, --upload and --pr-comment
+	// must describe the same commit, and each detection spawns git.
+	const ciContext = detectCiContext(cwd);
+
 	// Run scan using core API with progress output
 	const report = await scan(cwd, {
 		skipTests,
 		config,
+		diffBase,
+		ciContext,
 		onProgress: quietMode
 			? undefined
 			: (check, result) => {
@@ -662,8 +664,6 @@ async function main() {
 	}
 	report.meta.analyzerSnapshots = withFreshAnalyzerSnapshots(report).meta.analyzerSnapshots;
 
-	const trend = computeTrend(report, outputDir);
-
 	// Load previous report BEFORE writeOutputs overwrites it (for delta in markdown/PR)
 	let prevReport: VibeReport | undefined;
 	const prevReportPath = join(outputDir, "report.json");
@@ -674,6 +674,10 @@ async function main() {
 			/* corrupt */
 		}
 	}
+	// A --diff report covers only the changed files. Compared with a full scan,
+	// either way round, every issue outside the diff would read as fixed or new.
+	if (isPartialScan(report) || isPartialScan(prevReport)) prevReport = undefined;
+	const trend = prevReport ? computeTrend(report, outputDir) : null;
 
 	await writeOutputs(report, outputDir, flags, prevReport);
 
@@ -686,20 +690,27 @@ async function main() {
 	}
 
 	if (flags.annotations) emitAnnotations(report);
-	if (flags.uploadMode) await handleUpload(report, cwd, quietMode);
+	if (flags.uploadMode) await handleUpload(report, cwd, quietMode, ciContext);
 
 	if (flags.prComment) {
-		const posted = await postPRComment(report, trend, cwd, prevReport);
+		const posted = await postPRComment(report, trend, cwd, prevReport, ciContext);
 		if (!quietMode) {
 			if (posted) console.log("  \x1b[32m\u2713 PR comment posted\x1b[0m");
 			else console.log("  \x1b[2mNo PR detected or no GITHUB_TOKEN — skipping PR comment\x1b[0m");
 		}
 	}
 
-	const failUnder = flags.failUnder ?? (ciMode ? 60 : (config.failUnder ?? 0));
-	if (failUnder > 0 && score < failUnder && !watchMode) {
-		if (!quietMode) console.log(`  \x1b[31mFailing: score ${score} < ${failUnder}\x1b[0m\n`);
+	const gate = resolveFailUnder(flags.failUnder, config.failUnder, ciMode);
+	if (gate.threshold > 0 && score < gate.threshold && !watchMode) {
+		if (!quietMode) console.log(`  \x1b[31mFailing: score ${score} < ${gate.threshold} (${gate.source})\x1b[0m\n`);
 		process.exit(1);
+	}
+	if (ciMode && !quietMode && !watchMode) {
+		console.log(
+			gate.threshold > 0
+				? `  \x1b[32mPassing: score ${score} \u2265 ${gate.threshold} (${gate.source})\x1b[0m\n`
+				: `  \x1b[2mNo score gate: failUnder is 0 (${gate.source})\x1b[0m\n`,
+		);
 	}
 
 	if (!quietMode && !ciMode && !watchMode && !process.env.VCQA_NO_UPDATE_CHECK) {

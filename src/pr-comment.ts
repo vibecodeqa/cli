@@ -1,8 +1,8 @@
 /** Post scan results as a GitHub PR comment. Upserts to avoid duplicates. */
 
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { computeDelta } from "./delta.js";
+import { type CiContext, detectCiContext } from "./ci-context.js";
+import { computeDelta, formatCheckChangeBullets } from "./delta.js";
 import type { TrendDelta } from "./trend.js";
 import type { VibeReport } from "./types.js";
 
@@ -14,8 +14,14 @@ interface PRInfo {
 	prNumber: number;
 }
 
-export async function postPRComment(report: VibeReport, trend: TrendDelta | null, cwd: string, prevReport?: VibeReport): Promise<boolean> {
-	const pr = detectPR(cwd);
+export async function postPRComment(
+	report: VibeReport,
+	trend: TrendDelta | null,
+	cwd: string,
+	prevReport?: VibeReport,
+	ctx?: CiContext,
+): Promise<boolean> {
+	const pr = detectPR(cwd, ctx);
 	if (!pr) return false;
 
 	const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
@@ -33,21 +39,14 @@ export async function postPRComment(report: VibeReport, trend: TrendDelta | null
 	return true;
 }
 
-function detectPR(cwd: string): PRInfo | null {
-	// 1. GitHub Actions: GITHUB_EVENT_PATH contains PR info
-	const eventPath = process.env.GITHUB_EVENT_PATH;
-	if (eventPath && existsSync(eventPath)) {
-		try {
-			const event = JSON.parse(readFileSync(eventPath, "utf-8"));
-			const pr = event.pull_request || event.issue;
-			if (pr?.number && process.env.GITHUB_REPOSITORY) {
-				const parts = process.env.GITHUB_REPOSITORY.split("/");
-				if (parts.length >= 2) {
-					return { owner: parts[0], repo: parts[1], prNumber: pr.number };
-				}
-			}
-		} catch {
-			/* not a PR event */
+export function detectPR(cwd: string, ctx: CiContext = detectCiContext(cwd)): PRInfo | null {
+	// 1. GitHub Actions: the event payload names the PR (pull_request*), or the
+	//    issue a comment was left on (issue_comment on a PR).
+	const prNumber = ctx.git.prNumber ?? ctx.event?.pull_request?.number ?? ctx.event?.issue?.number;
+	if (prNumber && ctx.repository) {
+		const parts = ctx.repository.split("/");
+		if (parts.length >= 2) {
+			return { owner: parts[0], repo: parts[1], prNumber };
 		}
 	}
 
@@ -89,14 +88,7 @@ export function buildCommentBody(report: VibeReport, trend: TrendDelta | null, p
 		if (delta.introduced.length > 0) body += ` · ${delta.introduced.length} new`;
 		body += "\n\n";
 
-		const changed = delta.checks.filter((c) => c.delta !== 0).sort((a, b) => b.delta - a.delta);
-		if (changed.length > 0) {
-			for (const c of changed.slice(0, 6)) {
-				const a = c.delta > 0 ? "+" : "";
-				body += `- ${c.delta > 0 ? "✅" : "⚠️"} ${c.name}: ${c.before} → ${c.after} (${a}${c.delta})\n`;
-			}
-			body += "\n";
-		}
+		body += formatCheckChangeBullets(delta, 6);
 	} else if (trend) {
 		const arrow = trend.scoreDelta > 0 ? "📈" : trend.scoreDelta < 0 ? "📉" : "➡️";
 		body += `${arrow} **${trend.scoreDelta > 0 ? "+" : ""}${trend.scoreDelta}** vs previous`;

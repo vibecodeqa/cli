@@ -134,7 +134,44 @@ describe("CLI flags", () => {
 			const check = report.checks.find((c: { name: string }) => c.name === snapshot.analyzerId);
 			expect(snapshot.findingCount).toBe(check.issues.length);
 		}
+		// The report says it is partial (#98: meta.scan).
+		expect(report.meta.scan.diffBase).toBe("HEAD");
 	}, 30_000);
+});
+
+describe("--diff partial reports are not a comparison baseline (#98)", () => {
+	beforeEach(() => {
+		execSync("git init && git config user.email 'test@test.com' && git config user.name 'Test' && git add -A && git commit -m init", {
+			cwd: TMP,
+			stdio: "pipe",
+		});
+		writeFileSync(join(TMP, "src", "new.ts"), 'eval("bad");');
+	});
+
+	it("a full scan after a --diff scan does not compare against it", () => {
+		run("--skip-tests --json --diff HEAD .");
+		const partial = JSON.parse(readFileSync(join(TMP, ".vibe-check", "report.json"), "utf-8"));
+		expect(partial.meta.scan.diffBase).toBe("HEAD");
+		const history = readdirSync(join(TMP, ".vibe-check", "history"));
+		const snapshot = JSON.parse(readFileSync(join(TMP, ".vibe-check", "history", history[0]!), "utf-8"));
+		expect(snapshot.meta.scan.diffBase).toBe("HEAD");
+
+		const md = run("--skip-tests --markdown --fail-under 0 .");
+		expect(md).toContain("VibeCode QA:");
+		expect(md).not.toContain("vs previous");
+	}, 60_000);
+
+	it("a --diff scan after a full scan does not compare against it", () => {
+		run("--skip-tests --json --fail-under 0 .");
+		const md = run("--skip-tests --markdown --fail-under 0 --diff HEAD .");
+		expect(md).toContain("VibeCode QA:");
+		expect(md).not.toContain("vs previous");
+	}, 60_000);
+
+	it("two full scans still compare", () => {
+		run("--skip-tests --json --fail-under 0 .");
+		expect(run("--skip-tests --markdown --fail-under 0 .")).toContain("vs previous");
+	}, 60_000);
 });
 
 describe("scan output on-ramp", () => {
@@ -249,6 +286,55 @@ describe("config file", () => {
 	}, 30_000);
 });
 
+describe("--ci honours config failUnder (#108)", () => {
+	function scan(args: string): { status: number; out: string } {
+		try {
+			const out = execSync(`node ${CLI} ${args}`, {
+				encoding: "utf-8",
+				timeout: 30_000,
+				cwd: TMP,
+				env: { ...process.env, VCQA_NO_UPDATE_CHECK: "1" },
+			});
+			return { status: 0, out };
+		} catch (e: any) {
+			return { status: e.status ?? -1, out: `${e.stdout ?? ""}${e.stderr ?? ""}` };
+		}
+	}
+
+	it("fails under --ci when the score is below a config failUnder above 60", () => {
+		writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ failUnder: 100 }));
+		const { status, out } = scan("--ci --skip-tests .");
+		const score = Number(/Failing: score (\d+) < 100 \(config\)/.exec(out)?.[1]);
+		expect(status).toBe(1);
+		expect(score).toBeGreaterThan(60); // the old CI default of 60 would have passed it
+	}, 30_000);
+
+	it("passes under --ci when a config failUnder below 60 clears a score below 60", () => {
+		// A project that scores under 60: the old CI default would fail it (exit 1).
+		const fn = (i: number) =>
+			`export function f${i}(a: any, b: any): any {\n  try { eval("x" + a); } catch (e) {}\n  // @ts-ignore\n  if (a) { if (b) { for (const x of a) { if (x) { while (b) { if ((a && b) || x) { return a as any; } } } } } }\n  return JSON.parse(b);\n}\n`;
+		const body = Array.from({ length: 40 }, (_, i) => fn(i)).join("");
+		for (let j = 0; j < 6; j++) writeFileSync(join(TMP, "src", `m${j}.ts`), body);
+		writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ failUnder: 1 }));
+		const { status, out } = scan("--ci --skip-tests .");
+		const score = Number(/Passing: score (\d+) \u2265 1 \(config\)/.exec(out)?.[1]);
+		expect(status).toBe(0);
+		expect(score).toBeLessThan(60); // the old CI default of 60 would have failed it
+	}, 30_000);
+
+	it("--fail-under overrides config under --ci", () => {
+		writeFileSync(join(TMP, ".vcqa.json"), JSON.stringify({ failUnder: 100 }));
+		const { status, out } = scan("--ci --skip-tests --fail-under 1 .");
+		expect(status).toBe(0);
+		expect(out).toMatch(/Passing: score \d+ \u2265 1 \(flag\)/);
+	}, 30_000);
+
+	it("uses the CI default of 60 when neither flag nor config sets one", () => {
+		const { out } = scan("--ci --skip-tests .");
+		expect(out).toMatch(/(Passing: score \d+ \u2265 60|Failing: score \d+ < 60) \(ci default\)/);
+	}, 30_000);
+});
+
 describe("init command", () => {
 	it("creates workflow file", () => {
 		const out = run("init .");
@@ -256,7 +342,8 @@ describe("init command", () => {
 		expect(existsSync(join(TMP, ".github", "workflows", "vibecodeqa.yml"))).toBe(true);
 		const workflow = readFileSync(join(TMP, ".github", "workflows", "vibecodeqa.yml"), "utf-8");
 		expect(workflow).toContain("pull_request");
-		expect(workflow).toContain("--fail-under");
+		expect(workflow).toContain("--ci");
+		expect(workflow).not.toContain("--fail-under"); // the gate lives in .vcqa.json (#108)
 	});
 
 	it("does not overwrite existing workflow", () => {
@@ -296,11 +383,12 @@ describe("init command", () => {
 		expect(Object.keys(config.checks)).toContain("confusion");
 		expect(Object.keys(config.checks)).toContain("context");
 		expect(Object.keys(config.checks).length).toBe(Object.keys(CHECK_META).length);
+		// The CI gate the scaffolded workflow enforces lives here, not in a flag (#108)
+		expect(config.failUnder).toBe(70);
 		// Should have help fields
 		expect(config._comment).toContain("vibecodeqa.online");
 		expect(config._checks_help).toContain("enabled");
 		expect(config._ignore_help).toContain("vendor");
-		expect(config.failUnder).toBe(60);
 	});
 
 	it("does not overwrite existing .vcqa.json", () => {

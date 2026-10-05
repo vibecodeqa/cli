@@ -14,7 +14,8 @@ import { basename, extname, join } from "node:path";
 import type { FileInventory } from "../file-inventory.js";
 import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles } from "../fs-utils.js";
-import type { CheckResult, Issue, StackInfo, WorkspaceInfo } from "../types.js";
+import { type FingerprintedIssue, normalizePath } from "../issue-fingerprint.js";
+import type { CheckResult, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 
 interface PatternCheck {
@@ -53,7 +54,7 @@ const CODE_SMELLS: PatternCheck[] = [
 
 export function runStandards(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
-	const issues: Issue[] = [];
+	const issues: FingerprintedIssue[] = [];
 
 	// Detect CLI projects — console.log is intentional in CLI tools
 	let isCLI = false;
@@ -129,6 +130,8 @@ export function runStandards(cwd: string, stack: StackInfo, workspace?: Workspac
 				message: `${lines} lines — split this file (exponential penalty above ${SOFT_LIMIT})`,
 				file: f.path,
 				rule: "large-file",
+				// Identity is the file, not its line count (#97).
+				subject: normalizePath(f.path),
 			});
 		} else if (lines > SOFT_LIMIT) {
 			largeFiles++;
@@ -139,6 +142,7 @@ export function runStandards(cwd: string, stack: StackInfo, workspace?: Workspac
 				message: `${lines} lines — consider splitting (penalty grows exponentially above ${SOFT_LIMIT})`,
 				file: f.path,
 				rule: "large-file",
+				subject: normalizePath(f.path),
 			});
 		}
 	}

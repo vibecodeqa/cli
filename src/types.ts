@@ -82,5 +82,7 @@ export interface VibeReport extends Omit<SchemaVibeReport, "meta"> {
 		scanPolicy?: Record<string, unknown>;
 		fileInventory?: Record<string, unknown>;
 		analyzerSnapshots?: AnalyzerSnapshot[];
+		/** Issue fingerprint scheme (#97); absent = 1. Declared by schema 0.6.0. */
+		fingerprintVersion?: number;
 	};
 }

@@ -242,3 +242,33 @@ describe("redactDeep", () => {
 		expect(leakedWindows(t.body, JSON.stringify(input)).length).toBeGreaterThan(0); // input untouched
 	});
 });
+
+describe("report provenance survives redaction intact", () => {
+	it("leaves git/CI meta (shas, refs, run URLs, credential-word branch names) unchanged", () => {
+		const hex = (n: number) => Array.from({ length: n }, (_, i) => "0123456789abcdef"[(i * 7 + 3) % 16]).join("");
+		const meta = {
+			repoUrl: "https://github.com/octo-org/widgets",
+			branch: "chore/rotate-secret-token-handling",
+			linkRef: hex(40),
+			git: {
+				sha: hex(40),
+				headSha: hex(40),
+				baseSha: hex(40),
+				branch: "chore/rotate-secret-token-handling",
+				ref: "refs/pull/42/merge",
+				prNumber: 42,
+				defaultBranch: "main",
+			},
+			ci: {
+				provider: "github-actions",
+				runId: "9876543210",
+				runAttempt: 2,
+				runUrl: "https://github.com/octo-org/widgets/actions/runs/9876543210",
+				event: "pull_request",
+				actor: "octocat",
+			},
+			scan: { id: "3f2b8c1e-4a5d-4e6f-9a7b-8c9d0e1f2a3b", skipTests: true, diffBase: "origin/main" },
+		};
+		expect(redactDeep(meta)).toEqual(meta);
+	});
+});

@@ -4,9 +4,18 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { type CheckMeta, getCheckMeta } from "../check-meta.js";
 import { suggestFix } from "../commands/shared.js";
-import type { ScanDelta } from "../delta.js";
+import {
+	type CheckSide,
+	compareCheckSides,
+	formatCheckSide,
+	formatCheckState,
+	formatTransition,
+	type ScanDelta,
+	scoreChanges,
+	statusTransitions,
+} from "../delta.js";
 import { buildCoverageMapInput, generateCoverageMap } from "../diagrams/coverage.js";
-import { loadHistory } from "../history.js";
+import { type HistoryEntry, loadHistory } from "../history.js";
 import {
 	generateArchSVG,
 	generateDSM,
@@ -728,59 +737,75 @@ export function trendsPage(historyDir: string | undefined): string {
 		{ width: 700, height: 150 },
 	);
 
-	// Collect all check names from latest entry
+	// Check names from the latest entry, plus any the first entry had (so a
+	// dropped check reads "72 → not present" instead of vanishing).
+	const first = history[0];
 	const latest = history[history.length - 1];
-	const checkNames = [...latest.checkScores.keys()];
+	const checkNames = [...latest.checkStates.keys()];
+	for (const name of first.checkStates.keys()) if (!checkNames.includes(name)) checkNames.push(name);
 
-	// Per-check mini charts
+	// Per-check mini charts. Only scans where the check ran are plotted: a
+	// not-run check's placeholder 100 is not a score, so it is a gap (#107).
 	const checkCharts = checkNames
 		.map((name) => {
-			const data = history.map((h) => ({ score: h.checkScores.get(name) ?? 0, timestamp: h.timestamp })).filter((d) => d.score > 0);
+			const data = history.flatMap((h) => {
+				const score = h.checkScores.get(name);
+				return score === undefined ? [] : [{ score, timestamp: h.timestamp }];
+			});
 			if (data.length < 2) return "";
 
-			const current = data[data.length - 1].score;
-			const prev = data[data.length - 2].score;
-			const delta = current - prev;
-			const deltaStr =
-				delta > 0
-					? `<span style="color:var(--pass)">+${delta}</span>`
-					: delta < 0
-						? `<span style="color:var(--fail)">${delta}</span>`
-						: `<span class="muted">=</span>`;
-			const color = current >= 90 ? "var(--pass)" : current >= 75 ? "#84cc16" : current >= 60 ? "var(--warn)" : "var(--fail)";
-
+			const latestSide = historySide(latest, name);
 			const chart = buildTimeline(data, { width: 300, height: 60 });
+			let headline: string;
+			if (latestSide.state === "ran") {
+				const current = latestSide.score ?? 0;
+				const delta = current - data[data.length - 2].score;
+				const deltaStr =
+					delta > 0
+						? `<span style="color:var(--pass)">+${delta}</span>`
+						: delta < 0
+							? `<span style="color:var(--fail)">${delta}</span>`
+							: `<span class="muted">=</span>`;
+				const color = current >= 90 ? "var(--pass)" : current >= 75 ? "#84cc16" : current >= 60 ? "var(--warn)" : "var(--fail)";
+				headline = `<span class="trend-score" style="color:${color}">${current}</span>${deltaStr}`;
+			} else {
+				// A single check's state on its own: show the crash reason in full.
+				headline = `<span class="trend-status muted">${e(formatCheckState(latestSide, latest.checkReasons.get(name)))}</span>`;
+			}
 
 			return `<div class="trend-card">
-<div class="trend-header"><span class="trend-name">${e(name)}</span><span class="trend-score" style="color:${color}">${current}</span>${deltaStr}</div>
+<div class="trend-header"><span class="trend-name">${e(name)}</span>${headline}</div>
 <div class="trend-chart">${chart}</div>
 </div>`;
 		})
 		.filter(Boolean)
 		.join("");
 
-	// Score delta table
-	const deltaRows = checkNames
-		.map((name) => {
-			const scores = history.map((h) => h.checkScores.get(name) ?? 0);
-			const first = scores.find((s) => s > 0) ?? 0;
-			const last = scores[scores.length - 1];
-			const delta = last - first;
-			if (first === 0 && last === 0) return "";
-			return { name, first, last, delta };
-		})
-		.filter(Boolean)
-		.sort((a, b) => (b as { delta: number }).delta - (a as { delta: number }).delta) as {
-		name: string;
-		first: number;
-		last: number;
-		delta: number;
-	}[];
+	// First → latest: a numeric delta only when the check ran at both ends;
+	// otherwise a status transition such as "64 → unavailable".
+	type DeltaRow = { name: string; before: CheckSide; after: CheckSide; delta: number; transition: boolean };
+	const deltaRows: DeltaRow[] = [];
+	for (const name of checkNames) {
+		const firstEntry = history.find((h) => h.checkStates.has(name));
+		if (!firstEntry) continue;
+		const before = historySide(firstEntry, name);
+		const after = historySide(latest, name);
+		const { delta, transition } = compareCheckSides(before, after);
+		if (before.state !== "ran" && !transition) continue; // never ran: nothing to show
+		deltaRows.push({ name, before, after, delta, transition: !!transition });
+	}
+	deltaRows.sort((a, b) => Number(a.transition) - Number(b.transition) || b.delta - a.delta);
 
 	const deltaTable = deltaRows
 		.map((r) => {
-			const clr = r.delta > 0 ? "var(--pass)" : r.delta < 0 ? "var(--fail)" : "var(--muted)";
-			return `<div class="trend-row"><span class="trend-row-name">${e(r.name)}</span><span class="trend-row-val">${r.first}</span><span class="trend-row-arrow">\u2192</span><span class="trend-row-val">${r.last}</span><span class="trend-row-delta" style="color:${clr}">${r.delta > 0 ? "+" : ""}${r.delta}</span></div>`;
+			const cell = (side: CheckSide) =>
+				side.state === "ran"
+					? `<span class="trend-row-val">${side.score}</span>`
+					: `<span class="trend-row-val trend-row-state">${e(formatCheckSide(side))}</span>`;
+			const tail = r.transition
+				? `<span class="trend-row-delta trend-row-state muted">status</span>`
+				: `<span class="trend-row-delta" style="color:${r.delta > 0 ? "var(--pass)" : r.delta < 0 ? "var(--fail)" : "var(--muted)"}">${r.delta > 0 ? "+" : ""}${r.delta}</span>`;
+			return `<div class="trend-row"><span class="trend-row-name">${e(r.name)}</span>${cell(r.before)}<span class="trend-row-arrow">\u2192</span>${cell(r.after)}${tail}</div>`;
 		})
 		.join("");
 
@@ -796,6 +821,15 @@ export function trendsPage(historyDir: string | undefined): string {
 
 <h3 style="margin-top:2rem">Per-Check Trends</h3>
 <div class="trend-grid">${checkCharts}</div>`;
+}
+
+/** One check's side in a history entry: its score when it ran, else its run state. */
+function historySide(entry: HistoryEntry, name: string): CheckSide {
+	const state = entry.checkStates.get(name);
+	if (!state) return { state: "absent" };
+	if (state !== "ran") return { state };
+	const score = entry.checkScores.get(name);
+	return score === undefined ? { state: "absent" } : { state, score };
 }
 
 // ── Feature Map (Pro) ────────────────────────────────────
@@ -1031,13 +1065,19 @@ export function actionsPage(allChecks: CheckResult[], fl: FL, linter: string, de
 		const dArrow = delta.scoreDelta > 0 ? "&#9650;" : delta.scoreDelta < 0 ? "&#9660;" : "&#9644;";
 
 		// Per-check changes
-		const changed = delta.checks.filter((c) => c.delta !== 0).sort((a, b) => b.delta - a.delta);
+		const changed = scoreChanges(delta);
 		const checkDeltas = changed
 			.slice(0, 10)
 			.map((c) => {
 				const cc = c.delta > 0 ? "var(--pass)" : "var(--fail)";
 				return `<span class="delta-chip" style="color:${cc}">${c.name} ${c.delta > 0 ? "+" : ""}${c.delta}</span>`;
 			})
+			.join("");
+		// Checks that started or stopped running — listed apart from score changes,
+		// because a not-run check's placeholder 100 is not a score (#107).
+		const statusChips = statusTransitions(delta)
+			.slice(0, 10)
+			.map((c) => `<span class="delta-chip" style="color:var(--muted)">${e(c.name)}: ${e(formatTransition(c.transition))}</span>`)
 			.join("");
 
 		// Fixed issues list
@@ -1077,6 +1117,7 @@ export function actionsPage(allChecks: CheckResult[], fl: FL, linter: string, de
     <span style="color:var(--muted)">${delta.after.issueCount} remaining</span>
   </div>
   ${checkDeltas ? `<div class="delta-checks">${checkDeltas}</div>` : ""}
+  ${statusChips ? `<div class="delta-checks delta-status"><span class="delta-status-label">Status changes:</span> ${statusChips}</div>` : ""}
   ${fixedList}${newList}
 </div>`;
 	}
