@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### A check that did not run is no longer scored, diffed or counted
+A not-run check carries a placeholder `score: 100` and a crashed runner a
+placeholder `0`/F. Deltas and trends subtracted them from real scores, so
+installing a linter read as `lint: 100 → 72 (-28)`, uninstalling it as `+36`,
+and a crash as `-72` (#107).
+- **Changed**: when either side of a comparison did not run (skipped,
+  unavailable), its runner crashed, or the check is absent, the delta, the
+  trend, the PR comment, the delta markdown and the Actions and Trends pages
+  show a status transition, e.g. `lint: unavailable → 72` or
+  `72 → failed (runner error)`, instead of a numeric delta. The Trends page
+  plots only the scans in which a check ran; a single check's card shows the
+  full crash reason.
+- **Changed**: issues of such a check are not compared, so a crash, an
+  uninstalled tool or a dropped check no longer reports its issues as fixed
+  (or, the other way round, as new).
+
+**Note for consumers** of `@vibecodeqa/cli/core`:
+- `ScanDelta.checks[].before` / `.after` (`CheckDelta`) are now
+  `number | null`: `null` for a side that did not run, crashed, or is absent;
+  the check then carries a `transition` and `delta: 0`. TypeScript callers
+  that treat them as `number` need a null check.
+- Internally (not exported from `core`), `TrendDelta.checkDeltas[].prev` /
+  `.curr` change the same way, and the unused `trendHTML` is removed.
+
 ## 0.56.0 (2026-08-18)
 
 ### A linter that cannot read your language no longer grades it
