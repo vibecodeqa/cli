@@ -44,9 +44,12 @@ export interface IssueSnapshot {
 export type SourceLineReader = (file: string, line: number) => string | undefined;
 
 /**
- * Line reader over the scan's FileInventory. Reads the raw file (not the
- * SFC-extracted script), so a reported line number means the same line a
- * reader sees. Files are read at most once per scan.
+ * Line reader over the scan's FileInventory. Reads the raw file, which is what a
+ * reported line number means for every file the anchor is used on — SFCs are
+ * never anchored (see {@link contentAnchor}). Files are read at most once per
+ * scan. A file that cannot be read (deleted, permissions) yields no line, so its
+ * findings fall back to the unanchored key; they churn once, when it becomes
+ * readable again, rather than failing the scan.
  */
 export function inventoryLineReader(inventory: FileInventory): SourceLineReader {
 	const byPath = new Map([...inventory.files, ...inventory.ignoredFiles].map((f) => [normalizePath(f.path), f]));
@@ -165,8 +168,21 @@ function v2Key(checkName: string, issue: FingerprintedIssue, readLine?: SourceLi
 	return anchor ? [...base, `@${anchor}`] : base;
 }
 
+/**
+ * Vue/Svelte single-file components carry no content anchor. Their line numbers
+ * have no single provenance: most runners analyse `SourceFile.content`, the
+ * extracted `<script>`, and report script-relative lines, while accessibility,
+ * security and external linters report raw-file lines — and an issue does not
+ * say which. Anchoring on either text would hash an unrelated line for the other
+ * half, so a template-only edit would re-identify script findings. Unanchored,
+ * SFC findings keep the v1-shaped key and repeats are told apart by line order,
+ * which an edit outside the finding's own section does not disturb.
+ */
+const UNANCHORED_EXTENSIONS = /\.(vue|svelte)$/i;
+
 function contentAnchor(issue: Issue, readLine?: SourceLineReader): string | undefined {
 	if (!readLine || !issue.file || typeof issue.line !== "number" || issue.line < 1) return undefined;
+	if (UNANCHORED_EXTENSIONS.test(issue.file)) return undefined;
 	const text = readLine(normalizePath(issue.file), issue.line);
 	if (text === undefined) return undefined;
 	return createHash("sha1").update(text.replace(/\s+/g, " ").trim()).digest("hex").slice(0, 12);

@@ -20,7 +20,10 @@ repeated findings in one file shared one fingerprint (#97).
     the clone snippet;
   - these runners emit the key as `Issue.subject`;
   - other findings that point at a line add a hash of that source line, and
-    only findings that are still identical get an occurrence ordinal.
+    only findings that are still identical get an occurrence ordinal. Vue and
+    Svelte files are not anchored — their runners report lines relative to
+    the extracted `<script>` or to the raw file depending on the check — so
+    their repeats are told apart by line order alone.
 - **Compatibility**: comparing a v1 report (no `fingerprintVersion`) with a v2
   report recomputes v1 fingerprints on both sides, so the first scan after the
   upgrade shows no churn. Anything that stores fingerprints and matches them

@@ -329,6 +329,40 @@ describe("scan writes v2", () => {
 	});
 });
 
+describe("v2 single-file components", { timeout: 30_000 }, () => {
+	// Runners report script-relative lines for SFCs, so the raw-file line a
+	// content anchor would hash is usually template. A template-only edit must
+	// not re-identify script findings.
+	const script = ["const a = foo as any;", "const b = bar as any;", "try { run(); } catch (e) {}", "try { run(); } catch (e) {}"].join(
+		"\n",
+	);
+	const rows = (label: string) => lines(20, (i) => `    <div>${label} ${i}</div>`);
+	const vue = (label: string) =>
+		`<template>\n  <main>\n${rows(label)}\n  </main>\n</template>\n\n<script setup lang="ts">\n${script}\n</script>\n`;
+	// Svelte allows markup before the script; put it there so the edit lands above.
+	const svelte = (label: string) => `<main>\n${rows(label)}\n</main>\n\n<script lang="ts">\n${script}\n</script>\n`;
+
+	for (const [ext, sfc] of [
+		["vue", vue],
+		["svelte", svelte],
+	] as const) {
+		it(`a template-only edit to a .${ext} file reports 0 new / 0 fixed`, async () => {
+			const file = `src/Comp.${ext}`;
+			const dir = project({ [file]: sfc("row") });
+			const opts = { checks: ["type-safety", "error-handling"], skipTests: true };
+			const before = await scan(dir, opts);
+			const found = before.checks.flatMap((c) => c.issues).filter((i) => i.file === file);
+			expect(found.length).toBeGreaterThanOrEqual(2); // the fixture really produces script findings
+			expect(new Set(found.map((i) => (i as FingerprintedIssue).fingerprint)).size).toBe(found.length); // repeats still distinct
+			write(dir, { [file]: sfc("row zero") });
+			const after = await scan(dir, opts);
+			const delta = computeDelta(before, after);
+			expect(delta.introduced).toHaveLength(0);
+			expect(delta.fixed).toHaveLength(0);
+		});
+	}
+});
+
 function check(name: string, issues: Issue[]): CheckResult {
 	return { name, score: 80, grade: "B", details: { status: "passed" }, issues, duration: 1 };
 }
