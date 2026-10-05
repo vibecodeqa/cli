@@ -16,6 +16,7 @@ import { detectStack, detectWorkspace } from "./detect.js";
 import { postPRComment } from "./pr-comment.js";
 import { generatePages } from "./report/html.js";
 import { buildReportHistorySnapshot, withFreshAnalyzerSnapshots } from "./report-contract.js";
+import { isValidTestTimeout, MAX_TEST_TIMEOUT_MS } from "./runners/testing.js";
 import { computeTrend, formatTrend, type TrendDelta } from "./trend.js";
 import type { VibeReport, WorkspaceInfo } from "./types.js";
 import { buildReportUploadPayload, currentGitSha } from "./upload.js";
@@ -66,8 +67,8 @@ function parseFlags(): ParsedFlags {
 	const topN = parseValueFlag("--top", 5) ?? 0;
 	const failUnder = parseValueFlag("--fail-under");
 	const testTimeoutMs = parseValueFlag("--test-timeout");
-	if (args.includes("--test-timeout") && !testTimeoutMs) {
-		console.error("--test-timeout needs a positive whole number of milliseconds, e.g. --test-timeout 300000");
+	if (args.includes("--test-timeout") && !isValidTestTimeout(testTimeoutMs)) {
+		console.error(`--test-timeout needs a whole number of milliseconds from 1 to ${MAX_TEST_TIMEOUT_MS}, e.g. --test-timeout 300000`);
 		process.exit(2);
 	}
 

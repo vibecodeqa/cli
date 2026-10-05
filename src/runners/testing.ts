@@ -16,7 +16,7 @@ import { inventorySourceFiles } from "../file-inventory.js";
 import { getProductionFiles, normalizeToolPath, readDeps } from "../fs-utils.js";
 import type { AnalyzerMetric, CheckResult, Issue, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
-import { runWithTreeKill } from "./exec-tree.js";
+import { MAX_TIMER_MS, runWithTreeKill } from "./exec-tree.js";
 
 // ── Types ──
 
@@ -76,15 +76,20 @@ export interface EffectiveTestTimeout {
 	invalidSetting?: unknown;
 }
 
-function isValidTimeout(value: unknown): value is number {
-	return typeof value === "number" && Number.isInteger(value) && value > 0;
+/** Largest accepted test timeout: 2^31-1 ms (~24.8 days), the most a Node
+ * timer can wait. Larger values are rejected, not clamped. */
+export const MAX_TEST_TIMEOUT_MS = MAX_TIMER_MS;
+
+/** A test timeout is a whole number of ms from 1 to {@link MAX_TEST_TIMEOUT_MS}. */
+export function isValidTestTimeout(value: unknown): value is number {
+	return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= MAX_TEST_TIMEOUT_MS;
 }
 
 export function resolveTestTimeout(options: TestingOptions = {}): EffectiveTestTimeout {
 	const configured = options.settings?.timeoutMs;
-	const invalid = configured !== undefined && !isValidTimeout(configured) ? { invalidSetting: configured } : {};
-	if (isValidTimeout(options.timeoutMs)) return { ms: options.timeoutMs, source: "flag", ...invalid };
-	if (isValidTimeout(configured)) return { ms: configured, source: "config" };
+	const invalid = configured !== undefined && !isValidTestTimeout(configured) ? { invalidSetting: configured } : {};
+	if (isValidTestTimeout(options.timeoutMs)) return { ms: options.timeoutMs, source: "flag", ...invalid };
+	if (isValidTestTimeout(configured)) return { ms: configured, source: "config" };
 	return { ms: DEFAULT_TEST_TIMEOUT_MS, source: "default", ...invalid };
 }
 
@@ -948,7 +953,7 @@ export function runTesting(
 		if ("invalidSetting" in testTimeout) {
 			issues.push({
 				severity: "info",
-				message: `checks.testing.settings.timeoutMs must be a positive integer (ms); using ${testTimeout.ms} ms`,
+				message: `checks.testing.settings.timeoutMs must be a whole number of ms from 1 to ${MAX_TEST_TIMEOUT_MS}; using ${testTimeout.ms} ms`,
 				rule: "invalid-test-timeout-setting",
 			});
 		}

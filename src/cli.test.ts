@@ -96,6 +96,18 @@ describe("CLI flags", () => {
 		}
 	}, 30_000);
 
+	it("--test-timeout rejects a value a timer cannot hold, or no value (#106)", () => {
+		for (const value of ["3000000000", "0", ""]) {
+			try {
+				execSync(`node ${CLI} --json --test-timeout ${value} .`, { encoding: "utf-8", timeout: 30_000, cwd: TMP, stdio: "pipe" });
+				expect.unreachable(`--test-timeout ${value} should exit 2`);
+			} catch (e: any) {
+				expect(e.status).toBe(2);
+				expect(String(e.stderr)).toContain("from 1 to 2147483647");
+			}
+		}
+	}, 30_000);
+
 	it("--fail-under does not exit when score is above threshold", () => {
 		const out = run("--skip-tests --json --fail-under 0 .");
 		const report = JSON.parse(out);

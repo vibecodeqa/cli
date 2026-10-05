@@ -165,4 +165,10 @@ describe("resolveTestTimeout", () => {
 		expect(resolveTestTimeout({ settings: { timeoutMs: -1 } })).toMatchObject({ ms: 120_000, source: "default" });
 		expect(resolveTestTimeout({ settings: { timeoutMs: 1.5 } })).toMatchObject({ ms: 120_000, source: "default" });
 	});
+
+	it("accepts up to 2^31-1 ms and rejects anything a timer would fire at once", () => {
+		expect(resolveTestTimeout({ settings: { timeoutMs: 2 ** 31 - 1 } })).toEqual({ ms: 2 ** 31 - 1, source: "config" });
+		expect(resolveTestTimeout({ settings: { timeoutMs: 3e9 } })).toEqual({ ms: 120_000, source: "default", invalidSetting: 3e9 });
+		expect(resolveTestTimeout({ timeoutMs: 2 ** 31, settings: { timeoutMs: 9000 } })).toEqual({ ms: 9000, source: "config" });
+	});
 });
