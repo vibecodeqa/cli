@@ -114,7 +114,6 @@ export function filterToolRuns(runs: ToolRun[], filter: ToolRunFilter = {}): Too
 
 export function run(cmd: string, cwd: string, timeout = 60_000, context: ToolRunContext = {}): { stdout: string; ok: boolean } {
 	const started = Date.now();
-	const runContext = normalizedContext({ ...defaultContext, ...context });
 	try {
 		const stdout = execSync(cmd, {
 			cwd,
@@ -123,48 +122,34 @@ export function run(cmd: string, cwd: string, timeout = 60_000, context: ToolRun
 			maxBuffer: MAX_BUFFER,
 			stdio: ["pipe", "pipe", "pipe"],
 		});
-		record({
-			tool: toolNameOf(cmd),
-			command: cmd,
-			cwd,
-			...runContext,
-			status: "success",
-			exitCode: 0,
-			ok: true,
-			durationMs: Date.now() - started,
-			output: stdout.trim().slice(0, MAX_OUTPUT),
-			notFound: false,
-		});
+		recordToolRun(cmd, cwd, { status: "success", exitCode: 0, ok: true, durationMs: Date.now() - started, output: stdout }, context);
 		return { stdout, ok: true };
 	} catch (e: any) {
 		const output = outputOf(e);
 		const timedOut = e?.code === "ETIMEDOUT";
-		record({
-			tool: toolNameOf(cmd),
-			command: cmd,
+		recordToolRun(
+			cmd,
 			cwd,
-			...runContext,
-			status: timedOut ? "timeout" : "failed",
-			...(timedOut ? { timedOut: true, timeoutMs: timeout } : {}),
-			exitCode: typeof e?.status === "number" ? e.status : null,
-			ok: false,
-			durationMs: Date.now() - started,
-			output: output.trim().slice(0, MAX_OUTPUT),
-			notFound: /not found|ENOENT|command not found/i.test(output),
-		});
+			{
+				status: timedOut ? "timeout" : "failed",
+				...(timedOut ? { timedOut: true, timeoutMs: timeout } : {}),
+				exitCode: typeof e?.status === "number" ? e.status : null,
+				ok: false,
+				durationMs: Date.now() - started,
+				output,
+			},
+			context,
+		);
 		return { stdout: output, ok: false };
 	}
 }
 
-/** Record a run executed outside `run()` (e.g. by a runner that must kill a
- * whole process tree), so it lands in the same provenance log. */
-export function recordToolRun(
-	cmd: string,
-	cwd: string,
-	result: Pick<ToolRun, "status" | "exitCode" | "ok" | "durationMs" | "output" | "timedOut" | "timeoutMs">,
-	context: ToolRunContext = {},
-): void {
-	record({
+type ToolRunResult = Pick<ToolRun, "status" | "exitCode" | "ok" | "durationMs" | "output" | "timedOut" | "timeoutMs">;
+
+/** The one place a ToolRun entry is built: command, cwd, context, capped
+ * output and the not-found guess. Every recorded run goes through it. */
+function toolRunEntry(cmd: string, cwd: string, result: ToolRunResult, context: ToolRunContext): ToolRun {
+	return {
 		tool: toolNameOf(cmd),
 		command: cmd,
 		cwd,
@@ -172,7 +157,14 @@ export function recordToolRun(
 		...result,
 		output: result.output.trim().slice(0, MAX_OUTPUT),
 		notFound: !result.ok && !result.timedOut && /not found|ENOENT|command not found/i.test(result.output),
-	});
+	};
+}
+
+/** Record a finished run in the provenance log. `run()` records through this,
+ * and so does a runner that executes its command another way (e.g. one that
+ * must kill a whole process tree). */
+export function recordToolRun(cmd: string, cwd: string, result: ToolRunResult, context: ToolRunContext = {}): void {
+	record(toolRunEntry(cmd, cwd, result, context));
 }
 
 export function runJSON<T>(cmd: string, cwd: string, timeout = 60_000, context: ToolRunContext = {}): T | null {
