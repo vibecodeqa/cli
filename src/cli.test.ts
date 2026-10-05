@@ -139,6 +139,41 @@ describe("CLI flags", () => {
 	}, 30_000);
 });
 
+describe("--diff partial reports are not a comparison baseline (#98)", () => {
+	beforeEach(() => {
+		execSync("git init && git config user.email 'test@test.com' && git config user.name 'Test' && git add -A && git commit -m init", {
+			cwd: TMP,
+			stdio: "pipe",
+		});
+		writeFileSync(join(TMP, "src", "new.ts"), 'eval("bad");');
+	});
+
+	it("a full scan after a --diff scan does not compare against it", () => {
+		run("--skip-tests --json --diff HEAD .");
+		const partial = JSON.parse(readFileSync(join(TMP, ".vibe-check", "report.json"), "utf-8"));
+		expect(partial.meta.scan.diffBase).toBe("HEAD");
+		const history = readdirSync(join(TMP, ".vibe-check", "history"));
+		const snapshot = JSON.parse(readFileSync(join(TMP, ".vibe-check", "history", history[0]!), "utf-8"));
+		expect(snapshot.meta.scan.diffBase).toBe("HEAD");
+
+		const md = run("--skip-tests --markdown --fail-under 0 .");
+		expect(md).toContain("VibeCode QA:");
+		expect(md).not.toContain("vs previous");
+	}, 60_000);
+
+	it("a --diff scan after a full scan does not compare against it", () => {
+		run("--skip-tests --json --fail-under 0 .");
+		const md = run("--skip-tests --markdown --fail-under 0 --diff HEAD .");
+		expect(md).toContain("VibeCode QA:");
+		expect(md).not.toContain("vs previous");
+	}, 60_000);
+
+	it("two full scans still compare", () => {
+		run("--skip-tests --json --fail-under 0 .");
+		expect(run("--skip-tests --markdown --fail-under 0 .")).toContain("vs previous");
+	}, 60_000);
+});
+
 describe("scan output on-ramp", () => {
 	// run() uses execSync (no TTY), so the interactive prompt + default top-issues
 	// view are suppressed — exactly the non-interactive path we want to assert here.

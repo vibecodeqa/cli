@@ -14,6 +14,7 @@ import { loadConfig } from "./config.js";
 import { scan } from "./core.js";
 import { computeDelta } from "./delta.js";
 import { detectStack, detectWorkspace } from "./detect.js";
+import { isPartialScan } from "./history.js";
 import { postPRComment } from "./pr-comment.js";
 import { generatePages } from "./report/html.js";
 import { buildReportHistorySnapshot, withFreshAnalyzerSnapshots } from "./report-contract.js";
@@ -669,8 +670,6 @@ async function main() {
 	}
 	report.meta.analyzerSnapshots = withFreshAnalyzerSnapshots(report).meta.analyzerSnapshots;
 
-	const trend = computeTrend(report, outputDir);
-
 	// Load previous report BEFORE writeOutputs overwrites it (for delta in markdown/PR)
 	let prevReport: VibeReport | undefined;
 	const prevReportPath = join(outputDir, "report.json");
@@ -681,6 +680,10 @@ async function main() {
 			/* corrupt */
 		}
 	}
+	// A --diff report covers only the changed files. Compared with a full scan,
+	// either way round, every issue outside the diff would read as fixed or new.
+	if (isPartialScan(report) || isPartialScan(prevReport)) prevReport = undefined;
+	const trend = prevReport ? computeTrend(report, outputDir) : null;
 
 	await writeOutputs(report, outputDir, flags, prevReport);
 
