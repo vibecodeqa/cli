@@ -32,7 +32,7 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 				project.stack.linter === "dart_analyze" && !hasDartSdk(cwd)
 					? DART_SDK_MISSING_REASON
 					: project.stack.linter === "eslint"
-						? eslintDependencyGap(projectCwd)
+						? eslintDependencyGap(projectCwd, cwd)
 						: null;
 			if (unavailableReason) {
 				unavailableReasons.push(unavailableReason);
@@ -103,7 +103,7 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 		// ESLint runs the project's own config, and its plugins and parsers come
 		// from the project's dependencies. Uninstalled, the config fails to load,
 		// the masked crash prints nothing, and nothing parses as zero issues (#100).
-		const depsReason = eslintDependencyGap(cwd);
+		const depsReason = eslintDependencyGap(cwd, cwd);
 		if (depsReason) {
 			return unavailableResult("lint", depsReason, { linter: "eslint", lintTarget }, start);
 		}
@@ -280,8 +280,8 @@ function dartAnalyzeIssues(cwd: string, workspace?: WorkspaceInfo): Issue[] {
  *  the project's dependencies (its config's plugins) and ESLint itself must
  *  resolve from there, or `npx eslint` fetches a bare ESLint that cannot load
  *  the config. */
-function eslintDependencyGap(dir: string): string | null {
-	return dependencyGap(dir, "eslint");
+function eslintDependencyGap(dir: string, scanRoot: string): string | null {
+	return dependencyGap(dir, scanRoot, "eslint");
 }
 
 function lintableProjects(workspace?: WorkspaceInfo): ProjectContext[] {

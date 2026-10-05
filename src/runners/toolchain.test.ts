@@ -53,7 +53,7 @@ vi.mock("./exec.js", async (importOriginal) => {
 const { runTypeCheck } = await import("./types-check.js");
 const { runLint } = await import("./lint.js");
 const { runPerformance, deadCodeCheckFromPerformance } = await import("./performance.js");
-const { probeDependencies, resetToolchainProbes } = await import("./toolchain.js");
+const { dependencyGap, installBoundary, probeDependencies, resetToolchainProbes } = await import("./toolchain.js");
 
 const dirs: string[] = [];
 
@@ -106,12 +106,12 @@ afterEach(() => {
 describe("probeDependencies", () => {
 	it("reports a declared-but-uninstalled project and infers the package manager from the lockfile", () => {
 		const dir = tsEslintFixture();
-		expect(probeDependencies(dir)).toMatchObject({ installed: false, packageManager: "pnpm", declared: 3 });
+		expect(probeDependencies(dir, dir)).toMatchObject({ installed: false, packageManager: "pnpm", declared: 3 });
 	});
 
 	it("counts a manifest that declares nothing as installed", () => {
 		const dir = project({ "package.json": "{}" });
-		expect(probeDependencies(dir).installed).toBe(true);
+		expect(probeDependencies(dir, dir).installed).toBe(true);
 	});
 
 	it("resolves dependencies hoisted to a workspace root, like Node does", () => {
@@ -120,10 +120,10 @@ describe("probeDependencies", () => {
 			"yarn.lock": "",
 			"packages/web/package.json": JSON.stringify({ name: "web", dependencies: { react: "^19" } }),
 		});
-		expect(probeDependencies(join(dir, "packages/web"))).toMatchObject({ installed: false, packageManager: "yarn" });
+		expect(probeDependencies(join(dir, "packages/web"), dir)).toMatchObject({ installed: false, packageManager: "yarn" });
 		install(dir, ["react"]);
 		// Installing changes the fingerprint the cache is keyed on — no reset needed.
-		expect(probeDependencies(join(dir, "packages/web")).installed).toBe(true);
+		expect(probeDependencies(join(dir, "packages/web"), dir).installed).toBe(true);
 	});
 });
 
@@ -197,7 +197,7 @@ describe("zero-config Biome (#100 leaves it unchanged)", () => {
 		const workspace = detectWorkspace(dir);
 		const stack = detectStack(dir, workspace);
 		expect(stack.linter).toBe("none");
-		expect(probeDependencies(dir).installed).toBe(false);
+		expect(probeDependencies(dir, dir).installed).toBe(false);
 
 		const result = runLint(dir, stack, workspace);
 		expect(result.details).toMatchObject({ linter: "biome", zeroConfig: true, warnings: 1 });
@@ -267,6 +267,88 @@ describe("monorepos (#100) — probed per project directory", () => {
 		const lint = runLint(dir, stack, workspace);
 		expect(lint.details).toMatchObject({ unavailable: true, linter: "eslint" });
 		expect(String(lint.details.reason)).toMatch(/^dependencies not installed — run `pnpm install`/);
+		expect(npxCalls()).toEqual([]);
+	});
+});
+
+describe("the probe stops at the project being scanned (#100, review round 1)", () => {
+	/** `parent/` has an install; `parent/child/` is its own project, never installed. */
+	function nestedUnderInstalledParent(parentManifest: Record<string, unknown> = { name: "parent" }): { parent: string; child: string } {
+		const parent = project({
+			"package.json": JSON.stringify({ ...parentManifest, devDependencies: { typescript: "^5" } }),
+			"child/package.json": JSON.stringify({ name: "child", devDependencies: { typescript: "^5", "@types/node": "^22" } }),
+			"child/tsconfig.json": JSON.stringify({ compilerOptions: { strict: true, noEmit: true }, include: ["src"] }),
+			"child/src/index.ts": "import { readFileSync } from 'node:fs';\nexport const f = readFileSync;\n",
+		});
+		install(parent, ["typescript", "@types/node"]);
+		return { parent, child: join(parent, "child") };
+	}
+
+	it("does not count a parent directory's install for a nested project (reviewer repro)", () => {
+		const { child } = nestedUnderInstalledParent();
+		expect(installBoundary(child)).toBe(child);
+		expect(probeDependencies(child, child).installed).toBe(false);
+		expect(dependencyGap(child, child, "typescript")).toBe("dependencies not installed — run `npm install`");
+
+		const types = runTypeCheck(child, false, detectWorkspace(child));
+		expect(types.details).toMatchObject({ skipped: true, unavailable: true, reason: "dependencies not installed — run `npm install`" });
+		expect(types.issues).toEqual([]);
+		expect(npxCalls()).toEqual([]);
+	});
+
+	it("still sees the parent's install when the parent is what is being scanned", () => {
+		const { parent, child } = nestedUnderInstalledParent();
+		expect(probeDependencies(child, parent).installed).toBe(true);
+		expect(dependencyGap(child, parent, "typescript")).toBeNull();
+	});
+
+	it("does not widen to an enclosing workspace the project is not a member of", () => {
+		const { child } = nestedUnderInstalledParent({ name: "parent", private: true, workspaces: ["packages/*"] });
+		expect(installBoundary(child)).toBe(child);
+		expect(probeDependencies(child, child).installed).toBe(false);
+	});
+
+	it("honours a negated workspace glob", () => {
+		const { child } = nestedUnderInstalledParent({ name: "parent", private: true, workspaces: ["*", "!child"] });
+		expect(installBoundary(child)).toBe(child);
+	});
+
+	it("widens to the workspace root when the scanned project is a hoisted workspace member", () => {
+		const root = project({
+			"package.json": JSON.stringify({ private: true, workspaces: ["packages/*"] }),
+			"package-lock.json": "{}",
+			"packages/web/package.json": JSON.stringify({ name: "web", devDependencies: { typescript: "^5" } }),
+			"packages/web/tsconfig.json": JSON.stringify({ include: ["src"] }),
+			"packages/web/src/index.ts": "export const web = 1;\n",
+		});
+		install(root, ["typescript"]);
+		const web = join(root, "packages/web");
+		expect(installBoundary(web)).toBe(root);
+		expect(probeDependencies(web, web).installed).toBe(true);
+
+		const types = runTypeCheck(web, false, detectWorkspace(web));
+		expect(types.details.unavailable).toBeUndefined();
+		expect(npxCalls().map((c) => c.cmd.split(" ").slice(0, 2).join(" "))).toEqual(["npx tsc"]);
+	});
+
+	it("widens for pnpm-workspace.yaml members too, including ** globs", () => {
+		const root = project({
+			"pnpm-workspace.yaml": "packages:\n  - apps/**\n",
+			"package.json": JSON.stringify({ private: true }),
+			"apps/site/web/package.json": JSON.stringify({ name: "web", dependencies: { react: "^19" } }),
+		});
+		install(root, ["react"]);
+		const web = join(root, "apps/site/web");
+		expect(installBoundary(web)).toBe(root);
+		expect(probeDependencies(web, web).installed).toBe(true);
+	});
+
+	it("bounds knip the same way", () => {
+		const { child } = nestedUnderInstalledParent();
+		const perf = runPerformance(child, detectWorkspace(child));
+		expect((perf.details as Record<string, unknown>).deadCodeUnavailable).toEqual([
+			{ path: ".", reason: "dependencies not installed — run `npm install`" },
+		]);
 		expect(npxCalls()).toEqual([]);
 	});
 });

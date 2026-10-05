@@ -509,7 +509,7 @@ function tryKnip(cwd: string, workspace?: WorkspaceInfo): KnipOutcome {
 		// Knip resolves the project's imports and enables plugins from its
 		// installed packages; without them its "unused" lists describe the
 		// missing install, not the code (#100). Do not run it at all.
-		const deps = probeDependencies(root.dir);
+		const deps = probeDependencies(root.dir, cwd);
 		if (!deps.installed) {
 			unavailable.push({ path: root.rel || ".", reason: dependenciesMissingReason(deps.packageManager) });
 			continue;

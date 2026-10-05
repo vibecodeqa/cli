@@ -87,7 +87,7 @@ export function runTypeCheck(cwd: string, isDart = false, workspace?: WorkspaceI
 		: targets.filter((target) => {
 				// `npx tsc` must find the project's own TypeScript; a package script
 				// (`pnpm typecheck`) needs the install but resolves its own binaries.
-				const gap = dependencyGap(target.cwd, target.mode === "script" ? undefined : "typescript");
+				const gap = dependencyGap(target.cwd, cwd, target.mode === "script" ? undefined : "typescript");
 				if (!gap) return true;
 				unavailableTargets.push({
 					id: target.projectId ?? "root",
