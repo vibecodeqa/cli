@@ -2,12 +2,17 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type IssueSnapshot, issueSnapshot, readIssueFingerprint } from "./issue-fingerprint.js";
-import type { VibeReport } from "./types.js";
+import { checkSide, compareCheckSides, issuesComparable, type StatusTransition } from "./delta.js";
+import { comparableFingerprints, type IssueSnapshot, issueSnapshot } from "./issue-fingerprint.js";
+import type { Issue, VibeReport } from "./types.js";
 
 export interface TrendDelta {
 	scoreDelta: number; // positive = improved
-	checkDeltas: { name: string; prev: number; curr: number; delta: number }[];
+	/**
+	 * `delta` is 0 and `transition` is set when either side did not run or its
+	 * runner crashed (#107). `prev`/`curr` are null for such a side, or an absent one.
+	 */
+	checkDeltas: { name: string; prev: number | null; curr: number | null; delta: number; transition?: StatusTransition }[];
 	newIssues: number;
 	fixedIssues: number;
 	introduced?: IssueSnapshot[];
@@ -31,34 +36,64 @@ export function computeTrend(report: VibeReport, outputDir: string): TrendDelta 
 	const scoreDelta = report.score - prev.score;
 	const checkDeltas: TrendDelta["checkDeltas"] = [];
 
-	for (const curr of report.checks) {
-		const prevCheck = prev.checks.find((c) => c.name === curr.name);
-		const prevScore = prevCheck?.score ?? 0;
+	// Union of names, so a check that disappeared reads "72 → not present".
+	// Issues are compared only for checks that ran in both scans (#107).
+	const comparable = new Set<string>();
+	const names = report.checks.map((c) => c.name);
+	for (const c of prev.checks) if (!names.includes(c.name)) names.push(c.name);
+	for (const name of names) {
+		const prevSide = checkSide(prev.checks.find((c) => c.name === name));
+		const currSide = checkSide(report.checks.find((c) => c.name === name));
+		if (issuesComparable(prevSide, currSide)) comparable.add(name);
+		const { delta, transition } = compareCheckSides(prevSide, currSide);
 		checkDeltas.push({
-			name: curr.name,
-			prev: prevScore,
-			curr: curr.score,
-			delta: curr.score - prevScore,
+			name,
+			prev: prevSide.score ?? null,
+			curr: currSide.score ?? null,
+			delta,
+			...(transition ? { transition } : {}),
 		});
 	}
 
-	const prevIssueMap = issueMap(prev);
-	const currIssueMap = issueMap(report);
-	const introduced = [...currIssueMap.entries()].filter(([fp]) => !prevIssueMap.has(fp)).map(([, issue]) => issue);
-	const fixed = [...prevIssueMap.entries()].filter(([fp]) => !currIssueMap.has(fp)).map(([, issue]) => issue);
+	// Across a fingerprint-version boundary both sides are re-keyed as v1 (#97).
+	const keyOf = comparableFingerprints(prev, report);
+	const prevIssues = issueMultiset(prev, comparable, keyOf);
+	const currIssues = issueMultiset(report, comparable, keyOf);
+	const introduced = surplus(currIssues, prevIssues);
+	const fixed = surplus(prevIssues, currIssues);
 	const newIssues = introduced.length;
 	const fixedIssues = fixed.length;
 
 	return { scoreDelta, checkDeltas, newIssues, fixedIssues, introduced, fixed, prevTimestamp: prev.timestamp };
 }
 
-function issueMap(report: VibeReport): Map<string, IssueSnapshot> {
-	const out = new Map<string, IssueSnapshot>();
+/** Group issues of comparable checks by fingerprint, keeping every occurrence
+ * (a multiset, as in delta.ts). */
+function issueMultiset(
+	report: VibeReport,
+	comparable: Set<string>,
+	keyOf: (checkName: string, issue: Issue) => string,
+): Map<string, IssueSnapshot[]> {
+	const out = new Map<string, IssueSnapshot[]>();
 	for (const check of report.checks) {
+		if (!comparable.has(check.name)) continue;
 		for (const issue of check.issues) {
-			const fp = readIssueFingerprint(check.name, issue);
-			out.set(fp, issueSnapshot(check.name, issue));
+			const fp = keyOf(check.name, issue);
+			const list = out.get(fp);
+			const snap = issueSnapshot(check.name, issue);
+			if (list) list.push(snap);
+			else out.set(fp, [snap]);
 		}
+	}
+	return out;
+}
+
+/** Occurrences in `a` beyond the count of the same fingerprint in `b`. */
+function surplus(a: Map<string, IssueSnapshot[]>, b: Map<string, IssueSnapshot[]>): IssueSnapshot[] {
+	const out: IssueSnapshot[] = [];
+	for (const [fp, list] of a) {
+		const other = b.get(fp)?.length ?? 0;
+		if (list.length > other) out.push(...list.slice(other));
 	}
 	return out;
 }
@@ -94,23 +129,4 @@ function terminalSparkline(values: number[]): string {
 			return blocks[idx];
 		})
 		.join("");
-}
-
-/** Render trend HTML for the report. */
-export function trendHTML(trend: TrendDelta): string {
-	const arrow = trend.scoreDelta > 0 ? "&#9650;" : trend.scoreDelta < 0 ? "&#9660;" : "&#9644;";
-	const color = trend.scoreDelta > 0 ? "var(--pass)" : trend.scoreDelta < 0 ? "var(--fail)" : "var(--muted)";
-
-	let deltas = "";
-	for (const d of trend.checkDeltas) {
-		if (d.delta === 0) continue;
-		const c = d.delta > 0 ? "var(--pass)" : "var(--fail)";
-		deltas += `<span class="td-item" style="color:${c}">${d.name} ${d.delta > 0 ? "+" : ""}${d.delta}</span>`;
-	}
-
-	return `<div class="trend">
-<div class="trend-head"><span class="trend-arrow" style="color:${color}">${arrow}</span><span style="color:${color};font-weight:700">${trend.scoreDelta > 0 ? "+" : ""}${trend.scoreDelta} pts</span><span class="trend-vs">vs ${trend.prevTimestamp.split("T")[0]}</span></div>
-<div class="trend-stats">${trend.fixedIssues > 0 ? `<span style="color:var(--pass)">${trend.fixedIssues} fixed</span>` : ""}${trend.newIssues > 0 ? `<span style="color:var(--fail)">${trend.newIssues} new</span>` : ""}</div>
-${deltas ? `<div class="trend-deltas">${deltas}</div>` : ""}
-</div>`;
 }

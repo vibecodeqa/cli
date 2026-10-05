@@ -1,0 +1,33 @@
+{
+	"action": "opened",
+	"number": 43,
+	"pull_request": {
+		"number": 43,
+		"head": {
+			"ref": "patch-1",
+			"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"repo": {
+				"full_name": "someone/widgets"
+			}
+		},
+		"base": {
+			"ref": "main",
+			"sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			"repo": {
+				"full_name": "octo-org/widgets"
+			}
+		}
+	},
+	"repository": {
+		"full_name": "octo-org/widgets",
+		"name": "widgets",
+		"owner": {
+			"login": "octo-org"
+		},
+		"default_branch": "main",
+		"html_url": "https://github.com/octo-org/widgets"
+	},
+	"sender": {
+		"login": "someone"
+	}
+}

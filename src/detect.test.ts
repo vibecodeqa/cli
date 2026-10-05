@@ -1,7 +1,10 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { detectStack, detectWorkspace, parseYamlList } from "./detect.js";
+import { detectRepoUrl, detectStack, detectWorkspace, parseYamlList } from "./detect.js";
+import { fakeBody } from "./runners/fake-credentials.test-helper.js";
 
 const TMP = join(import.meta.dirname!, "__test_fixture__");
 
@@ -574,5 +577,59 @@ describe("parseYamlList", () => {
 	it("handles inline comments on list items", () => {
 		const yaml = "packages:\n  - packages/* # core packages\n  - apps/* # applications\n";
 		expect(parseYamlList(yaml, "packages")).toEqual(["packages/*", "apps/*"]);
+	});
+});
+
+describe("detectRepoUrl", () => {
+	const git = (cwd: string, ...args: string[]) =>
+		execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args], {
+			cwd,
+			encoding: "utf-8",
+			stdio: ["pipe", "pipe", "pipe"],
+		}).trim();
+	const repos: string[] = [];
+	const makeRepo = () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-detect-git-"));
+		repos.push(dir);
+		git(dir, "init", "-q", "-b", "trunk");
+		writeFileSync(join(dir, "a.txt"), "a\n");
+		git(dir, "add", "a.txt");
+		git(dir, "commit", "-q", "-m", "init");
+		git(dir, "remote", "add", "origin", "git@github.com:octo-org/widgets.git");
+		return dir;
+	};
+	afterEach(() => {
+		for (const dir of repos.splice(0)) rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("reports the checked-out branch and an https repo url", () => {
+		expect(detectRepoUrl(makeRepo())).toEqual({ repoUrl: "https://github.com/octo-org/widgets", branch: "trunk" });
+	});
+
+	it("never guesses main on a detached HEAD", () => {
+		const dir = makeRepo();
+		git(dir, "checkout", "-q", "--detach");
+		expect(detectRepoUrl(dir)).toEqual({ repoUrl: "https://github.com/octo-org/widgets", branch: "" });
+	});
+
+	it("keeps the branch when there is no remote", () => {
+		const dir = makeRepo();
+		git(dir, "remote", "remove", "origin");
+		expect(detectRepoUrl(dir)).toEqual({ repoUrl: null, branch: "trunk" });
+	});
+
+	it("returns an empty branch outside git", () => {
+		const dir = mkdtempSync(join(tmpdir(), "vcqa-detect-nogit-"));
+		repos.push(dir);
+		expect(detectRepoUrl(dir)).toEqual({ repoUrl: null, branch: "" });
+	});
+
+	it("drops credentials a CI checkout put into the remote URL", () => {
+		const dir = makeRepo();
+		const token = fakeBody(24);
+		git(dir, "remote", "set-url", "origin", `https://gitlab-ci-token:${token}@gitlab.example.com/group/app.git`);
+		expect(detectRepoUrl(dir).repoUrl).toBe("https://gitlab.example.com/group/app");
+		git(dir, "remote", "set-url", "origin", `https://${token}@github.com/owner/repo.git`);
+		expect(detectRepoUrl(dir).repoUrl).toBe("https://github.com/owner/repo");
 	});
 });

@@ -17,6 +17,7 @@ import { getProductionFiles, normalizeToolPath, readDeps } from "../fs-utils.js"
 import type { AnalyzerMetric, CheckResult, Issue, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { MAX_TIMER_MS, runWithTreeKill } from "./exec-tree.js";
+import { redactSecrets } from "./redact.js";
 
 // ── Types ──
 
@@ -456,7 +457,8 @@ function asDuration(v: unknown): number | null {
 
 function trimError(messages: unknown): string | undefined {
 	const list = Array.isArray(messages) ? messages : messages ? [messages] : [];
-	const text = list.map(String).join("\n").trim();
+	// Redact before the cut: a failing assertion can print a credential it read.
+	const text = redactSecrets(list.map(String).join("\n").trim());
 	if (!text) return undefined;
 	return text.length > 4000 ? `${text.slice(0, 4000)}\n...truncated` : text;
 }

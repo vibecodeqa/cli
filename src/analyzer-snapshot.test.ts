@@ -85,3 +85,28 @@ describe("buildAnalyzerSnapshots", () => {
 		});
 	});
 });
+
+describe("buildAnalyzerSnapshots not-run checks (#107)", () => {
+	it("omits score for skipped and unavailable checks", () => {
+		const snaps = buildAnalyzerSnapshots([
+			check({ name: "lint", score: 100, details: { skipped: true, unavailable: true, status: "unavailable" } }),
+			check({ name: "react", score: 100, details: { skipped: true, status: "skipped" } }),
+			check({ name: "ai-review", score: 100, details: { comingSoon: true } }),
+			check({ name: "types", score: 88, details: { status: "passed" } }),
+		]);
+		expect(snaps.map((s) => s.status)).toEqual(["unavailable", "skipped", "unavailable", "passed"]);
+		for (const s of snaps.slice(0, 3)) expect(s).not.toHaveProperty("score");
+		expect(snaps[3].score).toBe(88);
+		expect(JSON.parse(JSON.stringify(snaps[0]))).not.toHaveProperty("score");
+	});
+});
+
+describe("buildAnalyzerSnapshots crashed runner (#107)", () => {
+	it("keeps status failed but omits the placeholder 0", () => {
+		const [snap] = buildAnalyzerSnapshots([
+			check({ name: "lint", score: 0, details: { skipped: true, status: "failed", reason: "runner error: boom" } }),
+		]);
+		expect(snap.status).toBe("failed");
+		expect(snap).not.toHaveProperty("score");
+	});
+});

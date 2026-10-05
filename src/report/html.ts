@@ -14,7 +14,7 @@
 import { getCheckMeta } from "../check-meta.js";
 import { computeDelta } from "../delta.js";
 import type { CheckResult, VibeReport } from "../types.js";
-import { det, e, fileLink, gc } from "./components.js";
+import { det, e, fileLink, gc, linkRef } from "./components.js";
 import { FAVICON_SVG } from "./favicon.js";
 import {
 	actionsPage,
@@ -55,8 +55,8 @@ export function generatePages(report: VibeReport, historyDir?: string, prevRepor
 	const checkMap = new Map(allChecks.map((c) => [c.name, c]));
 	const active = allChecks.filter((c) => !det(c).skipped && !det(c).comingSoon);
 	const ru = report.meta.repoUrl;
-	const br = report.meta.branch;
-	const fl = (path: string, line?: number) => fileLink(path, line, ru, br);
+	const ref = linkRef(report.meta);
+	const fl = (path: string, line?: number) => fileLink(path, line, ru, ref);
 	const totalIssues = allChecks.reduce((s, c) => s + c.issues.length, 0);
 	const proj = report.meta.cwd.split("/").pop() || "project";
 

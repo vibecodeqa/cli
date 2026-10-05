@@ -2,18 +2,33 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { type CheckRunState, checkRunState } from "./delta.js";
 import type { IssueSnapshot } from "./issue-fingerprint.js";
 import type { AnalyzerSnapshot, VibeReport } from "./types.js";
 
 export interface HistoryEntry {
 	timestamp: string;
 	score: number;
+	/** Scores of checks that ran. A not-run check's placeholder 100, and a crashed runner's 0, are left out (#107). */
 	checkScores: Map<string, number>;
+	/** Run state of every check in the snapshot (from `status` / `details.status`, the "runner error:" reason, else the details flags). */
+	checkStates: Map<string, Exclude<CheckRunState, "absent">>;
+	/** The "runner error: …" reason of each check whose runner crashed. */
+	checkReasons: Map<string, string>;
 	issues: IssueSnapshot[];
 	analyzerSnapshots: AnalyzerSnapshot[];
 }
 
-/** Load history entries from historyDir, sorted oldest-first. Returns last 30 max. */
+/** A `--diff` scan: its issues were filtered to the changed files, so it is
+ *  not comparable with a full scan — not as a trend baseline, not as a
+ *  history point. Marked by `meta.scan.diffBase` (report and history snapshot). */
+export function isPartialScan(report: { meta?: unknown } | null | undefined): boolean {
+	const scan = (report?.meta as { scan?: { diffBase?: unknown } } | undefined)?.scan;
+	return typeof scan?.diffBase === "string" && scan.diffBase.length > 0;
+}
+
+/** Load history entries from historyDir, sorted oldest-first, leaving out
+ *  partial (`--diff`) scans. Returns last 30 max. */
 export function loadHistory(historyDir: string): HistoryEntry[] {
 	if (!existsSync(historyDir)) return [];
 
@@ -25,28 +40,53 @@ export function loadHistory(historyDir: string): HistoryEntry[] {
 	for (const file of files) {
 		try {
 			const raw: VibeReport = JSON.parse(readFileSync(join(historyDir, file), "utf-8"));
-			if (raw.score === null || raw.score === undefined || !Number.isFinite(Number(raw.score)) || !raw.checks) continue;
+			if (!isComparableSnapshot(raw)) continue;
 			const checkScores = new Map<string, number>();
+			const checkStates: HistoryEntry["checkStates"] = new Map();
+			const checkReasons = new Map<string, string>();
 			const issues: IssueSnapshot[] = [];
 			const analyzerSnapshots = normalizeAnalyzerSnapshots(raw.meta?.analyzerSnapshots);
-			for (const c of raw.checks) {
-				if (c.score !== null && c.score !== undefined && Number.isFinite(Number(c.score))) {
-					checkScores.set(c.name, Number(c.score));
-				}
-				if (Array.isArray((c as { issues?: unknown }).issues)) {
-					for (const issue of (c as { issues: unknown[] }).issues) {
-						const snapshot = normalizeHistoryIssue(c.name, issue);
-						if (snapshot) issues.push(snapshot);
-					}
-				}
-			}
-			entries.push({ timestamp: raw.timestamp, score: Number(raw.score), checkScores, issues, analyzerSnapshots });
+			for (const c of raw.checks) readHistoryCheck(c, { checkScores, checkStates, checkReasons, issues });
+			entries.push({
+				timestamp: raw.timestamp,
+				score: Number(raw.score),
+				checkScores,
+				checkStates,
+				checkReasons,
+				issues,
+				analyzerSnapshots,
+			});
 		} catch {
 			// skip corrupt files
 		}
 	}
 
 	return entries.slice(-30);
+}
+
+function readHistoryCheck(
+	c: VibeReport["checks"][number],
+	{ checkScores, checkStates, checkReasons, issues }: Pick<HistoryEntry, "checkScores" | "checkStates" | "checkReasons" | "issues">,
+): void {
+	const state = checkRunState(c);
+	if (state !== "absent") checkStates.set(c.name, state);
+	const reason = (c.details as Record<string, unknown> | undefined)?.reason;
+	if (state === "runner-error" && typeof reason === "string") checkReasons.set(c.name, reason);
+	if (state === "ran" && c.score !== null && c.score !== undefined && Number.isFinite(Number(c.score))) {
+		checkScores.set(c.name, Number(c.score));
+	}
+	if (Array.isArray((c as { issues?: unknown }).issues)) {
+		for (const issue of (c as { issues: unknown[] }).issues) {
+			const snapshot = normalizeHistoryIssue(c.name, issue);
+			if (snapshot) issues.push(snapshot);
+		}
+	}
+}
+
+/** A scored, full-scan snapshot: one the series can compare. */
+function isComparableSnapshot(raw: VibeReport): boolean {
+	if (raw.score === null || raw.score === undefined || !Number.isFinite(Number(raw.score)) || !raw.checks) return false;
+	return !isPartialScan(raw);
 }
 
 function normalizeAnalyzerSnapshots(raw: unknown): AnalyzerSnapshot[] {
