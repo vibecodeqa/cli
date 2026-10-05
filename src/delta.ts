@@ -88,6 +88,18 @@ export function formatCheckSide(side: CheckSide): string {
 	return side.state === "absent" ? "not present" : side.state;
 }
 
+/**
+ * One check's state shown on its own (e.g. a Trends-page card), where the
+ * crash reason is the useful detail: "failed (runner error: eslint exited 2)".
+ * Transition and delta lines keep the short `formatCheckSide` token: the
+ * reason varies between runs and can carry local paths.
+ */
+export function formatCheckState(side: CheckSide, reason?: string): string {
+	if (side.state !== "runner-error" || !reason?.startsWith("runner error:")) return formatCheckSide(side);
+	const text = reason.length > 80 ? `${reason.slice(0, 79)}…` : reason;
+	return `failed (${text})`;
+}
+
 export interface DeltaIssue {
 	check: string;
 	severity: Issue["severity"];

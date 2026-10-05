@@ -13,6 +13,8 @@ export interface HistoryEntry {
 	checkScores: Map<string, number>;
 	/** Run state of every check in the snapshot (from `status` / `details.status`, the "runner error:" reason, else the details flags). */
 	checkStates: Map<string, Exclude<CheckRunState, "absent">>;
+	/** The "runner error: …" reason of each check whose runner crashed. */
+	checkReasons: Map<string, string>;
 	issues: IssueSnapshot[];
 	analyzerSnapshots: AnalyzerSnapshot[];
 }
@@ -32,10 +34,19 @@ export function loadHistory(historyDir: string): HistoryEntry[] {
 			if (raw.score === null || raw.score === undefined || !Number.isFinite(Number(raw.score)) || !raw.checks) continue;
 			const checkScores = new Map<string, number>();
 			const checkStates: HistoryEntry["checkStates"] = new Map();
+			const checkReasons = new Map<string, string>();
 			const issues: IssueSnapshot[] = [];
 			const analyzerSnapshots = normalizeAnalyzerSnapshots(raw.meta?.analyzerSnapshots);
-			for (const c of raw.checks) readHistoryCheck(c, checkScores, checkStates, issues);
-			entries.push({ timestamp: raw.timestamp, score: Number(raw.score), checkScores, checkStates, issues, analyzerSnapshots });
+			for (const c of raw.checks) readHistoryCheck(c, { checkScores, checkStates, checkReasons, issues });
+			entries.push({
+				timestamp: raw.timestamp,
+				score: Number(raw.score),
+				checkScores,
+				checkStates,
+				checkReasons,
+				issues,
+				analyzerSnapshots,
+			});
 		} catch {
 			// skip corrupt files
 		}
@@ -46,12 +57,12 @@ export function loadHistory(historyDir: string): HistoryEntry[] {
 
 function readHistoryCheck(
 	c: VibeReport["checks"][number],
-	checkScores: HistoryEntry["checkScores"],
-	checkStates: HistoryEntry["checkStates"],
-	issues: IssueSnapshot[],
+	{ checkScores, checkStates, checkReasons, issues }: Pick<HistoryEntry, "checkScores" | "checkStates" | "checkReasons" | "issues">,
 ): void {
 	const state = checkRunState(c);
 	if (state !== "absent") checkStates.set(c.name, state);
+	const reason = (c.details as Record<string, unknown> | undefined)?.reason;
+	if (state === "runner-error" && typeof reason === "string") checkReasons.set(c.name, reason);
 	if (state === "ran" && c.score !== null && c.score !== undefined && Number.isFinite(Number(c.score))) {
 		checkScores.set(c.name, Number(c.score));
 	}

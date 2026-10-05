@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkRunState, computeDelta, formatCheckChangeBullets, formatDeltaMarkdown, formatTransition } from "./delta.js";
+import { checkRunState, computeDelta, formatCheckChangeBullets, formatCheckState, formatDeltaMarkdown, formatTransition } from "./delta.js";
 import type { VibeReport } from "./types.js";
 
 function makeReport(overrides: Partial<VibeReport> = {}): VibeReport {
@@ -349,5 +349,20 @@ describe("issues of a check that did not run on one side are not diffed (#107)",
 		const delta = computeDelta(makeReport({ checks: [lintRan] }), makeReport({ checks: [{ ...lintRan, issues: threeIssues.slice(1) }] }));
 		expect(delta.fixed).toHaveLength(1);
 		expect(delta.introduced).toHaveLength(0);
+	});
+});
+
+describe("formatCheckState (#107)", () => {
+	it("shows the full crash reason for a single check, truncated to 80 chars", () => {
+		expect(formatCheckState({ state: "runner-error" }, "runner error: eslint exited 2")).toBe("failed (runner error: eslint exited 2)");
+		const long = `runner error: ${"x".repeat(200)}`;
+		const out = formatCheckState({ state: "runner-error" }, long);
+		expect(out).toBe(`failed (${long.slice(0, 79)}…)`);
+	});
+
+	it("falls back to the short token without a reason, and for other states", () => {
+		expect(formatCheckState({ state: "runner-error" })).toBe("failed (runner error)");
+		expect(formatCheckState({ state: "unavailable" }, "Dart SDK not installed")).toBe("unavailable");
+		expect(formatCheckState({ state: "ran", score: 72 })).toBe("72");
 	});
 });

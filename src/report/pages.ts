@@ -8,6 +8,7 @@ import {
 	type CheckSide,
 	compareCheckSides,
 	formatCheckSide,
+	formatCheckState,
 	formatTransition,
 	type ScanDelta,
 	scoreChanges,
@@ -738,7 +739,8 @@ export function trendsPage(historyDir: string | undefined): string {
 				const color = current >= 90 ? "var(--pass)" : current >= 75 ? "#84cc16" : current >= 60 ? "var(--warn)" : "var(--fail)";
 				headline = `<span class="trend-score" style="color:${color}">${current}</span>${deltaStr}`;
 			} else {
-				headline = `<span class="trend-status muted">${e(formatCheckSide(latestSide))}</span>`;
+				// A single check's state on its own: show the crash reason in full.
+				headline = `<span class="trend-status muted">${e(formatCheckState(latestSide, latest.checkReasons.get(name)))}</span>`;
 			}
 
 			return `<div class="trend-card">

@@ -394,8 +394,11 @@ describe("crashed runner on the actions and trends pages (#107)", () => {
 		expect(rows).toContain("structure 80 → 86 +6");
 		expect(html).not.toContain("-64");
 		expect(html).not.toContain("-72");
-		// The lint card plots only the two scans that produced a score, and labels the crash.
-		expect(html).toMatch(/<span class="trend-name">lint<\/span><span class="trend-status muted">failed \(runner error\)<\/span>/);
+		// The lint card shows one check on its own, so it carries the full crash reason;
+		// the first → latest row above keeps the short transition token.
+		expect(html).toMatch(/<span class="trend-name">lint<\/span><span class="trend-status muted">failed \(runner error: boom\)<\/span>/);
+		expect(rows.join("\n")).not.toContain("boom");
+		// The lint card plots only the two scans that produced a score.
 		const lintCard = html.slice(html.indexOf('<span class="trend-name">lint</span>')).split('<div class="trend-card">')[0];
 		expect(lintCard).toContain("<title>2026-10-01 — 64</title>");
 		expect(lintCard).toContain("<title>2026-10-02 — 72</title>");
