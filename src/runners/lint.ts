@@ -10,7 +10,7 @@ import { hasFileWithExt, isIgnoredPath, normalizeToolPath } from "../fs-utils.js
 import type { CheckResult, Issue, ProjectContext, StackInfo, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
-import { DART_SDK_MISSING_REASON, hasDartSdk, unavailableResult } from "./toolchain.js";
+import { DART_SDK_MISSING_REASON, dependencyGap, hasDartSdk, unavailableResult } from "./toolchain.js";
 
 export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo): CheckResult {
 	const start = Date.now();
@@ -20,20 +20,28 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 	if (stack.linter === "none" && projectRuns.length > 0) {
 		const projects: Array<Record<string, unknown>> = [];
 		let linted = 0;
-		let dartUnavailable = 0;
+		const unavailableReasons: string[] = [];
 		for (const project of projectRuns) {
 			const projectCwd = project.path === "." ? cwd : join(cwd, project.path);
-			// A Dart project we cannot analyze contributes no issues — which would
-			// otherwise read as "this package lints clean" (#92). Record it as
-			// unavailable and keep it out of the count of projects we really linted.
-			if (project.stack.linter === "dart_analyze" && !hasDartSdk(cwd)) {
-				dartUnavailable++;
+			// A project we cannot lint contributes no issues — which would otherwise
+			// read as "this package lints clean". Record it as unavailable and keep
+			// it out of the count of projects we really linted: a Dart project
+			// without the SDK (#92), or an ESLint project whose config's plugins are
+			// not installed (#100).
+			const unavailableReason =
+				project.stack.linter === "dart_analyze" && !hasDartSdk(cwd)
+					? DART_SDK_MISSING_REASON
+					: project.stack.linter === "eslint"
+						? eslintDependencyGap(projectCwd)
+						: null;
+			if (unavailableReason) {
+				unavailableReasons.push(unavailableReason);
 				projects.push({
 					id: project.id,
 					path: project.path,
 					linter: project.stack.linter,
 					unavailable: true,
-					reason: DART_SDK_MISSING_REASON,
+					reason: unavailableReason,
 				});
 				continue;
 			}
@@ -48,8 +56,14 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 			});
 		}
 		// Nothing was actually linted — do not report a score for it.
-		if (linted === 0 && dartUnavailable > 0) {
-			return unavailableResult("lint", DART_SDK_MISSING_REASON, { linter: "dart_analyze", projects }, start);
+		if (linted === 0 && unavailableReasons.length > 0) {
+			const linters = [...new Set(projectRuns.map((p) => p.stack.linter))];
+			return unavailableResult(
+				"lint",
+				unavailableReasons[0]!,
+				{ linter: linters.length === 1 ? linters[0] : "project-scoped", projects },
+				start,
+			);
 		}
 		const { score, errors, warnings } = scoreLint(issues);
 		return {
@@ -86,6 +100,13 @@ export function runLint(cwd: string, stack: StackInfo, workspace?: WorkspaceInfo
 			for (let i = 0; i < parseInt(warnings, 10); i++) issues.push({ severity: "warning", message: "lint warning" });
 		}
 	} else if (stack.linter === "eslint") {
+		// ESLint runs the project's own config, and its plugins and parsers come
+		// from the project's dependencies. Uninstalled, the config fails to load,
+		// the masked crash prints nothing, and nothing parses as zero issues (#100).
+		const depsReason = eslintDependencyGap(cwd);
+		if (depsReason) {
+			return unavailableResult("lint", depsReason, { linter: "eslint", lintTarget }, start);
+		}
 		const { stdout } = run(`npx eslint ${lintTarget} --format json 2>/dev/null || true`, cwd);
 		issues.push(...parseEslintJson(stdout, { repoCwd: cwd, toolCwd: cwd }));
 	} else if (stack.linter === "dart_analyze") {
@@ -253,6 +274,14 @@ function dartAnalyzeIssues(cwd: string, workspace?: WorkspaceInfo): Issue[] {
 		parseDartAnalyze(stdout, cwd, root.cwd, issues, false);
 	}
 	return issues;
+}
+
+/** Why ESLint cannot run against the project at `dir`, or null when it can:
+ *  the project's dependencies (its config's plugins) and ESLint itself must
+ *  resolve from there, or `npx eslint` fetches a bare ESLint that cannot load
+ *  the config. */
+function eslintDependencyGap(dir: string): string | null {
+	return dependencyGap(dir, "eslint");
 }
 
 function lintableProjects(workspace?: WorkspaceInfo): ProjectContext[] {
