@@ -1,0 +1,17 @@
+{
+	"inputs": {},
+	"ref": "refs/heads/main",
+	"repository": {
+		"full_name": "octo-org/widgets",
+		"name": "widgets",
+		"owner": {
+			"login": "octo-org"
+		},
+		"default_branch": "main",
+		"html_url": "https://github.com/octo-org/widgets"
+	},
+	"sender": {
+		"login": "octocat"
+	},
+	"workflow": ".github/workflows/vcqa.yml"
+}

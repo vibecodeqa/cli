@@ -6,10 +6,12 @@
  *   console.log(report.score, report.grade);
  */
 
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { buildAnalyzerSnapshots } from "./analyzer-snapshot.js";
 import { CHECK_META, type CheckMeta, getCheckMeta } from "./check-meta.js";
+import { type CiContext, detectCiContext, type ReportProvenanceMeta } from "./ci-context.js";
 import { getCheckIgnore, isCheckEnabled, loadConfig, type VcqaConfig } from "./config.js";
 import { detectRepoUrl, detectStack, detectWorkspace } from "./detect.js";
 import { buildFileInventory } from "./file-inventory.js";
@@ -80,6 +82,13 @@ type ScoreMode = "available-scored" | "available-unscored" | "not-applicable" | 
 export interface ScanOptions {
 	/** Skip test execution (faster scan). Default: false */
 	skipTests?: boolean;
+	/** Base ref the caller will filter issues against (`--diff`). Recorded in
+	 *  `meta.scan.diffBase` so the report says it is partial. Default: null */
+	diffBase?: string | null;
+	/** Where the scan ran, when the caller already detected it (the CLI does,
+	 *  once, and hands the same context to --upload and --pr-comment).
+	 *  Default: detected from `cwd` and process.env. */
+	ciContext?: CiContext;
 	/** Only run these checks (by name). Default: all checks */
 	checks?: string[];
 	/** Override config (instead of loading from .vcqa.json). */
@@ -294,7 +303,35 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 	).length;
 	const score = computeScore(checks);
 	const grade = gradeFromScore(score);
-	const { repoUrl, branch } = detectRepoUrl(resolvedCwd);
+	const { repoUrl } = detectRepoUrl(resolvedCwd);
+	const { git, ci, shaOnRemote } = options.ciContext ?? detectCiContext(resolvedCwd);
+
+	// Built as a typed variable rather than inline: the provenance fields
+	// (schema 0.6.0) are not yet on the VibeReport type this CLI compiles against.
+	const meta: VibeReport["meta"] & ReportProvenanceMeta & { linkRef: string } = {
+		cwd: resolvedCwd,
+		node: process.version,
+		duration: Date.now() - start,
+		// What the scan actually looked at — so a reader can sanity-check the
+		// result against the size of their project instead of taking it on faith.
+		filesScanned: inventorySourceCount,
+		stack,
+		workspace,
+		scanPolicy: scanPolicySummary(scanPolicy),
+		fileInventory: fileInventory.summary,
+		analyzerSnapshots: buildAnalyzerSnapshots(checks),
+		fingerprintVersion: FINGERPRINT_VERSION,
+		repoUrl,
+		// Mirrors git.branch; "" when unknown — never a guessed "main".
+		branch: git.branch ?? "",
+		source: "cli",
+		scan: { id: randomUUID(), skipTests, diffBase: options.diffBase ?? null },
+		git,
+		ci,
+		// File links: the sha is a permalink only once it is pushed; a local
+		// HEAD that is on no remote links to the branch instead.
+		linkRef: (shaOnRemote === false ? git.branch : git.sha || git.branch) ?? "",
+	};
 
 	return {
 		version: VERSION,
@@ -302,22 +339,7 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		score,
 		grade,
 		checks,
-		meta: {
-			cwd: resolvedCwd,
-			node: process.version,
-			duration: Date.now() - start,
-			// What the scan actually looked at — so a reader can sanity-check the
-			// result against the size of their project instead of taking it on faith.
-			filesScanned: inventorySourceCount,
-			stack,
-			workspace,
-			scanPolicy: scanPolicySummary(scanPolicy),
-			fileInventory: fileInventory.summary,
-			analyzerSnapshots: buildAnalyzerSnapshots(checks),
-			fingerprintVersion: FINGERPRINT_VERSION,
-			repoUrl,
-			branch,
-		},
+		meta,
 	};
 }
 
