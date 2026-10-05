@@ -1,5 +1,46 @@
 # Changelog
 
+## Unreleased
+
+### Issue fingerprints v2 — a finding keeps its identity when its number moves
+Fingerprints hashed check + rule + path + message, so a message carrying a
+measurement ("AdminLayout: 65 lines (max 60)") re-identified the finding every
+time the number changed, duplication identity included line numbers, and
+repeated findings in one file shared one fingerprint (#97).
+- **Fixed**: `trend` counts findings per fingerprint as a multiset, as the delta
+  report already did — fixing one of two identical findings now reports one
+  fixed instead of nothing.
+- **Changed**: reports now carry `meta.fingerprintVersion: 2`, and fingerprints
+  are computed differently:
+  - file-scoped measured rules (standards `large-file`, context
+    `high-token-count`, architecture `high-fan-out`, performance
+    `barrel-import`) are keyed by file, not message;
+  - complexity findings by file + function name;
+  - duplication by the sorted pair of paths without `:line`, plus a hash of
+    the clone snippet;
+  - these runners emit the key as `Issue.subject`;
+  - other findings that point at a line add a hash of that source line, and
+    only findings that are still identical get an occurrence ordinal. Vue and
+    Svelte files are not anchored — their runners report lines relative to
+    the extracted `<script>` or to the raw file depending on the check — so
+    their repeats are told apart by line order alone, so a new repeat added
+    above existing ones may be reported as the last in line order.
+  - limit: findings on textually identical source lines can only be told
+    apart by position. Counts of new and fixed stay right, but when one is
+    added or removed above the others, the one reported is the last in line
+    order rather than the one that changed.
+- **Changed**: `complexity` no longer mistakes top-level `if`/`for`/`while`/
+  `switch` blocks for functions. Their pseudo-function findings ("if: N
+  lines") disappear and `functionCount` drops — by about 5% on a real
+  repository.
+- **Compatibility**: comparing a v1 report (no `fingerprintVersion`) with a v2
+  report recomputes v1 fingerprints on both sides, so the first scan after the
+  upgrade shows no churn. Anything that stores fingerprints and matches them
+  across scans — rather than going through `trend`/`delta` — will see v2 values
+  differ from v1 for subject-keyed, line-anchored and repeated findings, and
+  must treat a `fingerprintVersion` change as a re-baseline. Project-level aggregate findings (for example "N unused files")
+  still keep their message in the key, as before.
+
 ## 0.56.0 (2026-08-18)
 
 ### A linter that cannot read your language no longer grades it

@@ -12,7 +12,8 @@ import { isAbsolute, join } from "node:path";
 import type { FileInventory, InventoryFile } from "../file-inventory.js";
 import { inventoryFiles, inventorySourceFiles, readInventoryText } from "../file-inventory.js";
 import { getProductionFiles, isIgnoredPath, normalizeToolPath, readDeps } from "../fs-utils.js";
-import type { CheckResult, Issue, WorkspaceInfo } from "../types.js";
+import { type FingerprintedIssue, normalizePath } from "../issue-fingerprint.js";
+import type { CheckResult, WorkspaceInfo } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
 import { dependenciesMissingReason, probeDependencies, unavailableResult } from "./toolchain.js";
@@ -38,7 +39,7 @@ const HEAVY_DEPS: Record<string, { kb: number; alt: string }> = {
 
 export function runPerformance(cwd: string, workspace?: WorkspaceInfo, inventory?: FileInventory): CheckResult {
 	const start = Date.now();
-	const issues: Issue[] = [];
+	const issues: FingerprintedIssue[] = [];
 	const sourceFiles = inventory ? inventorySourceFiles(inventory) : getProductionFiles(cwd);
 
 	if (sourceFiles.length === 0) {
@@ -71,6 +72,8 @@ export function runPerformance(cwd: string, workspace?: WorkspaceInfo, inventory
 				message: `Barrel file with ${exportLines.length} re-exports — defeats tree-shaking in many bundlers`,
 				file: f.path,
 				rule: "barrel-import",
+				// Identity is the file, not its re-export count (#97).
+				subject: normalizePath(f.path),
 			});
 		}
 	}
