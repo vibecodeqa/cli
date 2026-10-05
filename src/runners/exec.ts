@@ -10,6 +10,7 @@
  */
 
 import { execSync } from "node:child_process";
+import { redactSecrets, redactToolOutput } from "./redact.js";
 
 export interface ToolRun {
 	/** Best-effort tool name, taken from the command's first word. */
@@ -26,7 +27,7 @@ export interface ToolRun {
 	exitCode: number | null;
 	ok: boolean;
 	durationMs: number;
-	/** Combined output, trimmed and capped so reports stay a sane size. */
+	/** Combined output, credential values redacted, trimmed and capped so reports stay a sane size. */
 	output: string;
 	/** True when the binary was not found (as opposed to running and failing). */
 	notFound: boolean;
@@ -79,8 +80,12 @@ function toolNameOf(cmd: string): string {
 	return first;
 }
 
+/** The single place a run enters the log. Callers pass the RAW command and
+ *  output; credential values are redacted here, before the cap, so no recorder
+ *  can store an unredacted log or a value cut in half by truncation. */
 function record(entry: ToolRun): void {
-	if (recording) buffer.push(entry);
+	if (!recording) return;
+	buffer.push({ ...entry, command: redactSecrets(entry.command), output: redactToolOutput(entry.output, MAX_OUTPUT) });
 }
 
 function normalizedContext(context: ToolRunContext): ToolRunContext {
@@ -128,7 +133,7 @@ export function run(cmd: string, cwd: string, timeout = 60_000, context: ToolRun
 			exitCode: 0,
 			ok: true,
 			durationMs: Date.now() - started,
-			output: stdout.trim().slice(0, MAX_OUTPUT),
+			output: stdout,
 			notFound: false,
 		});
 		return { stdout, ok: true };
@@ -143,7 +148,7 @@ export function run(cmd: string, cwd: string, timeout = 60_000, context: ToolRun
 			exitCode: typeof e?.status === "number" ? e.status : null,
 			ok: false,
 			durationMs: Date.now() - started,
-			output: output.trim().slice(0, MAX_OUTPUT),
+			output,
 			notFound: /not found|ENOENT|command not found/i.test(output),
 		});
 		return { stdout: output, ok: false };

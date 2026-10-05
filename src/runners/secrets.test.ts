@@ -1,7 +1,9 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { startToolRecording, type ToolRun, takeToolRuns } from "./exec.js";
+import { fakeBody, fakeGithubPat, gitleaksInstalled, leakedWindows } from "./fake-credentials.test-helper.js";
 import { runSecrets } from "./secrets.js";
 
 let TMP = "";
@@ -199,5 +201,106 @@ describe("runSecrets", () => {
 		// Suggestion should NOT be in issues
 		expect(result.issues.some((i) => (i as any).rule === "suggest-gitleaks")).toBe(false);
 		cleanup();
+	});
+});
+
+/** A credential in a git-ignored local file must be reported by location only:
+ *  never in an issue message, and never in the tool log recorded as provenance. */
+describe("runSecrets output hygiene", () => {
+	let stubDir = "";
+	const realPath = process.env.PATH;
+
+	afterEach(() => {
+		process.env.PATH = realPath;
+		if (stubDir) rmSync(stubDir, { recursive: true, force: true });
+		stubDir = "";
+		cleanup();
+	});
+
+	function setupIgnoredDevVars() {
+		const pat = fakeGithubPat();
+		const generic = fakeBody(32);
+		setup({
+			".gitignore": ".dev.vars\n.vibe-check/\n",
+			".dev.vars": `GITHUB_TOKEN=${pat.value}\nSESSION_SECRET=${generic}\n`,
+			"src/app.ts": "export const x = 1;\n",
+		});
+		return { bodies: [pat.body, generic] };
+	}
+
+	function everythingRecorded(result: Awaited<ReturnType<typeof runSecrets>>, runs: ToolRun[]): string {
+		return JSON.stringify({ result, runs });
+	}
+
+	it.skipIf(!gitleaksInstalled())("gitleaks findings path (exit 1): redacted log is kept, values are not", async () => {
+		const { bodies } = setupIgnoredDevVars();
+		startToolRecording({ analyzerId: "secrets" });
+		const result = await runSecrets(TMP);
+		const runs = takeToolRuns();
+
+		expect((result.details as Record<string, unknown>).tool).toBe("gitleaks");
+		const gl = runs.find((r) => r.tool === "gitleaks");
+		expect(gl).toBeDefined();
+		expect(gl!.exitCode).toBe(1); // gitleaks exits 1 when it finds anything
+		expect(gl!.command).toContain("--redact");
+		expect(gl!.output).toContain("REDACTED");
+		expect(gl!.output).toContain(".dev.vars"); // provenance still says where
+		expect(result.issues.some((i) => i.file === ".dev.vars" && i.severity === "error")).toBe(true);
+
+		const all = everythingRecorded(result, runs);
+		for (const body of bodies) expect(leakedWindows(body, all)).toEqual([]);
+	});
+
+	it.skipIf(!gitleaksInstalled())("does not re-scan its own .vibe-check output", async () => {
+		const pat = fakeGithubPat();
+		setup({ ".vibe-check/report.json": JSON.stringify({ output: pat.value }), "src/app.ts": "export const x = 1;\n" });
+		startToolRecording({ analyzerId: "secrets" });
+		await runSecrets(TMP);
+		const runs = takeToolRuns();
+		const gl = runs.find((r) => r.tool === "gitleaks");
+		expect(gl?.exitCode).toBe(0);
+		expect(gl?.output).not.toContain(".vibe-check");
+		expect(leakedWindows(pat.body, JSON.stringify(runs))).toEqual([]);
+	});
+
+	it.skipIf(!gitleaksInstalled())("keeps the default ruleset for a project config that already extends another", async () => {
+		const pat = fakeGithubPat();
+		setup({
+			"base.toml": "[extend]\nuseDefault = true\n",
+			"src/a.ts": `export const m = "VCQAMARK_${fakeBody(8)}";\n`,
+			"src/b.ts": `export const t = "${pat.value}";\n`,
+		});
+		writeFileSync(
+			join(TMP, "project.toml"),
+			`[extend]\npath = ${JSON.stringify(join(TMP, "base.toml"))}\n\n[[rules]]\nid = "custom-marker"\nregex = "VCQAMARK_[A-Z0-9]{8}"\n`,
+		);
+		// Relative GITLEAKS_CONFIG resolves against the scanned dir, as gitleaks would.
+		process.env.GITLEAKS_CONFIG = "project.toml";
+		try {
+			startToolRecording({ analyzerId: "secrets" });
+			const result = await runSecrets(TMP);
+			takeToolRuns();
+			const rules = new Set(result.issues.map((i) => i.rule));
+			expect((result.details as Record<string, unknown>).tool).toBe("gitleaks");
+			expect(rules.has("custom-marker")).toBe(true);
+			expect(rules.has("github-pat")).toBe(true); // default ruleset still active
+		} finally {
+			delete process.env.GITLEAKS_CONFIG;
+		}
+	});
+
+	it("built-in path (gitleaks unavailable) reports without values", async () => {
+		// Shadow any installed gitleaks with one that is "not found".
+		stubDir = mkdtempSync(join(tmpdir(), "vcqa-nogitleaks-"));
+		writeFileSync(join(stubDir, "gitleaks"), '#!/bin/sh\necho "gitleaks: command not found" >&2\nexit 127\n', { mode: 0o755 });
+		process.env.PATH = `${stubDir}:${realPath}`;
+		const pat = fakeGithubPat();
+		setup({ "src/config.ts": `export const token = "${pat.value}";\n`, "src/app.ts": "export const x = 1;\n" });
+		startToolRecording({ analyzerId: "secrets" });
+		const result = await runSecrets(TMP);
+		const runs = takeToolRuns();
+		expect((result.details as Record<string, unknown>).tool).toBe("secretlint");
+		expect(result.issues.some((i) => i.file === "src/config.ts" && i.severity === "error")).toBe(true);
+		expect(leakedWindows(pat.body, everythingRecorded(result, runs))).toEqual([]);
 	});
 });

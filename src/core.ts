@@ -46,6 +46,7 @@ import { runLint } from "./runners/lint.js";
 import { runMemorySafety } from "./runners/memory-safety.js";
 import { deadCodeCheckFromPerformance, runPerformance } from "./runners/performance.js";
 import { runReact } from "./runners/react.js";
+import { redactDeep, redactSecrets } from "./runners/redact.js";
 import { runSecrets } from "./runners/secrets.js";
 import { runSecurity } from "./runners/security.js";
 import { runSqliteD1 } from "./runners/sqlite-d1.js";
@@ -126,7 +127,14 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		envIgnore: process.env.VCQA_IGNORE,
 	});
 	const fileInventory = buildFileInventory(resolvedCwd, workspace, scanPolicy);
-	const readSourceLine = inventoryLineReader(fileInventory);
+	// Content anchors hash the redacted line: a fingerprint must not be a hash
+	// of a credential (a short one could be brute-forced from it). For lines
+	// with nothing to redact this is the raw line, so those fingerprints hold.
+	const rawSourceLine = inventoryLineReader(fileInventory);
+	const readSourceLine: SourceLineReader = (file, line) => {
+		const text = rawSourceLine(file, line);
+		return text === undefined ? text : redactSecrets(text);
+	};
 
 	setGlobalSrcRoots(workspace.isMonorepo ? workspace.srcRoots : undefined);
 	setGlobalIgnore(config.ignore);
@@ -278,6 +286,12 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 			result.details = { ...result.details, toolRuns };
 		}
 
+		// One choke point for credential values: every string a check returns —
+		// details (parsed test failures, tool logs, commands), issue messages,
+		// snippets — is redacted before anything can render, write or upload it.
+		// Before normalising, so fingerprints are hashed over what is stored.
+		result = redactDeep(result);
+
 		result = normalizeCheckResult(result, readSourceLine);
 
 		// Apply per-check ignore patterns
@@ -339,7 +353,8 @@ export async function scan(cwd: string, options: ScanOptions = {}): Promise<Vibe
 		score,
 		grade,
 		checks,
-		meta,
+		// Last pass over meta: provenance strings (remote URL, CI refs) can carry tokens.
+		meta: redactDeep(meta),
 	};
 }
 

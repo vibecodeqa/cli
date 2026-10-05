@@ -2,8 +2,9 @@
  *  secretlint's recommended ruleset (broad coverage) PLUS our own patterns (which
  *  add LLM keys — OpenAI/Anthropic — that secretlint's preset doesn't cover). */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { lintSource } from "@secretlint/core";
 import { creator as secretlintPreset } from "@secretlint/secretlint-rule-preset-recommend";
 import { type FileInventory, inventoryAllFiles } from "../file-inventory.js";
@@ -11,6 +12,7 @@ import { collectAllFiles, isIgnoredPath } from "../fs-utils.js";
 import type { CheckResult, Issue } from "../types.js";
 import { gradeFromScore } from "../types.js";
 import { run } from "./exec.js";
+import { SECRET_PATTERNS } from "./redact.js";
 
 const SECRETLINT_CONFIG = { rules: [{ id: "@secretlint/secretlint-rule-preset-recommend", rule: secretlintPreset }] };
 
@@ -93,11 +95,66 @@ function secretlintKind(msg: { messageId?: string; ruleId?: string }): string {
 	return (msg.ruleId ?? "secret").replace(/.*secretlint-rule-/, "");
 }
 
-/** Try running gitleaks for secret detection. Returns true if gitleaks ran. */
-function tryGitleaks(cwd: string, issues: Issue[]): boolean {
-	const { stdout, ok } = run("gitleaks detect --no-git --report-format json --report-path /dev/stdout 2>/dev/null", cwd, 30_000);
-	if (!ok && !stdout.startsWith("[")) return false; // gitleaks not installed or errored
+/** The project's own gitleaks config, in the precedence gitleaks itself uses
+ *  when no --config is given: GITLEAKS_CONFIG (relative to the scanned dir),
+ *  GITLEAKS_CONFIG_TOML, then `.gitleaks.toml` in the scanned dir. */
+function projectGitleaksConfig(cwd: string, dir: string): string | null {
+	const fromEnv = process.env.GITLEAKS_CONFIG ? resolve(cwd, process.env.GITLEAKS_CONFIG) : null;
+	if (fromEnv && existsSync(fromEnv)) return fromEnv;
+	if (process.env.GITLEAKS_CONFIG_TOML) {
+		const path = join(dir, "project.toml");
+		writeFileSync(path, process.env.GITLEAKS_CONFIG_TOML);
+		return path;
+	}
+	const own = join(cwd, ".gitleaks.toml");
+	return existsSync(own) ? own : null;
+}
 
+/** gitleaks config for one run: the project's config (or gitleaks' defaults)
+ *  extended with an allowlist for our own output directory. Without it,
+ *  `--no-git` re-scans `.vibe-check/` and every report re-embeds the last.
+ *
+ *  A project config that already has an [extend] is passed as-is: wrapping it
+ *  adds an extend level, and past gitleaks' depth limit the default ruleset is
+ *  silently dropped. `.vibe-check/` findings are then filtered by
+ *  `isIgnoredPath`, and the recorded log is redacted either way. */
+function gitleaksConfigFor(cwd: string, dir: string): string {
+	const own = projectGitleaksConfig(cwd, dir);
+	if (own && /^\s*\[extend\]/m.test(readFileSync(own, "utf-8"))) return own;
+	const path = join(dir, "gitleaks.toml");
+	const toml = [
+		"[extend]",
+		own ? `path = ${JSON.stringify(own)}` : "useDefault = true",
+		"",
+		"[allowlist]",
+		'description = "vcqa report output"',
+		"paths = ['''(^|/)\\.vibe-check/''']",
+		"",
+	].join("\n");
+	writeFileSync(path, toml);
+	return path;
+}
+
+/** Try running gitleaks for secret detection. Returns true if gitleaks ran.
+ *  `--redact` keeps matched values out of the output recorded as provenance;
+ *  findings are classified from the source line, not from gitleaks' `Match`. */
+function tryGitleaks(cwd: string, issues: Issue[]): boolean {
+	const dir = mkdtempSync(join(tmpdir(), "vcqa-gitleaks-"));
+	try {
+		const config = gitleaksConfigFor(cwd, dir);
+		const { stdout, ok } = run(
+			`gitleaks detect --no-git --redact --config ${JSON.stringify(config)} --report-format json --report-path /dev/stdout 2>/dev/null`,
+			cwd,
+			30_000,
+		);
+		if (!ok && !stdout.startsWith("[")) return false; // gitleaks not installed or errored
+		return collectGitleaksFindings(cwd, stdout, issues);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+function collectGitleaksFindings(cwd: string, stdout: string, issues: Issue[]): boolean {
 	try {
 		const findings = JSON.parse(stdout);
 		if (!Array.isArray(findings)) return false;
@@ -116,13 +173,14 @@ function tryGitleaks(cwd: string, issues: Issue[]): boolean {
 			issues.push(
 				contextualizeSecret(
 					{
+						// Rule id and file:line identify the finding; no part of the value.
 						severity: "error",
-						message: `${f.Description || f.RuleID || "Secret detected"} (${f.Match?.slice(0, 8)}...)`,
+						message: String(f.Description || f.RuleID || "Secret detected"),
 						file: f.File,
 						line: f.StartLine,
 						rule: f.RuleID || "secret-detected",
 					},
-					`${String(f.Match ?? "")} ${String(f.Secret ?? "")} ${sourceLine}`,
+					sourceLine,
 				),
 			);
 		}
@@ -131,42 +189,6 @@ function tryGitleaks(cwd: string, issues: Issue[]): boolean {
 		return false;
 	}
 }
-
-const SECRET_PATTERNS: { name: string; pattern: RegExp }[] = [
-	{
-		name: "Credential Placeholder",
-		pattern:
-			/(?:Authorization:\s*Bearer\s+(?:YOUR_TOKEN|EXAMPLE_TOKEN|DUMMY_TOKEN|FAKE_TOKEN|TEST_TOKEN)\b|\btoken=(?:abc|abcdef)[a-z0-9]{8,28}\b|\bsk-(?:round-trip|owner-only|test|fixture|dummy|fake|sample|x\d)[a-z0-9_-]{3,32}\b)/i,
-	},
-	{ name: "AWS Access Key", pattern: /AKIA[0-9A-Z]{16}/ },
-	{
-		name: "AWS Secret Key",
-		pattern: /(?:aws_secret|AWS_SECRET)[^=]*=\s*['"][A-Za-z0-9/+=]{40}['"]/,
-	},
-	{ name: "GitHub Token (classic)", pattern: /ghp_[A-Za-z0-9]{36}/ },
-	{
-		name: "GitHub Token (fine-grained)",
-		pattern: /github_pat_[A-Za-z0-9_]{22,}/,
-	},
-	{ name: "GitHub OAuth", pattern: /gho_[A-Za-z0-9]{36}/ },
-	{ name: "Slack Token", pattern: /xox[bpors]-[0-9a-zA-Z-]{10,}/ },
-	{ name: "Stripe Secret Key", pattern: /sk_live_[0-9a-zA-Z]{24,}/ },
-	{ name: "Stripe Publishable Key", pattern: /pk_live_[0-9a-zA-Z]{24,}/ },
-	{
-		name: "OpenAI API Key",
-		pattern: /sk-(?:proj-|svc-|[A-Za-z0-9]{2,})[A-Za-z0-9_-]{20,}/,
-	},
-	{ name: "Anthropic API Key", pattern: /sk-ant-api\d{2}-[A-Za-z0-9-]{80,}/ },
-	{ name: "Google API Key", pattern: /AIza[0-9A-Za-z_-]{35}/ },
-	{
-		name: "Private Key",
-		pattern: /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/,
-	},
-	{
-		name: "Generic Secret Assignment",
-		pattern: /(?:password|secret|api_key|apikey|token|auth)\s*[:=]\s*['"][A-Za-z0-9+/=]{20,}['"]/,
-	},
-];
 
 type ScanFile = { path: string; content: string };
 

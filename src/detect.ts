@@ -1162,13 +1162,17 @@ function detectRemoteUrl(cwd: string): string | null {
 	try {
 		const remote = execSync("git remote get-url origin", { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
 		// Convert SSH to HTTPS
-		return remote
-			.replace(/^git@github\.com:/, "https://github.com/")
-			.replace(/^git@gitlab\.com:/, "https://gitlab.com/")
-			.replace(/^git@bitbucket\.org:/, "https://bitbucket.org/")
-			.replace(/^ssh:\/\/git@github\.com\//, "https://github.com/")
-			.replace(/^ssh:\/\/git@gitlab\.com\//, "https://gitlab.com/")
-			.replace(/\.git$/, "");
+		return (
+			remote
+				.replace(/^git@github\.com:/, "https://github.com/")
+				.replace(/^git@gitlab\.com:/, "https://gitlab.com/")
+				.replace(/^git@bitbucket\.org:/, "https://bitbucket.org/")
+				.replace(/^ssh:\/\/git@github\.com\//, "https://github.com/")
+				.replace(/^ssh:\/\/git@gitlab\.com\//, "https://gitlab.com/")
+				.replace(/\.git$/, "")
+				// CI checkouts put tokens in the remote (https://gitlab-ci-token:<token>@host/…).
+				.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/]+@/i, "$1")
+		);
 	} catch {
 		return null;
 	}

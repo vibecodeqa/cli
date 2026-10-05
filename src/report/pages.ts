@@ -1,6 +1,6 @@
 /** Page renderers for the HTML report. */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { type CheckMeta, getCheckMeta } from "../check-meta.js";
 import { suggestFix } from "../commands/shared.js";
@@ -24,6 +24,7 @@ import {
 	generateSequenceDiagram,
 } from "../runners/architecture.js";
 import type { FeatureCluster } from "../runners/dead-patterns.js";
+import { redactSecrets } from "../runners/redact.js";
 import type { CheckResult, ProjectContext, ProjectDiscoveryEvidence, VibeReport } from "../types.js";
 import { det, e, gc, pc } from "./components.js";
 import { buildPyramid, buildRadar, buildRing, buildTimeline } from "./svg.js";
@@ -128,13 +129,41 @@ function scopePayload(report: VibeReport): string {
 	);
 }
 
+/** Findings whose source line is a credential: no source block for these. */
+function isCredentialFinding(check: string, rule: string | undefined): boolean {
+	return check === "secrets" || rule === "CWE-598" || rule === "CWE-798" || /secret|credential|password|token/i.test(rule ?? "");
+}
+
+/** Largest file we render snippets from. */
+const MAX_SNIPPET_SOURCE = 2 * 1024 * 1024;
+/** Redacted lines per file for one render; a file with many issues is redacted once. */
+const redactedSources = new Map<string, { mtimeMs: number; size: number; lines: string[] | null }>();
+
+/** The file's lines with credentials redacted over the WHOLE file — a ±4-line
+ *  window can hold a PEM body without its BEGIN line, which only the full text
+ *  identifies. Null when the line structure would not survive redaction. */
+function redactedSourceLines(fullPath: string): string[] | null {
+	const { mtimeMs, size } = statSync(fullPath);
+	const cached = redactedSources.get(fullPath);
+	if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return cached.lines;
+	let lines: string[] | null = null;
+	if (size <= MAX_SNIPPET_SOURCE) {
+		const content = readFileSync(fullPath, "utf-8");
+		const redacted = redactSecrets(content).split("\n");
+		lines = redacted.length === content.split("\n").length ? redacted : null;
+	}
+	if (redactedSources.size > 500) redactedSources.clear();
+	redactedSources.set(fullPath, { mtimeMs, size, lines });
+	return lines;
+}
+
 /** Read source lines around an issue for inline display in the report. */
 function readSourceSnippet(cwd: string, file: string, line: number, radius = 4): string | null {
 	try {
 		const fullPath = join(cwd, file);
 		if (!existsSync(fullPath)) return null;
-		const content = readFileSync(fullPath, "utf-8");
-		const lines = content.split("\n");
+		const lines = redactedSourceLines(fullPath);
+		if (!lines) return null;
 		const target = line - 1;
 		const start = Math.max(0, target - radius);
 		const end = Math.min(lines.length, target + radius + 1);
@@ -492,7 +521,8 @@ export function categoryPage(cs: CatScore, fl: FL, allChecks?: CheckResult[], cw
 						: "";
 					// Source code snippet (collapsible)
 					let srcBlock = "";
-					if (cwd && iss.line && typeof iss.file === "string") {
+					// Never for credential findings: the line around one is the credential itself.
+					if (cwd && iss.line && typeof iss.file === "string" && !isCredentialFinding(c.name, iss.rule)) {
 						const src = readSourceSnippet(cwd, iss.file, iss.line);
 						if (src) {
 							const fixPrompt = `Fix this ${iss.severity} in ${iss.file}:${iss.line}\n${iss.message}${iss.rule ? ` (${iss.rule})` : ""}\nCheck: ${c.name}\n\nAnalyze the code, explain the issue, and provide the fix.`;
